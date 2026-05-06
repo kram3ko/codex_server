@@ -15,6 +15,14 @@ services:
     volumes:
       - ./app:/app/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      # Викликає наш HealthService.Check через Connect (як aism-py
+      # використовує grpc_health.v1 у scripts/healthcheck.py).
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -23,10 +31,7 @@ services:
       minio-init:
         condition: service_completed_successfully
       codex-app-server:
-        # service_started (не _healthy) поки OPENAI_API_KEY заглушка —
-        # дозволяє FastAPI стартувати для smoke-перевірок навіть якщо
-        # Codex CLI ще не може автентифікуватись.
-        condition: service_started
+        condition: service_healthy
 
   # Codex CLI у режимі WebSocket app-server. Окремий контейнер з бінарником
   # codex від OpenAI. Не публікуємо порт назовні — тільки docker-network.
@@ -44,7 +49,7 @@ services:
       # Кладеш сюди код / нотатки — модель ходить читати/правити.
       - ./workspace:/home/codex/workspace:rw
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4500/readyz 2>/dev/null | grep -q OK || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4500/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

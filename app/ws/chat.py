@@ -15,8 +15,6 @@ Frame format (JSON):
 у наступному проході (T5/T6). Зараз endpoint просто echo+close.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 

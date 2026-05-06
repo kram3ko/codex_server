@@ -1,7 +1,5 @@
 """Alembic env: бере DATABASE_URL з app.config.settings, metadata з Base."""
 
-from __future__ import annotations
-
 import asyncio
 from logging.config import fileConfig
 
