@@ -1,8 +1,8 @@
 """Outgoing Telegram chunks: parse Codex final_text into text + media items.
 
 Codex returns markdown. We pluck out `![alt](src)` as photos and
-`[label](src.ext)` with audio extensions as audio messages; everything
-else stays text and is split to fit Telegram's 4096-char limit.
+`[label](src.ext)` with image/audio extensions as media messages;
+everything else stays text and is split to fit Telegram's 4096-char limit.
 """
 
 import re
@@ -21,6 +21,7 @@ from app.tg.formatting import split_tg_message, tg_html
 log = structlog.get_logger(__name__)
 
 _AUDIO_SUFFIXES = frozenset({".mp3", ".ogg", ".oga", ".m4a", ".wav", ".webm", ".mpga"})
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"})
 
 _IMAGE_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<src>\S+?)\)")
 _LINK_RE = re.compile(r"(?<!\!)\[(?P<label>[^\]]*)\]\((?P<src>\S+?)\)")
@@ -91,6 +92,10 @@ def _media_spans(text: str) -> list[tuple[int, int, OutgoingChunk]]:
             spans.append(
                 (m.start(), m.end(), AudioChunk(src=m.group("src"), caption=m.group("label"))),
             )
+        elif _is_image(m.group("src")):
+            spans.append(
+                (m.start(), m.end(), PhotoChunk(src=m.group("src"), caption=m.group("label"))),
+            )
     spans.sort(key=lambda t: t[0])
     out: list[tuple[int, int, OutgoingChunk]] = []
     last_end = 0
@@ -157,3 +162,9 @@ def _is_audio(src: str) -> bool:
     parsed = urlparse(src)
     candidate = parsed.path if parsed.scheme else src
     return Path(candidate).suffix.lower() in _AUDIO_SUFFIXES
+
+
+def _is_image(src: str) -> bool:
+    parsed = urlparse(src)
+    candidate = parsed.path if parsed.scheme else src
+    return Path(candidate).suffix.lower() in _IMAGE_SUFFIXES

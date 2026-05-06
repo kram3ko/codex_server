@@ -41,6 +41,7 @@ _M_INITIALIZE = "initialize"
 _M_INITIALIZED = "initialized"
 _M_THREAD_START = "thread/start"
 _M_THREAD_RESUME = "thread/resume"
+_M_THREAD_INJECT_ITEMS = "thread/inject_items"
 _M_TURN_START = "turn/start"
 _M_TURN_STEER = "turn/steer"
 _M_TURN_INTERRUPT = "turn/interrupt"
@@ -216,6 +217,26 @@ class CodexClient:
             return False
         log.info("codex_steered", turn_id=turn_id, text_len=len(text))
         return True
+
+    async def inject_history(self, items: list[dict[str, Any]]) -> None:
+        """Append Responses-API items into the current thread's history.
+
+        Used after opening a fresh thread to seed it with prior turns from
+        our DB — gives Codex context without thread/resume (which is broken
+        upstream, see openai/codex#21360).
+        """
+        thread_id = self._thread_id
+        if not thread_id or not items:
+            return
+        try:
+            await self._transport.request(
+                _M_THREAD_INJECT_ITEMS,
+                {"threadId": thread_id, "items": items},
+            )
+        except AppServerError as exc:
+            log.warning("codex_inject_history_failed", code=exc.code, msg=str(exc))
+            return
+        log.info("codex_history_injected", thread_id=thread_id, items=len(items))
 
     async def start_new_thread(self) -> None:
         prev = self._thread_id

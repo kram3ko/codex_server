@@ -14,17 +14,21 @@ from aiogram.types import Message
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
 from app.services.codex.events import DoneEvent, ErrorEvent, TokenEvent, ToolResultEvent
+from app.services.codex.history import messages_to_history_items
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.stt.base import STTBackend
 from app.services.uploads.persist import persist_codex_outputs
 from app.tg.formatting import tg_html
 from app.tg.media import PreparedTurn, cleanup_attachments, prepare_turn
-from app.tg.output import parse_final_text, send_chunks
+from app.tg.output import AudioChunk, PhotoChunk, parse_final_text, send_chunks
 from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSession, ChatSessionStore
 
 log = structlog.get_logger(__name__)
+
+# 5 пар (USER+ASSISTANT) = 10 messages у seed-history.
+_HISTORY_REPLAY_LIMIT = 10
 
 
 class TurnRunner:
@@ -52,7 +56,18 @@ class TurnRunner:
             tg_chat_id=message.chat.id,
             display_name=message.from_user.full_name or message.from_user.username,
         )
+
+        if session.steer_pending:
+            session.steer_pending = False
+            if session.current_turn_task is not None and prepared.text:
+                ok = await session.client.steer(prepared.text)
+                if ok:
+                    await self._persist_user_turn(session, prepared)
+                    return
+                await message.answer(tg_html("Не вдалось додати — turn уже завершився"))
+
         await self._persist_user_turn(session, prepared)
+        await self._seed_history_if_fresh_thread(session)
 
         progress = TurnProgressReporter(message)
         await progress.start()
@@ -61,6 +76,23 @@ class TurnRunner:
         finally:
             await progress.stop()
             await cleanup_attachments(prepared.cleanup_paths)
+
+    @staticmethod
+    async def _seed_history_if_fresh_thread(session: ChatSession) -> None:
+        """Якщо наступний run_turn відкриватиме новий thread — inject DB history."""
+        if session.client.current_thread_id is not None:
+            return
+        async with SessionLocal() as db:
+            recent = await message_service.list(
+                db, session.db_chat_id, limit=_HISTORY_REPLAY_LIMIT,
+            )
+        if recent and recent[-1].role is MessageRole.USER:
+            recent = recent[:-1]
+        items = messages_to_history_items(recent)
+        if not items:
+            return
+        await session.client.ensure_thread()
+        await session.client.inject_history(items)
 
     async def _persist_user_turn(self, session: ChatSession, prepared: PreparedTurn) -> None:
         meta = {"attachments": list(prepared.attachments)} if prepared.attachments else None
@@ -137,9 +169,15 @@ class TurnRunner:
                     return
                 case DoneEvent(final_text=final_text):
                     done_seen = True
-                    fallback = final_text or buffer or "\n\n".join(tool_outputs)
-                    await self._handle_done(session, message, prepared,
-                                            fallback, buffer, tool_calls)
+                    composed = _compose_final_text(final_text, buffer, tool_outputs)
+                    await self._handle_done(
+                        session,
+                        message,
+                        prepared,
+                        composed,
+                        buffer,
+                        tool_calls,
+                    )
                     return
 
         if not done_seen:
@@ -308,3 +346,17 @@ async def cancel_turn(session: ChatSession) -> bool:
         )
         await db.commit()
     return True
+
+
+def _compose_final_text(final_text: str, buffer: str, tool_outputs: list[str]) -> str:
+    base = final_text or buffer
+    tool_text = "\n\n".join(t for t in tool_outputs if t.strip())
+    if not base:
+        return tool_text
+    if not tool_text or _has_media(base) or not _has_media(tool_text):
+        return base
+    return f"{base.rstrip()}\n\n{tool_text}"
+
+
+def _has_media(text: str) -> bool:
+    return any(isinstance(chunk, (PhotoChunk, AudioChunk)) for chunk in parse_final_text(text))
