@@ -1,0 +1,37 @@
+# VCS
+.git
+.gitignore
+.github
+
+# Editors
+.idea
+.vscode
+
+# Python
+.venv
+venv
+env
+__pycache__
+*.py[codz]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Local artefacts
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+tmp/
+.scratch/
+
+# OS
+.DS_Store
+
+# Docs / planning
+estimates/
+README.md
