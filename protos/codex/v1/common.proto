@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package codex.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Поширені типи / utility-повідомлення (не RPC).
+
+message Pagination {
+  int32 limit  = 1;  // page size, 0 → default 50
+  int32 offset = 2;  // skip first N
+}
+
+message Empty {}
+
+// Стандартний health-check (gRPC convention).
+message HealthCheckRequest {
+  string service = 1;  // "" для всього сервера
+}
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN          = 0;
+    SERVING          = 1;
+    NOT_SERVING      = 2;
+    SERVICE_UNKNOWN  = 3;
+  }
+  ServingStatus status = 1;
+}
+
+service HealthService {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}

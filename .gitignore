@@ -340,5 +340,15 @@ tmp/
 # Local planning / spec docs (not for public repo)
 estimates/
 
+# Generated protobuf / Connect stubs — reproduce via ./scripts/gen-proto.sh
+app/grpc_generated/
+
+# Codex CLI auth / local workspace
+.codex/
+workspace/
+
+# Claude Code local settings (per-machine)
+.claude/settings.local.json
+
 # Alembic local-only overrides
 alembic.local.ini

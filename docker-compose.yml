@@ -1,0 +1,105 @@
+services:
+  # FastAPI + Telegram bot polling. Спілкується з Codex CLI (sidecar
+  # codex-app-server) через ws://codex-app-server:4500.
+  codex-server:
+    build: .
+    container_name: codex-server
+    ports:
+      # 8000-8002 зайняті іншими контейнерами (SalesDep). Внутрішній порт 8000.
+      - "8088:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codex:codex@postgres:5432/codex
+      S3_ENDPOINT: http://minio:9000
+      CODEX_APP_SERVER_URL: ws://codex-app-server:4500
+    volumes:
+      - ./app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      codex-app-server:
+        # service_started (не _healthy) поки OPENAI_API_KEY заглушка —
+        # дозволяє FastAPI стартувати для smoke-перевірок навіть якщо
+        # Codex CLI ще не може автентифікуватись.
+        condition: service_started
+
+  # Codex CLI у режимі WebSocket app-server. Окремий контейнер з бінарником
+  # codex від OpenAI. Не публікуємо порт назовні — тільки docker-network.
+  codex-app-server:
+    build:
+      context: .
+      dockerfile: docker/codex/Dockerfile
+    container_name: codex-app-server
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    volumes:
+      # auth.json (для ChatGPT/Codex subscription mode, опційно)
+      - ./.codex:/home/codex/.codex:rw
+      # Workspace, який Codex бачить через shell_tool / unified_exec.
+      # Кладеш сюди код / нотатки — модель ходить читати/правити.
+      - ./workspace:/home/codex/workspace:rw
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4500/readyz 2>/dev/null | grep -q OK || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    image: postgres:alpine
+    container_name: codex-postgres
+    environment:
+      POSTGRES_USER: codex
+      POSTGRES_PASSWORD: codex
+      POSTGRES_DB: codex
+    ports:
+      - "5432:5432"
+    volumes:
+      # Postgres 18+: mount на parent /var/lib/postgresql, контейнер сам
+      # створює major-version subdirectory всередині (для pg_upgrade --link).
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codex -d codex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: codex-minio
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: codex-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb -p local/personal-codex || true &&
+      exit 0
+      "
+
+volumes:
+  postgres_data:
+  minio_data:
