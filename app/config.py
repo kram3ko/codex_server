@@ -8,18 +8,36 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- LLM / Codex sidecar ---
-    OPENAI_API_KEY: str = ""
+    # --- Codex sidecar ---
+    # OPENAI_API_KEY живе тільки у .env → docker-compose передає його у
+    # codex-app-server контейнер. Нашій FastAPI його не треба як settings.
     CODEX_APP_SERVER_URL: str = "ws://localhost:4500"
     CODEX_CWD: str = "/home/codex/workspace"
     CODEX_APPROVAL_POLICY: str = "never"
     CODEX_SANDBOX: str = "danger-full-access"
+    CODEX_REQUEST_TIMEOUT_SECONDS: float = 500.0
+    # Reuse stored codex_thread_id for token economy (sidecar resumes from disk).
+    # Disable якщо побачимо проблеми (silent-finalization тощо) — кожен turn
+    # тоді відкриватиме fresh thread.
+    CODEX_THREAD_REUSE_ENABLED: bool = True
+
+    # --- Speech-to-text (Speechmatics batch v2) ---
+    # `language='auto'` triggers Speechmatics Language Identification.
+    SPEECHMATICS_API_KEY: str = ""
+    SPEECHMATICS_LANGUAGE: str = "auto"
+    SPEECHMATICS_OPERATING_POINT: str = "enhanced"
 
     # --- Postgres ---
     DATABASE_URL: str = "postgresql+asyncpg://codex:codex@localhost:5432/codex"
     DB_ECHO: bool = False
 
+    # --- Redis (cache + future pub/sub between sidecars) ---
+    # URL must include the password if REDIS_PASSWORD is set on the server.
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_PASSWORD: str = ""
+
     # --- Object storage (MinIO local / R2 prod) ---
+    STORAGE_BACKEND: str = "s3"  # s3 | dropbox | gdrive (future)
     S3_ENDPOINT: str = "http://localhost:9000"
     S3_ACCESS_KEY_ID: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
@@ -28,7 +46,8 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     TG_BOT_TOKEN: str = ""
-    TG_ALLOWED_USER_ID: int = 0
+    # None → bot answers anyone. Set to a numeric Telegram user id to restrict.
+    TG_ALLOWED_USER_ID: int | None = None
 
     # --- Auth (single-user JWT) ---
     # WEB_API_TOKEN — "пароль", який клієнт обмінює на короткоживучий JWT

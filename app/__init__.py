@@ -1,6 +1,10 @@
 """Bootstrap: додаємо `app/grpc_generated/` у sys.path так, щоб генеровані
 Connect/protobuf stubs (`import codex.v1.auth_pb2 ...`) знаходились без
-переписування absolute-imports у згенерованому коді."""
+переписування absolute-imports у згенерованому коді.
+
+Also wires structlog before anything in `app.*` instantiates module-level
+loggers or service singletons.
+"""
 
 import os
 import sys
@@ -8,3 +12,7 @@ import sys
 _GRPC_GENERATED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "grpc_generated")
 if os.path.isdir(_GRPC_GENERATED) and _GRPC_GENERATED not in sys.path:
     sys.path.insert(0, _GRPC_GENERATED)
+
+from app.log_config import configure_logging  # noqa: E402
+
+configure_logging()

@@ -1,13 +1,27 @@
 """Високорівневий клієнт до Codex CLI app-server.
 
 Обгортає JSON-RPC handshake → thread/start → turn/start → стрім notifications,
-перекладає Codex-сповіщення у наші типізовані ChatEvent'и. Не знає про БД,
-HTTP/WS і тим паче про AISM. Один CodexClient = один WS до sidecar'а.
+перекладає Codex-сповіщення у наші типізовані ChatEvent'и. Один CodexClient =
+одна сесія з sidecar'ом.
+
+Thread state живе in-memory на стороні sidecar. Ми тримаємо `_thread_id` теж
+in-memory, плюс caller може передати `initial_thread_id` (з БД cache) для
+token-економії та `on_thread_change` callback для запису нового id.
+
+Reconnect-семантика:
+- Transport (WS) lost mid-stream → `_ensure_alive()` піднімає WS і робить
+  re-handshake. Sidecar може бути той самий або новий — ми ще не знаємо.
+- Якщо thread_id з БД stale (sidecar встиг рестартувати) → перший
+  `turn/start` повертає `-32600 thread not found` → інвалідейтимо +
+  відкриваємо новий thread + retry один раз.
 """
 
-import logging
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
+from urllib.parse import urlparse
+
+import structlog
 
 from app.services.codex.events import (
     ChatEvent,
@@ -19,14 +33,14 @@ from app.services.codex.events import (
 )
 from app.services.codex.transport import AppServerClient, AppServerError, Notification
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
-_CLIENT_INFO = {"name": "codex-server", "version": "0.1.0"}
+_CLIENT_INFO = {"name": "codex-api", "version": "0.1.0"}
 
-# JSON-RPC method names — single source of truth для wire-протоколу.
 _M_INITIALIZE = "initialize"
 _M_INITIALIZED = "initialized"
 _M_THREAD_START = "thread/start"
+_M_THREAD_RESUME = "thread/resume"
 _M_TURN_START = "turn/start"
 _M_TURN_INTERRUPT = "turn/interrupt"
 
@@ -36,18 +50,15 @@ _N_AGENT_MSG_DELTA = "item/agentMessage/delta"
 _N_ITEM_STARTED = "item/started"
 _N_ITEM_COMPLETED = "item/completed"
 
-# Codex CLI item types які НЕ є tool-call'ами (повідомлення моделі, плани, hooks).
 _NON_TOOL_ITEM_TYPES = frozenset(
     {"agentMessage", "userMessage", "reasoning", "plan", "hook", "system"}
 )
 
+type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
+
 
 class CodexClient:
-    """Один CodexClient = одна сесія з Codex CLI sidecar.
-
-    Flow: connect() → ensure_thread() → run_turn(...) → close().
-    Thread створюється лазі-стилем при першому run_turn'і й живе до close().
-    """
+    """Один CodexClient = одна сесія з Codex CLI sidecar."""
 
     def __init__(
         self,
@@ -56,6 +67,8 @@ class CodexClient:
         approval_policy: str,
         sandbox: str,
         request_timeout: float = 60.0,
+        initial_thread_id: str | None = None,
+        on_thread_change: ThreadChangeCallback | None = None,
     ) -> None:
         self._url = url
         self._cwd = cwd
@@ -63,26 +76,55 @@ class CodexClient:
         self._sandbox = sandbox
         self._transport = AppServerClient(url=url, request_timeout=request_timeout)
         self._initialized = False
-        self._thread_id: str | None = None
+        self._thread_id: str | None = initial_thread_id
+        self._thread_resumed_or_started = False
         self._current_turn_id: str | None = None
+        self._on_thread_change = on_thread_change
+        self._alive_lock = asyncio.Lock()
+
+    @property
+    def current_thread_id(self) -> str | None:
+        return self._thread_id
 
     async def connect(self) -> None:
         await self._transport.connect()
-        result = await self._transport.request(
-            _M_INITIALIZE,
-            {"clientInfo": _CLIENT_INFO, "capabilities": {}},
-        )
-        await self._transport.notify(_M_INITIALIZED, {})
-        self._initialized = True
-        logger.info(
-            "codex_handshake_done user_agent=%s codex_home=%s",
-            (result or {}).get("userAgent"),
-            (result or {}).get("codexHome"),
-        )
+        await self._handshake()
 
     async def ensure_thread(self) -> str:
-        if self._thread_id is not None:
+        """Ensure a usable thread_id is loaded into the sidecar.
+
+        Three paths:
+        1. We already opened a thread in this connection — reuse `_thread_id`.
+        2. Caller passed a stored `initial_thread_id` — try `thread/resume`
+           (sidecar reads it from disk). On success → reuse. On failure →
+           treat as gone and open a fresh one.
+        3. No id → `thread/start` opens a new thread.
+        """
+        if self._thread_id is not None and self._thread_resumed_or_started:
             return self._thread_id
+
+        if self._thread_id is not None:
+            stale = self._thread_id
+            if await self._try_resume(stale):
+                self._thread_resumed_or_started = True
+                return stale
+            log.info("codex_thread_resume_failed_opening_new", stale_thread_id=stale)
+            self._thread_id = None
+            await self._emit_thread_change(None)
+
+        return await self._open_new_thread()
+
+    async def _try_resume(self, thread_id: str) -> bool:
+        try:
+            await self._transport.request(_M_THREAD_RESUME, {"threadId": thread_id})
+        except AppServerError as exc:
+            if _is_thread_not_found(exc) or exc.code == -32601:
+                return False
+            raise
+        log.info("codex_thread_resumed", thread_id=thread_id)
+        return True
+
+    async def _open_new_thread(self) -> str:
         result = await self._transport.request(
             _M_THREAD_START,
             {
@@ -97,7 +139,9 @@ class CodexClient:
                 f"thread/start response shape unexpected (Codex CLI version drift?): {result!r}"
             )
         self._thread_id = thread_id
-        logger.info("codex_thread_opened thread_id=%s", thread_id)
+        self._thread_resumed_or_started = True
+        log.info("codex_thread_opened", thread_id=thread_id)
+        await self._emit_thread_change(thread_id)
         return thread_id
 
     async def run_turn(
@@ -105,9 +149,9 @@ class CodexClient:
         text: str,
         attachments: tuple[str, ...] = (),
     ) -> AsyncIterator[ChatEvent]:
+        await self._ensure_alive()
         thread_id = await self.ensure_thread()
-        input_payload: list[dict[str, Any]] = [{"type": "text", "text": text}]
-        input_payload.extend({"type": "image", "url": url} for url in attachments)
+        input_payload = self._build_input(text, attachments)
 
         try:
             result = await self._transport.request(
@@ -121,9 +165,6 @@ class CodexClient:
         self._current_turn_id = _extract_turn_id(result)
         accumulated = ""
 
-        # Накопичення робимо тут (єдина точка відповідальності): _translate
-        # отримує його як fallback для DoneEvent.final_text, а handler
-        # використовує тільки ev.final_text без власного аккумулятора.
         async for note in self._transport.notifications():
             event = _translate(note, accumulated)
             if event is None:
@@ -136,7 +177,6 @@ class CodexClient:
                 return
 
     async def interrupt(self) -> None:
-        """Best-effort cancel поточного turn'а."""
         turn_id = self._current_turn_id
         if not turn_id:
             return
@@ -144,18 +184,87 @@ class CodexClient:
             await self._transport.request(_M_TURN_INTERRUPT, {"turnId": turn_id})
         except AppServerError as exc:
             if exc.code == -32601:
-                logger.info("codex_interrupt_unsupported turn_id=%s", turn_id)
+                log.info("codex_interrupt_unsupported", turn_id=turn_id)
             else:
-                logger.warning("codex_interrupt_failed turn_id=%s code=%s", turn_id, exc.code)
+                log.warning("codex_interrupt_failed", turn_id=turn_id, code=exc.code)
+
+    async def start_new_thread(self) -> None:
+        prev = self._thread_id
+        self._thread_id = None
+        self._thread_resumed_or_started = False
+        self._current_turn_id = None
+        if prev is not None:
+            log.info("codex_thread_reset", prev_thread_id=prev)
+            await self._emit_thread_change(None)
 
     async def close(self) -> None:
         await self._transport.close()
+
+    @staticmethod
+    def _build_input(text: str, attachments: tuple[str, ...]) -> list[dict[str, Any]]:
+        payload: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        for attachment in attachments:
+            parsed = urlparse(attachment)
+            if parsed.scheme in {"http", "https"}:
+                payload.append({"type": "image", "url": attachment})
+            else:
+                payload.append({"type": "localImage", "path": attachment})
+        return payload
+
+    async def _handshake(self) -> None:
+        result = await self._transport.request(
+            _M_INITIALIZE,
+            {"clientInfo": _CLIENT_INFO, "capabilities": {}},
+        )
+        await self._transport.notify(_M_INITIALIZED, {})
+        self._initialized = True
+        log.info(
+            "codex_handshake_done",
+            user_agent=(result or {}).get("userAgent"),
+            codex_home=(result or {}).get("codexHome"),
+        )
+
+    async def _ensure_alive(self) -> None:
+        """Reconnect + re-handshake if transport died mid-stream.
+
+        Не інвалідейтимо thread_id тут — sidecar може бути той самий, в такому
+        разі stored thread валідний. Якщо sidecar теж рестартувався — побачимо
+        thread-not-found на наступному turn/start і обробимо retry'ем.
+        """
+        async with self._alive_lock:
+            if self._transport.is_connected and self._initialized:
+                return
+            log.warning("codex_transport_lost", thread_id=self._thread_id)
+            self._initialized = False
+            self._thread_resumed_or_started = False
+            await self._transport.connect()
+            await self._handshake()
+
+    async def _emit_thread_change(self, new_thread_id: str | None) -> None:
+        if self._on_thread_change is None:
+            return
+        try:
+            await self._on_thread_change(new_thread_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "codex_on_thread_change_failed",
+                new=new_thread_id,
+                error=str(exc),
+            )
+
+
+def _is_thread_not_found(exc: AppServerError) -> bool:
+    """Sidecar restarted → stored thread_id stale, retry with fresh thread."""
+    return exc.code == -32600 and "thread not found" in str(exc).lower()
 
 
 def _extract_turn_id(result: Any) -> str | None:
     if not isinstance(result, dict):
         return None
-    tid = result.get("turnId") or (result.get("turn") or {}).get("id")
+    turn = result.get("turn")
+    if not isinstance(turn, dict):
+        return None
+    tid = turn.get("id")
     return tid if isinstance(tid, str) and tid else None
 
 
@@ -167,18 +276,16 @@ def _translate(note: Notification, accumulated: str) -> ChatEvent | None:
         return None
 
     if method == _N_AGENT_MSG_DELTA:
-        delta = params.get("delta") or params.get("text") or ""
+        delta = params.get("delta", "")
         return TokenEvent(delta=delta) if delta else None
 
     if method == _N_ITEM_STARTED:
         item = params.get("item") or {}
         if item.get("type") in _NON_TOOL_ITEM_TYPES:
             return None
-        # Codex CLI міняв назви полів між версіями — fallback ланцюг покриває
-        # старі (tool, args) і нові (toolName, arguments) shapes.
         return ToolCallEvent(
-            name=str(item.get("toolName") or item.get("tool") or item.get("type") or ""),
-            args=dict(item.get("arguments") or item.get("args") or {}),
+            name=str(item.get("toolName", "")),
+            args=dict(item.get("arguments") or {}),
         )
 
     if method == _N_ITEM_COMPLETED:
@@ -186,8 +293,8 @@ def _translate(note: Notification, accumulated: str) -> ChatEvent | None:
         if item.get("type") in _NON_TOOL_ITEM_TYPES:
             return None
         return ToolResultEvent(
-            name=str(item.get("toolName") or item.get("tool") or item.get("type") or ""),
-            result=str(item.get("output") or item.get("result") or ""),
+            name=str(item.get("toolName", "")),
+            result=str(item.get("output", "")),
             error=str(item["error"]) if item.get("error") else None,
         )
 

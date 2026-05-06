@@ -10,10 +10,15 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://codex:codex@postgres:5432/codex
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       S3_ENDPOINT: http://minio:9000
       CODEX_APP_SERVER_URL: ws://codex-app-server:4500
     volumes:
       - ./app:/app/app
+      - ./:/home/codex/workspace:rw
+      # Read-only mount Codex'ового generated_images — щоб FSInputFile
+      # бачив файли що пише sidecar з image_generation tool.
+      - ./.codex/generated_images:/home/codex/.codex/generated_images:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       # Викликає наш HealthService.Check через Connect (як aism-py
@@ -25,6 +30,8 @@ services:
       start_period: 20s
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -40,14 +47,14 @@ services:
       context: .
       dockerfile: docker/codex/Dockerfile
     container_name: codex-app-server
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    # No OPENAI_API_KEY — codex auth via mounted ./.codex/auth.json (subscription).
     volumes:
       # auth.json (для ChatGPT/Codex subscription mode, опційно)
       - ./.codex:/home/codex/.codex:rw
-      # Workspace, який Codex бачить через shell_tool / unified_exec.
-      # Кладеш сюди код / нотатки — модель ходить читати/правити.
-      - ./workspace:/home/codex/workspace:rw
+      # Workspace now mirrors the full repository root.
+      # Persona/instructions live у docker/codex/AGENTS.md; root має symlink
+      # на нього → Codex CLI читає AGENTS.md з workspace cwd автоматично.
+      - ./:/home/codex/workspace:rw
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4500/readyz || exit 1"]
       interval: 10s
@@ -70,6 +77,23 @@ services:
       - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U codex -d codex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8.6.2-alpine
+    container_name: codex-redis
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --appendonly
+      - "yes"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -107,4 +131,5 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   minio_data:

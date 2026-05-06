@@ -4,21 +4,24 @@
 turn/start → стрім notifications → close. Pending requests track'аться по
 числовому id; notifications кладуться в `asyncio.Queue` для consumer'a.
 
-Transport: WebSocket, по одному JSON-RPC повідомленню на frame. Час життя
-з'єднання = одна WS-сесія користувача (або одна conversation).
+Transport-level reconnect: якщо WS падає сам по собі (мережа, таймаут),
+`is_connected` стає False і пендінги дофейлюються; явним `connect()` ззовні
+сесія піднімається наново. Стан thread'у — відповідальність CodexClient.
+Lifecycle: `connect()` ідемпотентний; `close()` — final, після нього
+жоден `connect()` не дозволений.
 """
 
 import asyncio
 import contextlib
 import json
-import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+import structlog
 import websockets
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 _JSONRPC_VERSION = "2.0"
 _DEFAULT_REQUEST_TIMEOUT = 60.0
@@ -61,24 +64,43 @@ class AppServerClient:
         self._notifications: asyncio.Queue[Notification | None] = asyncio.Queue(
             maxsize=_NOTIFICATION_QUEUE_MAX,
         )
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: websockets.ClientConnection | None = None
         self._reader_task: asyncio.Task | None = None
-        self._closed = False
+        self._explicit_close = False
+        self._connect_lock = asyncio.Lock()
+
+    @property
+    def is_connected(self) -> bool:
+        return self._ws is not None and not self._explicit_close
 
     async def connect(self) -> None:
-        if self._ws is not None:
-            raise RuntimeError("AppServerClient already connected")
-        headers = (
-            {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
-        )
-        logger.info("app_server_connecting url=%s authenticated=%s", self._url, bool(self._auth_token))
-        self._ws = await websockets.connect(
-            self._url,
-            max_size=100 * 1024 * 1024,
-            additional_headers=headers,
-        )
-        self._reader_task = asyncio.create_task(self._read_loop(), name="codex_app_server_reader")
-        logger.info("app_server_connected")
+        """Ідемпотентний — no-op якщо WS вже є; піднімає новий якщо ні.
+
+        Кидає RuntimeError якщо клієнт уже був явно закритий.
+        """
+        if self._explicit_close:
+            raise RuntimeError("AppServerClient was closed")
+        async with self._connect_lock:
+            if self._ws is not None:
+                return
+            headers = (
+                {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
+            )
+            log.info(
+                "app_server_connecting",
+                url=self._url,
+                authenticated=bool(self._auth_token),
+            )
+            self._ws = await websockets.connect(
+                self._url,
+                max_size=100 * 1024 * 1024,
+                additional_headers=headers,
+            )
+            self._reader_task = asyncio.create_task(
+                self._read_loop(),
+                name="codex_app_server_reader",
+            )
+            log.info("app_server_connected")
 
     async def request(self, method: str, params: dict[str, Any] | None = None) -> Any:
         self._ensure_open()
@@ -94,7 +116,8 @@ class AppServerClient:
         self._pending[req_id] = future
         await self._send(payload)
         try:
-            return await asyncio.wait_for(future, timeout=self._request_timeout)
+            async with asyncio.timeout(self._request_timeout):
+                return await future
         finally:
             self._pending.pop(req_id, None)
 
@@ -115,59 +138,65 @@ class AppServerClient:
             yield note
 
     async def close(self) -> None:
-        """Порядок: stop producer → close transport → wake consumer →
-        fail pending. Інакше sentinel race з notifications."""
-        if self._closed:
+        """Final teardown. Після цього reconnect неможливий."""
+        if self._explicit_close:
             return
-        logger.info("app_server_closing pending=%d", len(self._pending))
-        self._closed = True
-
-        if self._reader_task is not None:
-            self._reader_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._reader_task
-
-        if self._ws is not None:
-            with contextlib.suppress(Exception):
-                await self._ws.close()
-
-        try:
-            self._notifications.put_nowait(None)
-        except asyncio.QueueFull:
-            with contextlib.suppress(asyncio.QueueEmpty):
-                self._notifications.get_nowait()
-            self._notifications.put_nowait(None)
-
-        for future in self._pending.values():
-            if not future.done():
-                future.set_exception(RuntimeError("AppServerClient closed"))
-        self._pending.clear()
+        log.info("app_server_closing", pending=len(self._pending))
+        self._explicit_close = True
+        await self._teardown_transport()
+        self._wake_notifications()
+        self._fail_pending(RuntimeError("AppServerClient closed"))
 
     def _ensure_open(self) -> None:
-        if self._closed or self._ws is None:
+        if self._explicit_close:
+            raise RuntimeError("AppServerClient is closed")
+        if self._ws is None:
             raise RuntimeError("AppServerClient is not connected")
 
     async def _send(self, payload: dict[str, Any]) -> None:
-        await self._ws.send(json.dumps(payload, ensure_ascii=False))
+        ws = self._ws
+        if ws is None:
+            raise RuntimeError("AppServerClient is not connected")
+        await ws.send(json.dumps(payload, ensure_ascii=False))
 
     async def _read_loop(self) -> None:
+        ws = self._ws
+        if ws is None:
+            return
         try:
-            async for raw in self._ws:
+            async for raw in ws:
                 self._dispatch(raw if isinstance(raw, str) else raw.decode("utf-8"))
         except asyncio.CancelledError:
             raise
         except websockets.ConnectionClosed:
-            logger.info("app_server_ws_closed")
+            log.info("app_server_ws_closed")
         except Exception as exc:  # noqa: BLE001 — логнути будь-що і завершитись
-            logger.error("app_server_reader_error error=%s", exc)
+            log.error("app_server_reader_error", error=str(exc))
         finally:
-            self._closed = True
+            # Reader умер — транспорт втрачено, але це не explicit close;
+            # CodexClient побачить is_connected=False і реконектить.
+            if self._ws is ws:
+                self._ws = None
+                self._reader_task = None
+            self._wake_notifications()
+            self._fail_pending(RuntimeError("AppServerClient connection lost"))
+
+    async def _teardown_transport(self) -> None:
+        if self._reader_task is not None:
+            self._reader_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._reader_task
+            self._reader_task = None
+        if self._ws is not None:
+            with contextlib.suppress(Exception):
+                await self._ws.close()
+            self._ws = None
 
     def _dispatch(self, raw: str) -> None:
         try:
             message = json.loads(raw)
         except json.JSONDecodeError:
-            logger.warning("app_server_bad_frame frame=%s", raw[:200])
+            log.warning("app_server_bad_frame", frame=raw[:200])
             return
 
         if "id" in message and message["id"] is not None:
@@ -180,13 +209,13 @@ class AppServerClient:
             try:
                 self._notifications.put_nowait(note)
             except asyncio.QueueFull:
-                logger.warning(
-                    "app_server_notification_dropped method=%s queue_size=%d",
-                    note.method,
-                    self._notifications.qsize(),
+                log.warning(
+                    "app_server_notification_dropped",
+                    method=note.method,
+                    queue_size=self._notifications.qsize(),
                 )
         else:
-            logger.warning("app_server_unknown_message keys=%s", list(message.keys()))
+            log.warning("app_server_unknown_message", keys=list(message.keys()))
 
     def _resolve_response(self, message: dict[str, Any]) -> None:
         req_id = message["id"]
@@ -204,3 +233,17 @@ class AppServerClient:
             )
         else:
             future.set_result(message.get("result"))
+
+    def _wake_notifications(self) -> None:
+        try:
+            self._notifications.put_nowait(None)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._notifications.get_nowait()
+            self._notifications.put_nowait(None)
+
+    def _fail_pending(self, exc: Exception) -> None:
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(exc)
+        self._pending.clear()

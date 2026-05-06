@@ -1,21 +1,43 @@
-FROM python:3.14-slim
+# Free-threaded Python 3.14 (PEP 703, no GIL).
+# Офіційного python:3.14t-* image нема — uv ставить freethreaded build
+# через python-build-standalone. Multistage: build-essential лишається тільки
+# у builder, runtime отримує чистий venv + інтерпретатор.
+
+FROM debian:trixie-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.22 /uv /uvx /bin/
 
-ENV UV_PROJECT_ENVIRONMENT=/usr/local \
+ENV UV_PYTHON_PREFERENCE=only-managed \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    PYTHONUNBUFFERED=1
+    UV_PYTHON=3.14t
+
+RUN uv python install 3.14t
 
 WORKDIR /app
-
-# Install deps from lockfile straight into system Python (no .venv created).
-# UV_PROJECT_ENVIRONMENT points uv at the system prefix, so `uv sync` reuses
-# it instead of provisioning a virtualenv.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen
+    uv sync --frozen --no-install-project
 
+
+FROM debian:trixie-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /root/.local/share/uv/python /root/.local/share/uv/python
+COPY --from=builder /app/.venv /app/.venv
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHON_GIL=0 \
+    PATH=/app/.venv/bin:$PATH
+
+WORKDIR /app
 COPY alembic.ini ./
 COPY migrations/ ./migrations/
 COPY app/ ./app/
@@ -23,6 +45,5 @@ COPY docker/server/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 8000
-
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

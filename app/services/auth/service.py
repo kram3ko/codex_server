@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 
-from app.config import Settings, settings
+from app.config import Settings
 
 
 class InvalidCredentials(Exception):
@@ -53,7 +53,3 @@ class AuthService:
         if sub != self.SUBJECT:
             raise InvalidToken("subject mismatch")
         return sub
-
-
-# Module-level singleton — DI через підміну `auth_service` у тестах.
-auth_service = AuthService(settings)

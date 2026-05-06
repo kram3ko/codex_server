@@ -5,7 +5,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Query, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.services.auth_service import InvalidToken, auth_service
+from app.services.auth.default import auth_service
+from app.services.auth.service import InvalidToken
 
 _bearer = HTTPBearer(auto_error=False)
 

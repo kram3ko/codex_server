@@ -1,0 +1,59 @@
+"""MinIO/S3 backend (aiobotocore)."""
+
+from pathlib import Path
+
+import structlog
+from aiobotocore.session import get_session
+
+from app.config import settings
+from app.services.storage.base import StorageError
+
+log = structlog.get_logger(__name__)
+
+
+class S3Storage:
+    kind = "s3"
+
+    def __init__(self) -> None:
+        self._endpoint = settings.S3_ENDPOINT
+        self._access_key = settings.S3_ACCESS_KEY_ID
+        self._secret_key = settings.S3_SECRET_KEY
+        self._bucket = settings.S3_BUCKET
+        self._region = settings.S3_REGION
+        self._session = get_session()
+
+    def _client(self):
+        return self._session.create_client(
+            "s3",
+            endpoint_url=self._endpoint,
+            aws_access_key_id=self._access_key,
+            aws_secret_access_key=self._secret_key,
+            region_name=self._region,
+        )
+
+    async def upload_file(self, key: str, source: Path, content_type: str) -> str:
+        async with self._client() as s3:  # type: ignore[attr-defined]
+            with source.open("rb") as fp:
+                await s3.put_object(  # type: ignore[reportGeneralTypeIssues]
+                    Bucket=self._bucket,
+                    Key=key,
+                    Body=fp,
+                    ContentType=content_type,
+                )
+        log.info("s3_uploaded", bucket=self._bucket, key=key, size=source.stat().st_size)
+        return f"s3://{self._bucket}/{key}"
+
+    async def presigned_url(self, key: str, expires_s: int = 3600) -> str:
+        async with self._client() as s3:  # type: ignore[attr-defined]
+            return await s3.generate_presigned_url(  # type: ignore[reportGeneralTypeIssues]
+                "get_object",
+                Params={"Bucket": self._bucket, "Key": key},
+                ExpiresIn=expires_s,
+            )
+
+    async def delete(self, key: str) -> None:
+        async with self._client() as s3:  # type: ignore[attr-defined]
+            try:
+                await s3.delete_object(Bucket=self._bucket, Key=key)  # type: ignore[reportGeneralTypeIssues]
+            except Exception as exc:  # noqa: BLE001
+                raise StorageError(f"S3 delete failed for {key}: {exc}") from exc

@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package codex.v1;
 
-import "google/protobuf/timestamp.proto";
-
 // Поширені типи / utility-повідомлення (не RPC).
 
 message Pagination {

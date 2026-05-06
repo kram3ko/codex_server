@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package codex.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Поточний application user. Один web юзер на single-user setup, плюс N
+// telegram-юзерів за `tg_user_id`.
+
+message User {
+  int64 id = 1;
+  optional int64 tg_user_id = 2;
+  optional string email = 3;
+  optional string display_name = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message MeRequest {}
+
+message UpdateMeRequest {
+  // Порожній рядок = очистити display_name.
+  string display_name = 1;
+}
+
+service UserService {
+  // Resolve current JWT subject → User row (lazy create web user якщо ще немає).
+  rpc Me(MeRequest) returns (User);
+  rpc UpdateMe(UpdateMeRequest) returns (User);
+}

@@ -2,75 +2,92 @@
 
 Frame format (JSON):
   client → server:
-    {"type": "user_message", "text": "...", "conv_id": int|null,
+    {"type": "user_message", "text": "...", "chat_id": int|null,
      "attachment_ids": [int]}
     {"type": "interrupt"}
   server → client:
     {"type": "ready"}
-    {"type": "conv", "conv_id": int}
+    {"type": "chat", "chat_id": int}
     {"type": "token",  "delta": "..."}
     {"type": "tool_call", "name": "...", "args": {...}}
     {"type": "tool_result", "name": "...", "result": "...", "error": null}
-    {"type": "done", "conv_id": int, "final_text": "..."}
+    {"type": "done", "chat_id": int, "final_text": "..."}
     {"type": "error", "code": "...", "detail": "..."}
 """
 
+import asyncio
+import contextlib
 import json
-import logging
 
+import structlog
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app.config import settings
 from app.db.base import SessionLocal
-from app.models import Conversation
-from app.services.codex import (
-    CodexClient,
+from app.models import EventKind, MessageRole
+from app.services.chats.default import chat_service
+from app.services.codex.client import CodexClient
+from app.services.codex.events import (
     DoneEvent,
     ErrorEvent,
-    TokenEvent,
     ToolCallEvent,
     event_to_frame,
 )
-from app.services.conversation_service import (
-    ConversationService,
-    conversation_service,
-)
+from app.services.events.default import event_service
+from app.services.messages.default import message_service
+from app.services.users.default import user_service
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
+
+# Single-user web setup: one synthetic User backs all browser sessions.
+# Switch to per-OAuth-account users when multi-user lands.
+_WEB_USER_EMAIL = "web@codex.local"
 
 
 class ChatWebSocketHandler:
     """Один екземпляр на додаток. Кожен WS-конект отримує власний CodexClient."""
 
-    def __init__(self, conv_svc: ConversationService) -> None:
-        self._conv_svc = conv_svc
+    def __init__(self) -> None:
+        self._cached_web_user_pk: int | None = None
+        self._user_pk_lock = asyncio.Lock()
 
-    async def handle(self, websocket: WebSocket, user_id: str) -> None:
+    async def handle(self, websocket: WebSocket, jwt_subject: str) -> None:
         await websocket.accept()
+        user_pk = await self._resolve_web_user_pk()
         codex = CodexClient(
             url=settings.CODEX_APP_SERVER_URL,
             cwd=settings.CODEX_CWD,
             approval_policy=settings.CODEX_APPROVAL_POLICY,
             sandbox=settings.CODEX_SANDBOX,
+            request_timeout=settings.CODEX_REQUEST_TIMEOUT_SECONDS,
         )
         try:
             await codex.connect()
         except Exception as exc:  # noqa: BLE001 — будь-яка помилка → frame + close
-            logger.error("codex_connect_failed user=%s error=%s", user_id, exc)
-            await self._safe_send(websocket, {"type": "error", "code": "codex_unavailable", "detail": str(exc)})
+            log.error("codex_connect_failed", subject=jwt_subject, error=str(exc))
+            await self._safe_send(
+                websocket,
+                {"type": "error", "code": "codex_unavailable", "detail": str(exc)},
+            )
             await websocket.close(code=1011)
             return
 
         try:
             await websocket.send_json({"type": "ready"})
             async for raw in websocket.iter_text():
-                await self._dispatch(websocket, codex, raw)
+                await self._dispatch(websocket, codex, user_pk, raw)
         except WebSocketDisconnect:
-            logger.info("ws_disconnected user=%s", user_id)
+            log.info("ws_disconnected", subject=jwt_subject)
         finally:
             await codex.close()
 
-    async def _dispatch(self, ws: WebSocket, codex: CodexClient, raw: str) -> None:
+    async def _dispatch(
+        self,
+        ws: WebSocket,
+        codex: CodexClient,
+        user_pk: int,
+        raw: str,
+    ) -> None:
         try:
             frame = json.loads(raw)
         except json.JSONDecodeError:
@@ -79,16 +96,20 @@ class ChatWebSocketHandler:
 
         kind = frame.get("type")
         if kind == "user_message":
-            await self._handle_user_message(ws, codex, frame)
+            await self._handle_user_message(ws, codex, user_pk, frame)
         elif kind == "interrupt":
             await codex.interrupt()
         else:
-            await self._safe_send(ws, {"type": "error", "code": "bad_frame", "detail": f"unknown type: {kind}"})
+            await self._safe_send(
+                ws,
+                {"type": "error", "code": "bad_frame", "detail": f"unknown type: {kind}"},
+            )
 
     async def _handle_user_message(
         self,
         ws: WebSocket,
         codex: CodexClient,
+        user_pk: int,
         frame: dict,
     ) -> None:
         text: str = (frame.get("text") or "").strip()
@@ -96,66 +117,120 @@ class ChatWebSocketHandler:
             await self._safe_send(ws, {"type": "error", "code": "empty_text"})
             return
 
-        conv_id_raw = frame.get("conv_id")
-        conv_id = int(conv_id_raw) if isinstance(conv_id_raw, int) else None
+        chat_id_raw = frame.get("chat_id")
+        chat_id = int(chat_id_raw) if isinstance(chat_id_raw, int) else None
 
-        attachment_ids = frame.get("attachment_ids") or []
-        if attachment_ids:
-            # TODO(phase D): resolve uploads → presigned URLs → передати у CodexClient.run_turn
-            logger.warning("attachments_ignored count=%d (uploads service not yet wired)", len(attachment_ids))
-
-        # Persist user message + obtain conv id.
+        # Persist user message + obtain chat id.
         async with SessionLocal() as session:
-            conv = await self._conv_svc.get_or_create(session, conv_id)
-            await self._conv_svc.append_user_message(session, conv, text)
+            chat = (
+                await chat_service.get(session, chat_id)
+                if chat_id is not None
+                else None
+            )
+            if chat is None:
+                chat = await chat_service.create_web_chat(session, user_pk)
+            await message_service.append(session, chat.id, MessageRole.USER, text)
+            await event_service.emit(
+                session,
+                EventKind.TURN_STARTED,
+                chat_id=chat.id,
+                user_id=user_pk,
+                payload={"text_len": len(text)},
+            )
             await session.commit()
-            persisted_conv_id = conv.id
+            persisted_chat_id = chat.id
 
-        await self._safe_send(ws, {"type": "conv", "conv_id": persisted_conv_id})
+        await self._safe_send(ws, {"type": "chat", "chat_id": persisted_chat_id})
 
-        # Stream Codex events. Accumulation робить CodexClient — handler
-        # тільки збирає tool_calls для persist + бере final_text з DoneEvent.
         final_text = ""
         tool_calls: list[dict] = []
+        done_seen = False
         try:
             async for ev in codex.run_turn(text):
                 if isinstance(ev, ToolCallEvent):
                     tool_calls.append({"name": ev.name, "args": ev.args})
                 if isinstance(ev, ErrorEvent):
                     await self._safe_send(ws, event_to_frame(ev))
+                    await self._emit_event(persisted_chat_id, user_pk, EventKind.TURN_FAILED,
+                                           {"code": ev.code, "detail": ev.detail})
                     return
                 if isinstance(ev, DoneEvent):
                     final_text = ev.final_text
+                    done_seen = True
                     break
-                # token / tool_call / tool_result — стрімимо у клієнт
                 await self._safe_send(ws, event_to_frame(ev))
         except WebSocketDisconnect:
             raise
         except Exception as exc:  # noqa: BLE001
-            logger.error("codex_run_turn_failed exc_type=%s error=%s", type(exc).__name__, exc)
-            await self._safe_send(ws, {"type": "error", "code": "codex_error", "detail": str(exc)})
+            log.error("codex_run_turn_failed", exc_type=type(exc).__name__, error=str(exc))
+            await self._safe_send(
+                ws, {"type": "error", "code": "codex_error", "detail": str(exc)},
+            )
+            await self._emit_event(persisted_chat_id, user_pk, EventKind.TURN_FAILED,
+                                   {"exc_type": type(exc).__name__})
             return
 
-        # Persist assistant message.
+        if not done_seen:
+            await self._safe_send(
+                ws,
+                {"type": "error", "code": "stream_dropped",
+                 "detail": "Codex stream ended without completion"},
+            )
+            await self._emit_event(persisted_chat_id, user_pk, EventKind.TURN_FAILED,
+                                   {"reason": "stream_dropped"})
+            return
+
         async with SessionLocal() as session:
-            conv = await session.get(Conversation, persisted_conv_id)
-            await self._conv_svc.append_assistant_message(
-                session, conv, final_text, tool_calls or None
+            await message_service.append(
+                session,
+                persisted_chat_id,
+                MessageRole.ASSISTANT,
+                final_text,
+                meta={"calls": tool_calls} if tool_calls else None,
+            )
+            await event_service.emit(
+                session,
+                EventKind.TURN_COMPLETED,
+                chat_id=persisted_chat_id,
+                user_id=user_pk,
+                payload={"final_text_len": len(final_text), "tool_calls": len(tool_calls)},
             )
             await session.commit()
 
         await self._safe_send(
             ws,
-            {"type": "done", "conv_id": persisted_conv_id, "final_text": final_text},
+            {"type": "done", "chat_id": persisted_chat_id, "final_text": final_text},
         )
+
+    async def _resolve_web_user_pk(self) -> int:
+        if self._cached_web_user_pk is not None:
+            return self._cached_web_user_pk
+        async with self._user_pk_lock:
+            if self._cached_web_user_pk is not None:
+                return self._cached_web_user_pk
+            async with SessionLocal() as session:
+                user = await user_service.get_or_create_by_email(session, _WEB_USER_EMAIL)
+                await session.commit()
+                self._cached_web_user_pk = user.id
+                return user.id
+
+    async def _emit_event(
+        self,
+        chat_id: int,
+        user_pk: int,
+        kind: EventKind,
+        payload: dict | None = None,
+    ) -> None:
+        async with SessionLocal() as session:
+            await event_service.emit(
+                session, kind, chat_id=chat_id, user_id=user_pk, payload=payload,
+            )
+            await session.commit()
 
     @staticmethod
     async def _safe_send(ws: WebSocket, payload: dict) -> None:
-        try:
+        with contextlib.suppress(WebSocketDisconnect, RuntimeError):
             await ws.send_json(payload)
-        except (WebSocketDisconnect, RuntimeError):
-            # клієнт відключився — пропускаємо, finally закриє codex
-            pass
 
 
-chat_ws_handler = ChatWebSocketHandler(conversation_service)
+chat_ws_handler = ChatWebSocketHandler()
