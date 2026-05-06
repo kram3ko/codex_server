@@ -31,6 +31,9 @@ class ChatSession:
     db_user_id: int
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     current_turn_task: asyncio.Task | None = None
+    # Set by on_callback("turn:steer"); next user message goes to turn/steer
+    # instead of opening a fresh turn.
+    steer_pending: bool = False
 
 
 class ChatSessionStore:

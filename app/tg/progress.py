@@ -5,9 +5,24 @@ import contextlib
 import time
 
 from aiogram.enums import ChatAction
-from aiogram.types import Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.tg.formatting import tg_html
+
+# Callback data prefixes — handled у `app/tg/handlers.py:on_callback`.
+CB_TURN_STOP = "turn:stop"
+CB_TURN_NEW = "turn:new"
+CB_TURN_STEER = "turn:steer"
+
+
+def _turn_controls() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⏸ Зупинити", callback_data=CB_TURN_STOP),
+            InlineKeyboardButton(text="💬 Дописати", callback_data=CB_TURN_STEER),
+        ],
+        [InlineKeyboardButton(text="🆕 Новий thread", callback_data=CB_TURN_NEW)],
+    ])
 
 
 class TurnProgressReporter:
@@ -55,9 +70,11 @@ class TurnProgressReporter:
     async def _ensure_status_message(self, elapsed_s: int) -> None:
         text = tg_html(f"Thinking... {elapsed_s}s")
         if self._status_message is None:
-            self._status_message = await self._message.answer(text)
+            self._status_message = await self._message.answer(
+                text, reply_markup=_turn_controls(),
+            )
             return
         try:
-            await self._status_message.edit_text(text)
+            await self._status_message.edit_text(text, reply_markup=_turn_controls())
         except Exception:  # noqa: BLE001
             return

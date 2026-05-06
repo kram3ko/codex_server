@@ -42,6 +42,7 @@ _M_INITIALIZED = "initialized"
 _M_THREAD_START = "thread/start"
 _M_THREAD_RESUME = "thread/resume"
 _M_TURN_START = "turn/start"
+_M_TURN_STEER = "turn/steer"
 _M_TURN_INTERRUPT = "turn/interrupt"
 
 _N_TURN_STARTED = "turn/started"
@@ -50,9 +51,16 @@ _N_AGENT_MSG_DELTA = "item/agentMessage/delta"
 _N_ITEM_STARTED = "item/started"
 _N_ITEM_COMPLETED = "item/completed"
 
-_NON_TOOL_ITEM_TYPES = frozenset(
-    {"agentMessage", "userMessage", "reasoning", "plan", "hook", "system"}
-)
+# Codex CLI v2 ThreadItem types що НЕ є tool-call'ами (camelCase via serde).
+_NON_TOOL_ITEM_TYPES = frozenset({
+    "agentMessage",
+    "userMessage",
+    "hookPrompt",
+    "plan",
+    "reasoning",
+    "commandExecution",
+    "fileChange",
+})
 
 type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
 
@@ -188,6 +196,27 @@ class CodexClient:
             else:
                 log.warning("codex_interrupt_failed", turn_id=turn_id, code=exc.code)
 
+    async def steer(self, text: str) -> bool:
+        """Append text to in-flight turn. Returns True if accepted."""
+        thread_id = self._thread_id
+        turn_id = self._current_turn_id
+        if not thread_id or not turn_id:
+            return False
+        try:
+            await self._transport.request(
+                _M_TURN_STEER,
+                {
+                    "threadId": thread_id,
+                    "input": [{"type": "text", "text": text}],
+                    "expectedTurnId": turn_id,
+                },
+            )
+        except AppServerError as exc:
+            log.warning("codex_steer_failed", turn_id=turn_id, code=exc.code, msg=str(exc))
+            return False
+        log.info("codex_steered", turn_id=turn_id, text_len=len(text))
+        return True
+
     async def start_new_thread(self) -> None:
         prev = self._thread_id
         self._thread_id = None
@@ -253,6 +282,32 @@ class CodexClient:
             )
 
 
+def _dynamic_tool_call_to_event(item: dict[str, Any]) -> ToolResultEvent:
+    """Codex CLI dynamicToolCall (image_generation тощо) → markdown result.
+
+    `contentItems` may carry `inputText` (raw text) and `inputImage` (URL чи
+    file path). Збираємо у markdown щоб PhotoChunk-парсер у `tg/output.py`
+    підхопив автоматично.
+    """
+    parts: list[str] = []
+    for ci in item.get("contentItems") or []:
+        ci_type = ci.get("type")
+        if ci_type == "inputText":
+            text = (ci.get("text") or "").strip()
+            if text:
+                parts.append(text)
+        elif ci_type == "inputImage":
+            url = ci.get("imageUrl") or ""
+            if url:
+                tool = item.get("tool") or "image"
+                parts.append(f"![{tool}]({url})")
+    return ToolResultEvent(
+        name=str(item.get("tool", "")),
+        result="\n\n".join(parts),
+        error=str(item["error"]) if item.get("error") else None,
+    )
+
+
 def _is_thread_not_found(exc: AppServerError) -> bool:
     """Sidecar restarted → stored thread_id stale, retry with fresh thread."""
     return exc.code == -32600 and "thread not found" in str(exc).lower()
@@ -290,8 +345,17 @@ def _translate(note: Notification, accumulated: str) -> ChatEvent | None:
 
     if method == _N_ITEM_COMPLETED:
         item = params.get("item") or {}
-        if item.get("type") in _NON_TOOL_ITEM_TYPES:
+        item_type = item.get("type")
+        # Codex може видати повний agent-message одним item замість серії
+        # `agentMessage/delta` — підхоплюємо як TokenEvent щоб накопичувач
+        # `accumulated` у run_turn зловив його у final_text.
+        if item_type == "agentMessage":
+            text = item.get("text") or ""
+            return TokenEvent(delta=text) if text else None
+        if item_type in _NON_TOOL_ITEM_TYPES:
             return None
+        if item_type == "dynamicToolCall":
+            return _dynamic_tool_call_to_event(item)
         return ToolResultEvent(
             name=str(item.get("toolName", "")),
             result=str(item.get("output", "")),

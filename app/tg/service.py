@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
+from aiogram.types import BotCommand
 
 from app.config import settings
 from app.services.stt.default import stt_service
@@ -46,6 +47,12 @@ class TGBotService:
 
         self._bot = bot
         log.info("tg_bot_connected", username=me.username, id=me.id)
+        with contextlib.suppress(Exception):
+            await bot.set_my_commands([
+                BotCommand(command="new", description="Новий thread (скинути контекст)"),
+                BotCommand(command="stop", description="Зупинити поточну відповідь"),
+                BotCommand(command="reset", description="Закрити сесію"),
+            ])
 
         dispatcher = self._build_dispatcher()
         self._dispatcher = dispatcher
@@ -90,6 +97,10 @@ class TGBotService:
         dispatcher.message.register(self._handlers.on_reset, Command("reset"), user_filter)
         dispatcher.message.register(self._handlers.on_stop, Command("stop"), user_filter)
         dispatcher.message.register(self._handlers.on_incoming, user_filter, incoming_filter)
+        dispatcher.callback_query.register(
+            self._handlers.on_callback,
+            F.from_user.id == allowed if allowed is not None else F.data,
+        )
         return dispatcher
 
     @staticmethod

@@ -13,7 +13,7 @@ from aiogram.types import Message
 
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
-from app.services.codex.events import DoneEvent, ErrorEvent, TokenEvent
+from app.services.codex.events import DoneEvent, ErrorEvent, TokenEvent, ToolResultEvent
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.stt.base import STTBackend
@@ -116,12 +116,19 @@ class TurnRunner:
     ) -> None:
         buffer = ""
         tool_calls: list[dict] = []
+        # Markdown-форматовані результати tool'ів (image_generation повертає
+        # `![image](url)` тут) — використовуємо як fallback коли модель не
+        # шле власний agentMessage з посиланням на згенеровану картинку.
+        tool_outputs: list[str] = []
         done_seen = False
 
         async for ev in session.client.run_turn(prepared.text, attachments=prepared.attachments):
             match ev:
                 case TokenEvent(delta=delta):
                     buffer += delta
+                case ToolResultEvent(result=result):
+                    if result:
+                        tool_outputs.append(result)
                 case ErrorEvent(code=code, detail=detail):
                     await message.answer(
                         tg_html(f"Codex error [{code}]: {detail or 'unknown error'}"),
@@ -130,8 +137,9 @@ class TurnRunner:
                     return
                 case DoneEvent(final_text=final_text):
                     done_seen = True
+                    fallback = final_text or buffer or "\n\n".join(tool_outputs)
                     await self._handle_done(session, message, prepared,
-                                            final_text or buffer, buffer, tool_calls)
+                                            fallback, buffer, tool_calls)
                     return
 
         if not done_seen:
