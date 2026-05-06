@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     # --- LLM / Codex sidecar ---
     OPENAI_API_KEY: str = ""
     CODEX_APP_SERVER_URL: str = "ws://localhost:4500"
+    CODEX_CWD: str = "/home/codex/workspace"
+    CODEX_APPROVAL_POLICY: str = "never"
+    CODEX_SANDBOX: str = "danger-full-access"
 
     # --- Postgres ---
     DATABASE_URL: str = "postgresql+asyncpg://codex:codex@localhost:5432/codex"
