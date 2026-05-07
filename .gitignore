@@ -332,13 +332,20 @@ pip-selfcheck.json
 *.sqlite
 *.sqlite3
 
-# Local uploads / scratch
-uploads/
-tmp/
+# Local uploads / scratch (root-only, otherwise collides with app/services/uploads)
+/uploads/
+/tmp/
 .scratch/
 
 # Local planning / spec docs (not for public repo)
 estimates/
+
+# Codex CLI auth / local workspace
+.codex/
+workspace/
+
+# Claude Code local settings (per-machine)
+.claude/settings.local.json
 
 # Alembic local-only overrides
 alembic.local.ini

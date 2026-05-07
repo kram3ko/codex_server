@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package codex.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "codex/v1/common.proto";
+
+// Append-only journal. Корисно для observability дашборду / debug.
+// `payload` — JSONB у БД, форма залежить від `kind`.
+
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED          = 0;
+  EVENT_KIND_THREAD_OPENED        = 1;
+  EVENT_KIND_THREAD_RESET         = 2;
+  EVENT_KIND_THREAD_LOST          = 3;
+  EVENT_KIND_TURN_STARTED         = 4;
+  EVENT_KIND_TURN_COMPLETED       = 5;
+  EVENT_KIND_TURN_INTERRUPTED     = 6;
+  EVENT_KIND_TURN_FAILED          = 7;
+  EVENT_KIND_ATTACHMENT_RECEIVED  = 8;
+  EVENT_KIND_AUDIO_TRANSCRIBED    = 9;
+  EVENT_KIND_ERROR                = 10;
+}
+
+message Event {
+  int64 id = 1;
+  optional int64 chat_id = 2;
+  optional int64 user_id = 3;
+  EventKind kind = 4;
+  optional google.protobuf.Struct payload = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message ListEventsRequest {
+  optional int64     chat_id = 1;
+  optional EventKind kind    = 2;
+  Pagination         pagination = 3;
+}
+
+message ListEventsResponse {
+  repeated Event events = 1;
+}
+
+service EventService {
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+}

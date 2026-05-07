@@ -8,7 +8,7 @@ Personal AI playground: FastAPI backend з Codex CLI app-server, Telegram bot
 1. **Codex backend** — FastAPI, SSE-стрім токенів, інтеграція з Codex CLI
    app-server, інлайн-tools (`web_search`, `fetch_url`, `read_file`,
    `analyze_image`, `notes_save`, `notes_search`).
-2. **Telegram bot** — `python-telegram-bot` v22+, polling всередині FastAPI
+2. **Telegram bot** — `aiogram` v3, polling всередині FastAPI
    lifespan, live-edit повідомлень з прогресом стріму.
 3. **Web chat** — 1 HTML-файл (Vue 3 + Tailwind через CDN), SSE через
    `EventSource`, markdown + highlight.js.
@@ -28,8 +28,25 @@ Personal AI playground: FastAPI backend з Codex CLI app-server, Telegram bot
 cp .env.example .env             # заповнити токени
 docker-compose up                # FastAPI + Postgres + MinIO
 # або без docker:
-uv sync && uvicorn app.main:app --reload
+uv sync && uvicorn app.main:app
 ```
+
+## Telegram bot
+
+1. Створи bot token через `@BotFather`.
+2. Дізнайся свій numeric Telegram user id через `@userinfobot` або аналог.
+3. У `.env` заповни:
+
+```bash
+TG_BOT_TOKEN=...
+TG_ALLOWED_USER_IDS=123456789
+```
+
+У docker-compose FastAPI стартує polling автоматично. Пиши боту звичайний текст,
+надсилай фото або voice/audio - voice буде транскрибований і піде в Codex як текст.
+Для voice/audio потрібен `SPEECHMATICS_API_KEY`; `OPENAI_API_KEY` до транскрипції
+не використовується.
+`/reset` закриває поточну Codex-сесію чату і відкриває нову на наступному повідомленні.
 
 ## Структура
 
@@ -44,12 +61,12 @@ codex_server/
 │   ├── routers/             [todo T6,T7] HTTP-роутери
 │   │                         /chat (SSE) /upload /history /reset
 │   ├── services/            [todo T4,T5] codex_client, storage (S3)
+│   ├── tg/                  Telegram polling, attachments, progress UI
 │   ├── tools/               [todo T8-T11] агентські інструменти
 │   │                         web_search / fetch_url / read_file / notes
-│   ├── tg/                  [todo T12] python-telegram-bot Application
 │   └── static/              [todo T13] index.html (web chat)
 ├── migrations/              [todo T3] alembic
-├── pyproject.toml           Python 3.14 + deps (fastapi, ptb, ...)
+├── pyproject.toml           Python 3.14 + deps (fastapi, aiogram, ...)
 ├── uv.lock                  pinned deps
 ├── .env.example             шаблон ENV
 ├── .gitignore / .dockerignore

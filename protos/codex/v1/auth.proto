@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package codex.v1;
+
+// Single-user JWT auth.
+//
+// Flow:
+//   1) Client posts WEB_API_TOKEN до Login() → отримує access_token (JWT, HS256).
+//   2) Усі наступні Connect-RPC дзвінки передають access_token у Authorization
+//      header як `Bearer <token>`. WebSocket /chat/ws — у query string ?token=...
+//      бо браузерні WS не підтримують custom headers.
+
+message LoginRequest {
+  // Той самий WEB_API_TOKEN що у .env. Виконує роль "паролю".
+  string token = 1;
+}
+
+message LoginResponse {
+  // JWT з claims: sub="codex-user", iat, exp.
+  string access_token = 1;
+  string token_type   = 2;  // "Bearer"
+  int64  expires_in   = 3;  // seconds
+}
+
+service AuthService {
+  rpc Login(LoginRequest) returns (LoginResponse);
+}

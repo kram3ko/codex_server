@@ -1,0 +1,144 @@
+services:
+  # FastAPI + Telegram bot polling. Спілкується з Codex CLI (sidecar
+  # codex-app-server) через ws://codex-app-server:4500.
+  codex-server:
+    build: .
+    container_name: codex-server
+    restart: unless-stopped
+    ports:
+      # 8000-8002 зайняті іншими контейнерами (SalesDep). Внутрішній порт 8000.
+      - "8088:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://codex:codex@postgres:5432/codex
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      CODEX_APP_SERVER_URL: ws://codex-app-server:4500
+    volumes:
+      # Source of truth — host repo as workspace AND uvicorn cwd.
+      - ./:/home/codex/workspace
+      # Codex sidecar's image_generation outputs (read by FSInputFile).
+      - ./.codex/generated_images:/home/codex/.codex/generated_images:ro
+      # Docker daemon API for /restart (httpx + UDS).
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      # Викликає наш HealthService.Check через Connect (як aism-py
+      # використовує grpc_health.v1 у scripts/healthcheck.py).
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      codex-app-server:
+        condition: service_healthy
+
+  # Codex CLI у режимі WebSocket app-server. Окремий контейнер з бінарником
+  # codex від OpenAI. Не публікуємо порт назовні — тільки docker-network.
+  codex-app-server:
+    build:
+      context: .
+      dockerfile: docker/codex/Dockerfile
+    container_name: codex-app-server
+    restart: unless-stopped
+    user: "0:0"
+    # No OPENAI_API_KEY — codex auth via mounted ./.codex/auth.json (subscription).
+    volumes:
+      # auth.json (для ChatGPT/Codex subscription mode, опційно)
+      - ./.codex:/home/codex/.codex:rw
+      # Доступ до Docker daemon хоста для ручного reload контейнерів з Codex.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Workspace now mirrors the full repository root.
+      # Persona/instructions live у docker/codex/AGENTS.md; root має symlink
+      # на нього → Codex CLI читає AGENTS.md з workspace cwd автоматично.
+      - ./:/home/codex/workspace:rw
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4500/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    image: postgres:alpine
+    container_name: codex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: codex
+      POSTGRES_PASSWORD: codex
+      POSTGRES_DB: codex
+    ports:
+      - "5432:5432"
+    volumes:
+      # Postgres 18+: mount на parent /var/lib/postgresql, контейнер сам
+      # створює major-version subdirectory всередині (для pg_upgrade --link).
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codex -d codex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8.6.2-alpine
+    container_name: codex-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --appendonly
+      - "yes"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: codex-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: codex-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb -p local/personal-codex || true &&
+      exit 0
+      "
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

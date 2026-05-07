@@ -1,0 +1,20 @@
+# Default: let git handle text normalization automatically.
+* text=auto
+
+# Shell scripts and Dockerfiles must be LF, otherwise Linux containers
+# fail with `exec ...: no such file or directory` due to \r in shebang.
+*.sh        text eol=lf
+*.bash      text eol=lf
+Dockerfile  text eol=lf
+*.dockerfile text eol=lf
+
+# Binary assets — never normalize.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary

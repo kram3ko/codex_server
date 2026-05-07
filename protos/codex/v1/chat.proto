@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package codex.v1;
+
+import "google/protobuf/timestamp.proto";
+import "codex/v1/common.proto";
+
+// Chat = одна розмова (web або telegram). Тримає `codex_thread_id` для
+// rehydrate Codex-сесії після рестарту FastAPI.
+
+enum ChatSource {
+  CHAT_SOURCE_UNSPECIFIED = 0;
+  CHAT_SOURCE_WEB         = 1;
+  CHAT_SOURCE_TELEGRAM    = 2;
+}
+
+message Chat {
+  int64 id = 1;
+  int64 user_id = 2;
+  ChatSource source = 3;
+  optional int64 tg_chat_id = 4;
+  // Reserved — поки sidecar in-memory, завжди NULL. Коли Codex CLI почне
+  // персистити thread state — почнемо писати ID для rehydration.
+  optional string codex_thread_id = 5;
+  optional string title = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp last_msg_at = 8;
+}
+
+message ListChatsRequest {
+  Pagination pagination = 1;
+}
+
+message ListChatsResponse {
+  repeated Chat chats = 1;
+}
+
+message GetChatRequest {
+  int64 chat_id = 1;
+}
+
+message RenameChatRequest {
+  int64 chat_id = 1;
+  string title = 2;
+}
+
+message DeleteChatRequest {
+  int64 chat_id = 1;
+}
+
+service ChatService {
+  rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
+  rpc GetChat(GetChatRequest) returns (Chat);
+  rpc RenameChat(RenameChatRequest) returns (Chat);
+  rpc DeleteChat(DeleteChatRequest) returns (Empty);
+}
