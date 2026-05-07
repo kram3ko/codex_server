@@ -25,6 +25,8 @@ from urllib.parse import urlparse
 import structlog
 
 from app.services.codex.events import (
+    Attachment,
+    AttachmentKind,
     ChatEvent,
     DoneEvent,
     ErrorEvent,
@@ -167,11 +169,7 @@ class CodexClient:
                 "sandbox": self._sandbox,
             },
         )
-        thread_id = ((result or {}).get("thread") or {}).get("id")
-        if not isinstance(thread_id, str) or not thread_id:
-            raise RuntimeError(
-                f"thread/start response shape unexpected (Codex CLI version drift?): {result!r}"
-            )
+        thread_id: str = result["thread"]["id"]
         self._thread_id = thread_id
         self._thread_resumed_or_started = True
         log.info("codex_thread_opened", thread_id=thread_id)
@@ -381,28 +379,30 @@ def _builtin_op_result(item: dict[str, Any], item_type: str) -> str:
 
 
 def _dynamic_tool_call_to_event(item: dict[str, Any]) -> ToolResultEvent:
-    """Codex CLI dynamicToolCall (image_generation тощо) → markdown result.
+    """Codex CLI dynamicToolCall (image_generation тощо) → typed event.
 
-    `contentItems` may carry `inputText` (raw text) and `inputImage` (URL чи
-    file path). Збираємо у markdown щоб PhotoChunk-парсер у `tg/output.py`
-    підхопив автоматично.
+    `contentItems[].inputImage.imageUrl` стає `Attachment(kind=IMAGE, …)`,
+    `inputText` зливається у `text`. Каллер шле binary напряму, без markdown
+    round-trip'у через regex.
     """
-    parts: list[str] = []
-    for ci in item.get("contentItems") or []:
-        ci_type = ci.get("type")
-        if ci_type == "inputText":
-            text = (ci.get("text") or "").strip()
-            if text:
-                parts.append(text)
-        elif ci_type == "inputImage":
-            url = ci.get("imageUrl") or ""
-            if url:
-                tool = item.get("tool") or "image"
-                parts.append(f"![{tool}]({url})")
+    text_parts: list[str] = []
+    attachments: list[Attachment] = []
+    tool_name: str = item["tool"]
+    for content in item["contentItems"]:
+        match content["type"]:
+            case "inputText":
+                text_parts.append(content["text"])
+            case "inputImage":
+                attachments.append(Attachment(
+                    kind=AttachmentKind.IMAGE,
+                    source=content["imageUrl"],
+                    caption=tool_name,
+                ))
     return ToolResultEvent(
-        name=str(item.get("tool", "")),
-        result="\n\n".join(parts),
-        error=str(item["error"]) if item.get("error") else None,
+        name=tool_name,
+        text="\n\n".join(p for p in text_parts if p.strip()),
+        attachments=tuple(attachments),
+        error=item.get("error"),
     )
 
 
@@ -411,14 +411,8 @@ def _is_thread_not_found(exc: AppServerError) -> bool:
     return exc.code == -32600 and "thread not found" in str(exc).lower()
 
 
-def _extract_turn_id(result: Any) -> str | None:
-    if not isinstance(result, dict):
-        return None
-    turn = result.get("turn")
-    if not isinstance(turn, dict):
-        return None
-    tid = turn.get("id")
-    return tid if isinstance(tid, str) and tid else None
+def _extract_turn_id(result: dict[str, Any]) -> str:
+    return result["turn"]["id"]
 
 
 def _translate(note: Notification, accumulated: str) -> ChatEvent | None:
@@ -426,20 +420,20 @@ def _translate(note: Notification, accumulated: str) -> ChatEvent | None:
         case _Notif.TURN_STARTED:
             return None
         case _Notif.AGENT_MSG_DELTA:
-            delta = note.params.get("delta", "")
+            delta: str = note.params["delta"]
             return TokenEvent(delta=delta) if delta else None
         case _Notif.ITEM_STARTED:
-            return _on_item_started(note.params.get("item") or {})
+            return _on_item_started(note.params["item"])
         case _Notif.ITEM_COMPLETED:
-            return _on_item_completed(note.params.get("item") or {}, accumulated)
+            return _on_item_completed(note.params["item"], accumulated)
         case _Notif.TURN_COMPLETED:
-            return DoneEvent(final_text=str(note.params.get("finalText") or accumulated))
+            return DoneEvent(final_text=note.params.get("finalText", accumulated))
         case _:
             return None
 
 
 def _on_item_started(item: dict[str, Any]) -> ChatEvent | None:
-    item_type = item.get("type") or ""
+    item_type: str = item["type"]
     if item_type == _Item.AGENT_MESSAGE or item_type in _HIDDEN_ITEMS:
         return None
     if item_type in _BUILTIN_OP_LABELS:
@@ -448,13 +442,13 @@ def _on_item_started(item: dict[str, Any]) -> ChatEvent | None:
             args=_builtin_op_args(item, item_type),
         )
     return ToolCallEvent(
-        name=str(item.get("toolName", "")),
-        args=dict(item.get("arguments") or {}),
+        name=item["toolName"],
+        args=item.get("arguments", {}),
     )
 
 
 def _on_item_completed(item: dict[str, Any], accumulated: str) -> ChatEvent | None:
-    item_type = item.get("type") or ""
+    item_type: str = item["type"]
     if item_type == _Item.AGENT_MESSAGE:
         return _agent_message_to_token(item, accumulated)
     if item_type in _HIDDEN_ITEMS:
@@ -464,20 +458,20 @@ def _on_item_completed(item: dict[str, Any], accumulated: str) -> ChatEvent | No
     if item_type in _BUILTIN_OP_LABELS:
         return ToolResultEvent(
             name=_BUILTIN_OP_LABELS[item_type],
-            result=_builtin_op_result(item, item_type),
-            error=str(item["error"]) if item.get("error") else None,
+            text=_builtin_op_result(item, item_type),
+            error=item.get("error"),
         )
     return ToolResultEvent(
-        name=str(item.get("toolName", "")),
-        result=str(item.get("output", "")),
-        error=str(item["error"]) if item.get("error") else None,
+        name=item["toolName"],
+        text=item.get("output", ""),
+        error=item.get("error"),
     )
 
 
 def _agent_message_to_token(item: dict[str, Any], accumulated: str) -> ChatEvent | None:
     # Sidecar may emit the whole agent-message as one item instead of streaming
     # `agentMessage/delta`. Reconcile against `accumulated` to avoid double text.
-    text = item.get("text") or ""
+    text: str = item["text"]
     if not text or accumulated.endswith(text):
         return None
     if text.startswith(accumulated):

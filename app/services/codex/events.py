@@ -1,70 +1,104 @@
 """Типізовані chat-event'и між Codex client'ом і WebSocket-handler'ом.
 
-Дискриминатор — клас (тут) → 'type' string у wire-frame'і (через
-`event_to_frame`). Усі поля плоскі, JSON-friendly.
+Pydantic v2 моделі — кожне поле з `Field(description=...)`, тому JSON Schema
+генерується із самих типів, а wire-frame має чітку документацію.
+
+Серіалізація — orjson, bytes-native, без проміжних `str` чи ascii-fallback'ів.
+Збираємо з `ORJSON_BUILD_FREETHREADED=1` у Dockerfile (3.14t opt-in).
 """
 
-import dataclasses
-from dataclasses import dataclass
-from typing import Any
+from enum import StrEnum
+from typing import Any, ClassVar
+
+import orjson
+from pydantic import BaseModel, ConfigDict, Field
 
 
-@dataclass(frozen=True, slots=True)
-class TokenEvent:
-    delta: str
+class AttachmentKind(StrEnum):
+    IMAGE = "image"
+    AUDIO = "audio"
+    FILE = "file"
 
 
-@dataclass(frozen=True, slots=True)
-class ToolCallEvent:
-    name: str
-    args: dict[str, Any]
+class _Frame(BaseModel):
+    """Базовий frozen-frame: усі ChatEvent'и наслідують і несуть дискриминатор."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # Перевизначається у кожного підкласу — використовується для wire-tag'а.
+    type_tag: ClassVar[str]
 
 
-@dataclass(frozen=True, slots=True)
-class ToolResultEvent:
-    name: str
-    result: str
-    error: str | None = None
+class Attachment(_Frame):
+    """Один файл/медіа-артефакт, що його тулза прислала разом з результатом.
+
+    `source` — URL або локальний шлях під довіреним коренем. Рендерер сам
+    ресолвить його (Telegram → bytes, web → presigned URL); markdown bridge
+    більше не потрібен.
+    """
+
+    type_tag: ClassVar[str] = "attachment"
+    kind: AttachmentKind = Field(description="Тип контенту: image / audio / file.")
+    source: str = Field(description="URL або локальний шлях під довіреним коренем.")
+    caption: str = Field(default="", description="Caption або alt-текст (порожній — без підпису).")
 
 
-@dataclass(frozen=True, slots=True)
-class DoneEvent:
-    final_text: str
+class TokenEvent(_Frame):
+    type_tag: ClassVar[str] = "token"
+    delta: str = Field(description="Інкрементальний шматок agentMessage стріму.")
 
 
-@dataclass(frozen=True, slots=True)
-class ErrorEvent:
-    code: str
-    detail: str | None = None
+class ToolCallEvent(_Frame):
+    type_tag: ClassVar[str] = "tool_call"
+    name: str = Field(description="Ім'я тулзи (Codex builtin label чи toolName).")
+    args: dict[str, Any] = Field(description="Аргументи виклику як отримано від Codex.")
+
+
+class ToolResultEvent(_Frame):
+    type_tag: ClassVar[str] = "tool_result"
+    name: str = Field(description="Ім'я тулзи, результат якої прийшов.")
+    text: str = Field(default="", description="Текстовий вивід тулзи (stdout, опис тощо).")
+    attachments: tuple[Attachment, ...] = Field(
+        default=(), description="Файли/медіа, що їх тулза вкладає у результат."
+    )
+    error: str | None = Field(default=None, description="Текст помилки, якщо тулза впала.")
+
+
+class DoneEvent(_Frame):
+    type_tag: ClassVar[str] = "done"
+    final_text: str = Field(description="Фінальний agentMessage після завершення турну.")
+
+
+class ErrorEvent(_Frame):
+    type_tag: ClassVar[str] = "error"
+    code: str = Field(description="Стабільний machine-readable код (наприклад, 'codex_error').")
+    detail: str | None = Field(default=None, description="Людинозрозумілий опис помилки.")
 
 
 ChatEvent = TokenEvent | ToolCallEvent | ToolResultEvent | DoneEvent | ErrorEvent
 
 
-_TYPE_TAG = {
-    TokenEvent: "token",
-    ToolCallEvent: "tool_call",
-    ToolResultEvent: "tool_result",
-    DoneEvent: "done",
-    ErrorEvent: "error",
+_TAG_TO_CLS: dict[str, type[_Frame]] = {
+    cls.type_tag: cls
+    for cls in (TokenEvent, ToolCallEvent, ToolResultEvent, DoneEvent, ErrorEvent)
 }
 
 
-def event_to_frame(ev: ChatEvent) -> dict[str, Any]:
-    """Серіалізація в wire-frame з discriminator-полем `type`."""
-    tag = _TYPE_TAG.get(type(ev))
-    if tag is None:
-        raise TypeError(f"unknown ChatEvent subtype: {type(ev).__name__}")
-    return {"type": tag, **dataclasses.asdict(ev)}
+def event_to_frame(event: ChatEvent) -> dict[str, Any]:
+    """Дискриминатор `type` + плоский dump. Серіалізація — окремо (orjson)."""
+    return {"type": event.type_tag, **event.model_dump(mode="json")}
 
 
-_TAG_TO_CLS: dict[str, type[ChatEvent]] = {tag: cls for cls, tag in _TYPE_TAG.items()}
+def event_to_bytes(event: ChatEvent) -> bytes:
+    """Hot-path серіалізатор для bus / WS (orjson — bytes-native, no copies)."""
+    return orjson.dumps(event_to_frame(event))
 
 
 def frame_to_event(frame: dict[str, Any]) -> ChatEvent:
-    tag = frame.get("type")
-    cls = _TAG_TO_CLS.get(tag) if isinstance(tag, str) else None
-    if cls is None:
-        raise ValueError(f"unknown ChatEvent type tag: {tag!r}")
+    cls = _TAG_TO_CLS[frame["type"]]
     payload = {k: v for k, v in frame.items() if k != "type"}
-    return cls(**payload)
+    return cls.model_validate(payload)  # type: ignore[return-value]
+
+
+def bytes_to_event(raw: bytes | str) -> ChatEvent:
+    return frame_to_event(orjson.loads(raw))

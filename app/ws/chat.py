@@ -1,6 +1,6 @@
 """WebSocket /chat/ws — bidi-стрім між клієнтом і Codex CLI app-server.
 
-Frame format (JSON):
+Frame format (orjson-serialized JSON):
   client → server:
     {"type": "user_message", "text": "...", "chat_id": int|null,
      "attachment_ids": [int]}
@@ -10,15 +10,17 @@ Frame format (JSON):
     {"type": "chat", "chat_id": int}
     {"type": "token",  "delta": "..."}
     {"type": "tool_call", "name": "...", "args": {...}}
-    {"type": "tool_result", "name": "...", "result": "...", "error": null}
+    {"type": "tool_result", "name": "...", "text": "...",
+     "media": [{"kind": "image", "src": "...", "caption": "..."}],
+     "error": null}
     {"type": "done", "chat_id": int, "final_text": "..."}
     {"type": "error", "code": "...", "detail": "..."}
 """
 
 import asyncio
 import contextlib
-import json
 
+import orjson
 import structlog
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -29,17 +31,17 @@ from app.services.bus.default import event_bus
 from app.services.chats.default import chat_service
 from app.services.codex.client import CodexClient
 from app.services.codex.events import (
+    Attachment,
     DoneEvent,
     ErrorEvent,
-    TokenEvent,
     ToolCallEvent,
     ToolResultEvent,
     event_to_frame,
 )
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
+from app.services.uploads.default import upload_service
 from app.services.users.default import user_service
-from app.tg.output import AudioChunk, PhotoChunk, parse_final_text
 
 log = structlog.get_logger(__name__)
 
@@ -78,7 +80,7 @@ class ChatWebSocketHandler:
             return
 
         try:
-            await websocket.send_json({"type": "ready"})
+            await self._safe_send(websocket, {"type": "ready"})
             async for raw in websocket.iter_text():
                 await self._dispatch(websocket, codex, user_pk, raw)
         except WebSocketDisconnect:
@@ -94,8 +96,8 @@ class ChatWebSocketHandler:
         raw: str,
     ) -> None:
         try:
-            frame = json.loads(raw)
-        except json.JSONDecodeError:
+            frame = orjson.loads(raw)
+        except orjson.JSONDecodeError:
             await self._safe_send(ws, {"type": "error", "code": "bad_json"})
             return
 
@@ -123,9 +125,8 @@ class ChatWebSocketHandler:
             return
 
         chat_id_raw = frame.get("chat_id")
-        chat_id = int(chat_id_raw) if isinstance(chat_id_raw, int) else None
+        chat_id = chat_id_raw if isinstance(chat_id_raw, int) else None
 
-        # Persist user message + obtain chat id.
         async with SessionLocal() as session:
             chat = (
                 await chat_service.get(session, chat_id)
@@ -148,20 +149,17 @@ class ChatWebSocketHandler:
         await self._safe_send(ws, {"type": "chat", "chat_id": persisted_chat_id})
 
         final_text = ""
-        streamed_text = ""
         tool_calls: list[dict] = []
-        tool_outputs: list[str] = []
+        attachments: list[Attachment] = []
         done_seen = False
         try:
             async for ev in codex.run_turn(text):
                 await event_bus.publish(persisted_chat_id, ev)
                 match ev:
-                    case TokenEvent(delta=delta):
-                        streamed_text += delta
                     case ToolCallEvent(name=name, args=args):
                         tool_calls.append({"name": name, "args": args})
-                    case ToolResultEvent(result=result) if result:
-                        tool_outputs.append(result)
+                    case ToolResultEvent(attachments=tool_files):
+                        attachments.extend(tool_files)
                     case ErrorEvent(code=code, detail=detail):
                         await self._safe_send(ws, event_to_frame(ev))
                         await self._emit_event(
@@ -170,7 +168,7 @@ class ChatWebSocketHandler:
                         )
                         return
                     case DoneEvent(final_text=ft):
-                        final_text = _compose_final_text(ft, tool_outputs)
+                        final_text = ft
                         done_seen = True
                         break
                 await self._safe_send(ws, event_to_frame(ev))
@@ -196,29 +194,37 @@ class ChatWebSocketHandler:
             return
 
         async with SessionLocal() as session:
+            upload_ids = await upload_service.persist_attachments(
+                session, persisted_chat_id, attachments,
+            )
+            meta: dict = {}
+            if tool_calls:
+                meta["calls"] = tool_calls
+            if upload_ids:
+                meta["upload_ids"] = upload_ids
             await message_service.append(
                 session,
                 persisted_chat_id,
                 MessageRole.ASSISTANT,
                 final_text,
-                meta={"calls": tool_calls} if tool_calls else None,
+                meta=meta or None,
             )
             await event_service.emit(
                 session,
                 EventKind.TURN_COMPLETED,
                 chat_id=persisted_chat_id,
                 user_id=user_pk,
-                payload={"final_text_len": len(final_text), "tool_calls": len(tool_calls)},
+                payload={
+                    "final_text_len": len(final_text),
+                    "tool_calls": len(tool_calls),
+                    "uploads": len(upload_ids),
+                },
             )
             await session.commit()
 
         await self._safe_send(
             ws,
-            {
-                "type": "done",
-                "chat_id": persisted_chat_id,
-                "final_text": _final_text_for_done_frame(final_text, streamed_text),
-            },
+            {"type": "done", "chat_id": persisted_chat_id, "final_text": final_text},
         )
 
     async def _resolve_web_user_pk(self) -> int:
@@ -248,27 +254,9 @@ class ChatWebSocketHandler:
 
     @staticmethod
     async def _safe_send(ws: WebSocket, payload: dict) -> None:
+        # Браузер очікує text-frame'и (window.WebSocket.onmessage event.data → str).
         with contextlib.suppress(WebSocketDisconnect, RuntimeError):
-            await ws.send_json(payload)
+            await ws.send_text(orjson.dumps(payload).decode())
 
 
 chat_ws_handler = ChatWebSocketHandler()
-
-
-def _compose_final_text(final_text: str, tool_outputs: list[str]) -> str:
-    tool_text = "\n\n".join(t for t in tool_outputs if t.strip())
-    if not final_text:
-        return tool_text
-    if not tool_text or _has_markdown_media(final_text) or not _has_markdown_media(tool_text):
-        return final_text
-    return f"{final_text.rstrip()}\n\n{tool_text}"
-
-
-def _final_text_for_done_frame(final_text: str, streamed_text: str) -> str:
-    if streamed_text and final_text == streamed_text:
-        return ""
-    return final_text
-
-
-def _has_markdown_media(text: str) -> bool:
-    return any(isinstance(c, (PhotoChunk, AudioChunk)) for c in parse_final_text(text))

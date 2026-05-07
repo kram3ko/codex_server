@@ -3,6 +3,10 @@
 Persists user message before run, assistant message after, and emits
 events (TURN_STARTED/COMPLETED/FAILED) to the journal. Storage is fire-and-
 return — callers (handlers) are kept thin.
+
+Attachments (image_generation тощо) приходять структурно через
+`ToolResultEvent.attachments: tuple[Attachment, ...]` — рендеримо текст і
+файли окремими повідомленнями, без markdown round-trip'у.
 """
 
 import asyncio
@@ -15,6 +19,7 @@ from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
 from app.services.bus.default import event_bus
 from app.services.codex.events import (
+    Attachment,
     DoneEvent,
     ErrorEvent,
     TokenEvent,
@@ -28,7 +33,7 @@ from app.services.stt.base import STTBackend
 from app.services.uploads.default import upload_service
 from app.tg.formatting import tg_html
 from app.tg.media import PreparedTurn, cleanup_attachments, prepare_turn
-from app.tg.output import AudioChunk, PhotoChunk, parse_final_text, send_chunks
+from app.tg.output import send_attachment, send_text
 from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSession, ChatSessionStore
 
@@ -174,10 +179,7 @@ class TurnRunner:
     ) -> None:
         buffer = ""
         tool_calls: list[dict] = []
-        # Markdown-форматовані результати tool'ів (image_generation повертає
-        # `![image](url)` тут) — використовуємо як fallback коли модель не
-        # шле власний agentMessage з посиланням на згенеровану картинку.
-        tool_outputs: list[str] = []
+        attachments: list[Attachment] = []
         done_seen = False
 
         async for ev in session.client.run_turn(prepared.text, attachments=prepared.attachments):
@@ -186,11 +188,11 @@ class TurnRunner:
                 case TokenEvent(delta=delta):
                     buffer += delta
                     await progress.note_partial(buffer)
-                case ToolCallEvent(name=name):
+                case ToolCallEvent(name=name, args=args):
+                    tool_calls.append({"name": name, "args": args})
                     await progress.note_tool(name)
-                case ToolResultEvent(name=name, result=result, error=error):
-                    if result:
-                        tool_outputs.append(result)
+                case ToolResultEvent(name=name, attachments=tool_files, error=error):
+                    attachments.extend(tool_files)
                     await progress.mark_tool_done(name, error=bool(error))
                 case ErrorEvent(code=code, detail=detail):
                     progress.mark_outcome("failed")
@@ -201,13 +203,12 @@ class TurnRunner:
                     return
                 case DoneEvent(final_text=final_text):
                     done_seen = True
-                    composed = _compose_final_text(final_text, buffer, tool_outputs)
                     await self._handle_done(
                         session,
                         message,
                         prepared,
-                        composed,
-                        buffer,
+                        final_text or buffer,
+                        attachments,
                         tool_calls,
                         progress.committed_text,
                     )
@@ -216,7 +217,7 @@ class TurnRunner:
         if not done_seen:
             progress.mark_outcome("failed")
             await self._handle_dropped_stream(
-                session, message, buffer, tool_calls, progress.committed_text,
+                session, message, buffer, attachments, tool_calls, progress.committed_text,
             )
 
     async def _handle_done(
@@ -225,28 +226,26 @@ class TurnRunner:
         message: Message,
         prepared: PreparedTurn,
         final_text: str,
-        buffer: str,
+        attachments: list[Attachment],
         tool_calls: list[dict],
         committed_prefix: str,
     ) -> None:
-        if not final_text.strip():
-            await self._handle_empty_response(session, message, prepared, buffer)
+        if not final_text.strip() and not attachments:
+            await self._handle_empty_response(session, message, prepared)
             return
-        await self._send_response(message, final_text, committed_prefix)
-        await self._persist_assistant_turn(session, final_text, tool_calls)
+        await self._send_response(message, final_text, attachments, committed_prefix)
+        await self._persist_assistant_turn(session, final_text, attachments, tool_calls)
 
     async def _handle_empty_response(
         self,
         session: ChatSession,
         message: Message,
         prepared: PreparedTurn,
-        buffer: str,
     ) -> None:
         log.warning(
             "tg_empty_response",
             attachments=len(prepared.attachments),
             text_len=len(prepared.text),
-            buffer_len=len(buffer),
         )
         await message.answer(
             tg_html(
@@ -261,6 +260,7 @@ class TurnRunner:
         session: ChatSession,
         message: Message,
         buffer: str,
+        attachments: list[Attachment],
         tool_calls: list[dict],
         committed_prefix: str,
     ) -> None:
@@ -270,106 +270,59 @@ class TurnRunner:
             buffer_len=len(buffer),
         )
         tail = buffer.strip()
-        if not tail:
-            await self._announce_empty_drop(session, message)
+        if not tail and not attachments:
+            await message.answer(
+                tg_html("Codex stream dropped before any reply. Use /reset and try again."),
+            )
+            await self._emit_failure(session, code="stream_dropped", detail="no buffer")
             return
-        await self._send_response(message, tail, committed_prefix)
-        await self._persist_partial_assistant_turn(session, tail, tool_calls)
+        await self._send_response(message, tail, attachments, committed_prefix)
+        await self._persist_assistant_turn(session, tail, attachments, tool_calls, partial=True)
         await message.answer(
             tg_html("⚠ Stream dropped before completion. Use /reset to reopen session."),
         )
 
-    async def _announce_empty_drop(
-        self,
-        session: ChatSession,
-        message: Message,
-    ) -> None:
-        await message.answer(
-            tg_html("Codex stream dropped before any reply. Use /reset and try again."),
-        )
-        await self._emit_failure(session, code="stream_dropped", detail="no buffer")
-
+    @staticmethod
     async def _send_response(
-        self,
         message: Message,
         final_text: str,
-        committed_prefix: str = "",
+        attachments: list[Attachment],
+        committed_prefix: str,
     ) -> None:
+        # `handle()` уже відсік `message.chat is None`; bot гарантовано є, бо
+        # це bot-handler. Assert замість if-return, щоб pyright звузив Optional.
+        assert message.bot is not None and message.chat is not None
         remainder = _strip_committed_prefix(final_text, committed_prefix)
-        if not remainder:
-            return
-        await self._dispatch_chunks(message, remainder)
-
-    @staticmethod
-    async def _dispatch_chunks(message: Message, text: str) -> None:
-        chunks = parse_final_text(text)
-        if not chunks:
-            await message.answer(tg_html(text))
-            return
-        bot = message.bot
-        if bot is None or message.chat is None:
-            return
-        await send_chunks(bot, message.chat.id, chunks)
+        if remainder:
+            await send_text(message.bot, message.chat.id, remainder)
+        for attachment in attachments:
+            await send_attachment(message.bot, message.chat.id, attachment)
 
     @staticmethod
     async def _persist_assistant_turn(
         session: ChatSession,
         final_text: str,
+        attachments: list[Attachment],
         tool_calls: list[dict],
+        *,
+        partial: bool = False,
     ) -> None:
         async with SessionLocal() as db:
-            upload_ids = await upload_service.persist_codex_outputs(
-                db, session.db_chat_id, final_text,
+            upload_ids = await upload_service.persist_attachments(
+                db, session.db_chat_id, attachments,
             )
-            meta: dict = {}
-            if tool_calls:
-                meta["calls"] = tool_calls
-            if upload_ids:
-                meta["upload_ids"] = upload_ids
-            await message_service.append(
-                db, session.db_chat_id, MessageRole.ASSISTANT, final_text, meta=meta or None,
-            )
-            await event_service.emit(
-                db,
-                EventKind.TURN_COMPLETED,
-                chat_id=session.db_chat_id,
-                user_id=session.db_user_id,
-                payload={
-                    "final_text_len": len(final_text),
-                    "tool_calls": len(tool_calls),
-                    "uploads": len(upload_ids),
-                },
-            )
-            await db.commit()
-
-    @staticmethod
-    async def _persist_partial_assistant_turn(
-        session: ChatSession,
-        final_text: str,
-        tool_calls: list[dict],
-    ) -> None:
-        async with SessionLocal() as db:
-            upload_ids = await upload_service.persist_codex_outputs(
-                db, session.db_chat_id, final_text,
-            )
-            meta: dict = {"partial": True}
-            if tool_calls:
-                meta["calls"] = tool_calls
-            if upload_ids:
-                meta["upload_ids"] = upload_ids
+            meta = _build_assistant_meta(tool_calls, upload_ids, partial=partial)
             await message_service.append(
                 db, session.db_chat_id, MessageRole.ASSISTANT, final_text, meta=meta,
             )
             await event_service.emit(
                 db,
-                EventKind.TURN_FAILED,
+                EventKind.TURN_FAILED if partial else EventKind.TURN_COMPLETED,
                 chat_id=session.db_chat_id,
                 user_id=session.db_user_id,
-                payload={
-                    "reason": "stream_dropped",
-                    "partial_text_len": len(final_text),
-                    "tool_calls": len(tool_calls),
-                },
+                payload=_build_turn_payload(
+                    final_text, tool_calls, upload_ids, partial=partial,
+                ),
             )
             await db.commit()
 
@@ -381,8 +334,9 @@ class TurnRunner:
         detail: str | None = None,
         exc_type: str | None = None,
     ) -> None:
-        raw = {"code": code, "detail": detail, "exc_type": exc_type}
-        payload = {k: v for k, v in raw.items() if v}
+        payload = {k: v for k, v in (
+            ("code", code), ("detail", detail), ("exc_type", exc_type),
+        ) if v}
         async with SessionLocal() as db:
             await event_service.emit(
                 db,
@@ -417,18 +371,37 @@ async def cancel_turn(session: ChatSession) -> bool:
     return True
 
 
-def _compose_final_text(final_text: str, buffer: str, tool_outputs: list[str]) -> str:
-    base = final_text or buffer
-    tool_text = "\n\n".join(t for t in tool_outputs if t.strip())
-    if not base:
-        return tool_text
-    if not tool_text or _has_media(base) or not _has_media(tool_text):
-        return base
-    return f"{base.rstrip()}\n\n{tool_text}"
+def _build_assistant_meta(
+    tool_calls: list[dict],
+    upload_ids: list[int],
+    *,
+    partial: bool,
+) -> dict | None:
+    meta: dict = {}
+    if partial:
+        meta["partial"] = True
+    if tool_calls:
+        meta["calls"] = tool_calls
+    if upload_ids:
+        meta["upload_ids"] = upload_ids
+    return meta or None
 
 
-def _has_media(text: str) -> bool:
-    return any(isinstance(chunk, (PhotoChunk, AudioChunk)) for chunk in parse_final_text(text))
+def _build_turn_payload(
+    final_text: str,
+    tool_calls: list[dict],
+    upload_ids: list[int],
+    *,
+    partial: bool,
+) -> dict:
+    payload: dict = {
+        "final_text_len": len(final_text),
+        "tool_calls": len(tool_calls),
+        "uploads": len(upload_ids),
+    }
+    if partial:
+        payload["reason"] = "stream_dropped"
+    return payload
 
 
 def _strip_committed_prefix(text: str, committed: str) -> str:

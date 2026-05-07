@@ -13,11 +13,11 @@ Lifecycle: `connect()` ідемпотентний; `close()` — final, післ
 
 import asyncio
 import contextlib
-import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+import orjson
 import structlog
 import websockets
 
@@ -157,7 +157,8 @@ class AppServerClient:
         ws = self._ws
         if ws is None:
             raise RuntimeError("AppServerClient is not connected")
-        await ws.send(json.dumps(payload, ensure_ascii=False))
+        # Codex sidecar приймає тільки text-frame'и: orjson → bytes → decode.
+        await ws.send(orjson.dumps(payload).decode())
 
     async def _read_loop(self) -> None:
         ws = self._ws
@@ -194,8 +195,8 @@ class AppServerClient:
 
     def _dispatch(self, raw: str) -> None:
         try:
-            message = json.loads(raw)
-        except json.JSONDecodeError:
+            message = orjson.loads(raw)
+        except orjson.JSONDecodeError:
             log.warning("app_server_bad_frame", frame=raw[:200])
             return
 

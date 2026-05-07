@@ -11,10 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.22 /uv /uvx /bin/
 
+# orjson 3.11.x офіційно дозволяє build на free-threaded Python тільки за
+# explicit opt-in (PEP 703 ще experimental у 3.14). Ми свідомо це вмикаємо.
 ENV UV_PYTHON_PREFERENCE=only-managed \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PYTHON=3.14t
+    UV_PYTHON=3.14t \
+    ORJSON_BUILD_FREETHREADED=1
 
 RUN uv python install 3.14t
 

@@ -20,6 +20,7 @@ dependencies = [
     "pyjwt>=2.12.1",
     "alembic>=1.18.4",
     "connectrpc>=0.10.0",
+    "orjson>=3.11.9",
 ]
 
 [dependency-groups]

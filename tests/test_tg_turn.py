@@ -1,24 +1,22 @@
-from app.tg.turn import _compose_final_text
+from app.tg.turn import _strip_committed_prefix
 
 
-def test_compose_final_text_keeps_tool_image_when_base_has_text() -> None:
-    base = "Сгенерировал картинку."
-    tool_outputs = ["![image](/home/codex/.codex/generated_images/run/cat.png)"]
+def test_strip_committed_prefix_removes_streamed_chunk() -> None:
+    text = "Привіт. Це мій повний відповідь."
+    committed = "Привіт. "
 
-    assert _compose_final_text(base, "", tool_outputs) == (
-        "Сгенерировал картинку.\n\n"
-        "![image](/home/codex/.codex/generated_images/run/cat.png)"
-    )
+    assert _strip_committed_prefix(text, committed) == "Це мій повний відповідь."
 
 
-def test_compose_final_text_does_not_duplicate_existing_media() -> None:
-    base = "![image](/home/codex/.codex/generated_images/run/cat.png)"
-    tool_outputs = ["![image](/home/codex/.codex/generated_images/run/cat.png)"]
+def test_strip_committed_prefix_returns_full_text_when_prefix_diverges() -> None:
+    """Якщо модель переписала ранні токени — не глушимо final, шлемо повністю."""
+    text = "Інакший фінал від моделі"
+    committed = "Привіт, я ще не закінчив"
 
-    assert _compose_final_text(base, "", tool_outputs) == base
+    assert _strip_committed_prefix(text, committed) == text
 
 
-def test_compose_final_text_uses_tool_output_for_empty_response() -> None:
-    tool_outputs = ["![image](/home/codex/.codex/generated_images/run/cat.png)"]
+def test_strip_committed_prefix_returns_empty_when_text_equals_committed() -> None:
+    text = "повністю заstreaml-ений вже"
 
-    assert _compose_final_text("", "", tool_outputs) == tool_outputs[0]
+    assert _strip_committed_prefix(text, text) == ""

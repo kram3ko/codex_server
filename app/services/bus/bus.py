@@ -8,14 +8,13 @@ SQL (`messages`, `events` tables); subscribers that connect mid-turn get only
 the tail. Subscribers that need replay must read the DB first, then attach.
 """
 
-import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import structlog
 from redis.asyncio import Redis
 
-from app.services.codex.events import ChatEvent, event_to_frame, frame_to_event
+from app.services.codex.events import ChatEvent, bytes_to_event, event_to_bytes
 
 log = structlog.get_logger(__name__)
 
@@ -30,9 +29,8 @@ class EventBus:
 
     async def publish(self, chat_id: int, event: ChatEvent) -> None:
         """Best-effort fan-out. Bus failures must not poison the turn."""
-        frame = event_to_frame(event)
         try:
-            await self._redis.publish(self.channel_for(chat_id), json.dumps(frame))
+            await self._redis.publish(self.channel_for(chat_id), event_to_bytes(event))
         except Exception as exc:  # noqa: BLE001
             log.warning("bus_publish_failed", chat_id=chat_id, error=str(exc))
 
@@ -58,8 +56,8 @@ class EventBus:
             if message.get("type") != "message":
                 continue
             try:
-                yield frame_to_event(json.loads(message["data"]))
-            except (ValueError, json.JSONDecodeError) as exc:
+                yield bytes_to_event(message["data"])
+            except (KeyError, ValueError) as exc:
                 log.warning("bus_decode_failed", error=str(exc))
 
 
