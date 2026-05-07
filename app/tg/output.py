@@ -18,7 +18,7 @@ from app.config import settings
 from app.services.codex.events import Attachment, AttachmentKind
 from app.services.tts.base import SpeechSynthesisError
 from app.services.tts.default import tts_service
-from app.tg.formatting import split_tg_message, tg_html
+from app.tg.markdown import tg_markdown
 from app.utils.paths import resolve_trusted_local_path
 
 log = structlog.get_logger(__name__)
@@ -29,18 +29,19 @@ _TTS_TMP_DIR = Path(settings.CODEX_CWD) / "tg_uploads"
 
 
 async def send_text(bot: Bot, chat_id: int, text: str) -> None:
-    for piece in split_tg_message(text):
-        await bot.send_message(chat_id=chat_id, text=tg_html(piece))
+    for piece in tg_markdown.render_html(text):
+        await bot.send_message(chat_id=chat_id, text=piece)
 
 
 async def send_voice_reply(bot: Bot, chat_id: int, text: str) -> bool:
     """Synthesize `text` via TTS, send as TG voice. Returns False on failure."""
-    if not text.strip() or not tts_service.enabled:
+    spoken = tg_markdown.to_plain(text)
+    if not spoken or not tts_service.enabled:
         return False
     _TTS_TMP_DIR.mkdir(parents=True, exist_ok=True)
     out_path = _TTS_TMP_DIR / f"tts_{chat_id}_{uuid4().hex}.ogg"
     try:
-        await tts_service.synthesize(text, out_path, audio_encoding=_VOICE_ENCODING)
+        await tts_service.synthesize(spoken, out_path, audio_encoding=_VOICE_ENCODING)
     except SpeechSynthesisError as exc:
         log.warning("tg_tts_failed", chat_id=chat_id, error=str(exc)[:200])
         return False
@@ -54,7 +55,7 @@ async def send_voice_reply(bot: Bot, chat_id: int, text: str) -> bool:
 
 async def send_attachment(bot: Bot, chat_id: int, attachment: Attachment) -> None:
     file = _resolve_input_file(attachment.source)
-    caption = tg_html(attachment.caption) if attachment.caption else None
+    caption = tg_markdown.escape(attachment.caption) if attachment.caption else None
     match attachment.kind:
         case AttachmentKind.IMAGE:
             await bot.send_photo(chat_id=chat_id, photo=file, caption=caption)

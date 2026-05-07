@@ -11,7 +11,7 @@ from app.db.base import SessionLocal
 from app.models import EventKind
 from app.services.docker.default import docker_control
 from app.services.events.default import event_service
-from app.tg.formatting import tg_html
+from app.tg.markdown import tg_markdown
 from app.tg.progress import CB_TURN_NEW, CB_TURN_STEER, CB_TURN_STOP
 from app.tg.sessions import ChatSessionStore
 from app.tg.turn import TurnRunner, cancel_turn
@@ -27,15 +27,17 @@ class TGHandlers:
         self._runner = runner
 
     async def on_start(self, message: Message) -> None:
-        await message.answer(
-            tg_html("Bot is running. Send text, photo, or voice — Codex will reply here."),
-        )
+        await message.answer(tg_markdown.escape(
+            "Bot is running. Send text, photo, or voice — Codex will reply here.",
+        ))
 
     async def on_reset(self, message: Message) -> None:
         if message.chat is None:
             return
         existed = await self._sessions.reset(message.chat.id)
-        await message.answer(tg_html("Session reset." if existed else "No active session."))
+        await message.answer(tg_markdown.escape(
+            "Session reset." if existed else "No active session.",
+        ))
 
     async def on_new(self, message: Message) -> None:
         """Start a new Codex thread without tearing down the WS session."""
@@ -43,7 +45,7 @@ class TGHandlers:
             return
         session = await self._sessions.get(message.chat.id)
         if session is None:
-            await message.answer(tg_html("New thread will open with the next message."))
+            await message.answer(tg_markdown.escape("New thread will open with the next message."))
             return
         await session.client.start_new_thread()
         async with SessionLocal() as db:
@@ -54,18 +56,18 @@ class TGHandlers:
                 user_id=session.db_user_id,
             )
             await db.commit()
-        await message.answer(tg_html("New thread started — context cleared."))
+        await message.answer(tg_markdown.escape("New thread started — context cleared."))
 
     async def on_stop(self, message: Message) -> None:
         if message.chat is None:
             return
         session = await self._sessions.get(message.chat.id)
         if session is None:
-            await message.answer(tg_html("No active turn to stop."))
+            await message.answer(tg_markdown.escape("No active turn to stop."))
             return
         cancelled = await cancel_turn(session)
         await message.answer(
-            tg_html("Turn interrupted." if cancelled else "No active turn to stop."),
+            tg_markdown.escape("Turn interrupted." if cancelled else "No active turn to stop."),
         )
 
     async def on_restart(self, message: Message) -> None:
@@ -73,7 +75,7 @@ class TGHandlers:
             "tg_restart_requested",
             user_id=message.from_user.id if message.from_user else None,
         )
-        await message.answer(tg_html("🔄 Перезапуск сервера..."))
+        await message.answer(tg_markdown.escape("🔄 Перезапуск сервера..."))
         asyncio.create_task(_restart_self())
 
     async def on_callback(self, query: CallbackQuery) -> None:
@@ -105,9 +107,9 @@ class TGHandlers:
                 return
             session.steer_pending = True
             await query.answer("Напиши доповнення наступним повідомленням")
-            await query.message.answer(
-                tg_html("✏️ Напиши що додати — наступне повідомлення піде у поточний turn"),
-            )
+            await query.message.answer(tg_markdown.escape(
+                "✏️ Напиши що додати — наступне повідомлення піде у поточний turn",
+            ))
         else:
             await query.answer()
 

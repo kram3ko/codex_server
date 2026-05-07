@@ -33,7 +33,7 @@ from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.stt.base import STTBackend
 from app.services.uploads.default import upload_service
-from app.tg.formatting import tg_html
+from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn, cleanup_attachments, prepare_turn
 from app.tg.output import send_attachment, send_text, send_voice_reply
 from app.tg.progress import TurnProgressReporter
@@ -115,7 +115,7 @@ class TurnRunner:
             return False
         ok = await session.client.steer(prepared.text)
         if not ok:
-            await message.answer(tg_html("Не вдалось додати — turn уже завершився"))
+            await message.answer(tg_markdown.escape("Не вдалось додати — turn уже завершився"))
             return False
         await self._persist_user_turn(session, prepared)
         return True
@@ -165,7 +165,9 @@ class TurnRunner:
                 )
                 with contextlib.suppress(Exception):
                     await session.client.interrupt()
-                await message.answer(tg_html("Codex не відповів вчасно — turn зупинено."))
+                await message.answer(tg_markdown.escape(
+                    "Codex не відповів вчасно — turn зупинено.",
+                ))
                 await self._emit_failure(
                     session,
                     code="turn_timeout",
@@ -182,7 +184,7 @@ class TurnRunner:
                     error=str(exc),
                     chat_id=message.chat.id,
                 )
-                await message.answer(tg_html(f"Помилка: {exc}"))
+                await message.answer(tg_markdown.escape(f"Помилка: {exc}"))
                 await self._emit_failure(session, exc_type=type(exc).__name__, detail=str(exc))
             finally:
                 if session.current_turn_task is current:
@@ -216,7 +218,7 @@ class TurnRunner:
                 case ErrorEvent(code=code, detail=detail):
                     progress.mark_outcome("failed")
                     await message.answer(
-                        tg_html(f"Codex error [{code}]: {detail or 'unknown error'}"),
+                        tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
                     )
                     await self._emit_failure(session, code=code, detail=detail)
                     return
@@ -271,7 +273,7 @@ class TurnRunner:
             text_len=len(prepared.text),
         )
         await message.answer(
-            tg_html(
+            tg_markdown.escape(
                 "Codex returned empty response. "
                 "Try adding a caption or send the image again.",
             ),
@@ -295,9 +297,9 @@ class TurnRunner:
         )
         tail = buffer.strip()
         if not tail and not attachments:
-            await message.answer(
-                tg_html("Codex stream dropped before any reply. Use /reset and try again."),
-            )
+            await message.answer(tg_markdown.escape(
+                "Codex stream dropped before any reply. Use /reset and try again.",
+            ))
             await self._emit_failure(session, code="stream_dropped", detail="no buffer")
             return
         await self._send_response(
@@ -306,7 +308,7 @@ class TurnRunner:
         )
         await self._persist_assistant_turn(session, tail, attachments, tool_calls, partial=True)
         await message.answer(
-            tg_html("⚠ Stream dropped before completion. Use /reset to reopen session."),
+            tg_markdown.escape("⚠ Stream dropped before completion. Use /reset to reopen session."),
         )
 
     @staticmethod
