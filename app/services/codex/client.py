@@ -143,13 +143,6 @@ class _BuiltinSpec(BaseModel):
         )
 
 
-# Tool labels (з `_BUILTINS.label`) які блокуємо для не-ADMIN юзерів. Все
-# інше (image_generation, image_view, web_search, mcp, dynamic*) гостям
-# дозволено. Match по label, не по item_type — щоб і generic toolName
-# з тим же ім'ям ловило (рідко, але буває).
-_GUEST_FORBIDDEN_TOOLS: frozenset[str] = frozenset({"shell", "file_change"})
-
-
 # Codex builtin item-types які surface'имо як pseudo-tools у progress'і.
 # Поля required у Rust (див. v2/item.rs) → юзаємо `item[...]` без fallback'а.
 # Решта camelCase variants (collabAgent…, enteredReviewMode…) — у _HIDDEN_ITEMS.
@@ -203,14 +196,12 @@ class CodexClient:
         initial_thread_id: str | None = None,
         on_thread_change: ThreadChangeCallback | None = None,
         reasoning_effort: str | None = None,
-        is_admin: bool = True,
     ) -> None:
         self._url = url
         self._cwd = cwd
         self._approval_policy = approval_policy
         self._sandbox = sandbox
         self._reasoning_effort = reasoning_effort
-        self._is_admin = is_admin
         self._transport = AppServerClient(url=url, request_timeout=request_timeout)
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
@@ -296,40 +287,12 @@ class CodexClient:
             event = _translate(note, accumulated)
             if event is None:
                 continue
-            # Guest guard: блокуємо БОТ `started` (preemptive interrupt) І
-            # `completed` (subprocess міг встигнути закінчити до interrupt'а
-            # за пару ms — щоб ні output ні attachments не leak'ало у чат).
-            if self._is_event_forbidden(event):
-                blocked_name = event.name  # type: ignore[union-attr]
-                log.warning(
-                    "codex_guest_tool_blocked",
-                    tool=blocked_name,
-                    phase="started" if isinstance(event, ToolCallEvent) else "completed",
-                    turn_id=self._current_turn_id,
-                )
-                await self.interrupt()
-                yield ErrorEvent(
-                    code="guest_tool_forbidden",
-                    detail=(
-                        f"Тулза `{blocked_name}` доступна тільки адміну. "
-                        "Спробуй сформулювати без правки коду / shell."
-                    ),
-                )
-                self._current_turn_id = None
-                return
             if isinstance(event, TokenEvent):
                 accumulated += event.delta
             yield event
             if isinstance(event, DoneEvent):
                 self._current_turn_id = None
                 return
-
-    def _is_event_forbidden(self, event: ChatEvent) -> bool:
-        if self._is_admin:
-            return False
-        if not isinstance(event, ToolCallEvent | ToolResultEvent):
-            return False
-        return event.name in _GUEST_FORBIDDEN_TOOLS
 
     async def interrupt(self) -> None:
         turn_id = self._current_turn_id

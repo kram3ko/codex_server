@@ -34,7 +34,6 @@ class ChatSession:
     client: CodexClient
     db_chat_id: int
     db_user_id: int
-    is_admin: bool = False
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     current_turn_task: asyncio.Task | None = None
     # Set by on_callback("turn:steer"); next user message goes to turn/steer
@@ -156,7 +155,6 @@ class ChatSessionStore:
             client=client,
             db_chat_id=db_chat_id,
             db_user_id=db_user_id,
-            is_admin=is_admin,
         )
 
     @staticmethod
@@ -210,8 +208,9 @@ class ChatSessionStore:
                 await chat_service.set_codex_thread_id(db, db_chat_id, new_thread_id)
                 await db.commit()
 
+        url = settings.CODEX_APP_SERVER_URL if is_admin else settings.CODEX_GUEST_APP_SERVER_URL
         client = CodexClient(
-            url=settings.CODEX_APP_SERVER_URL,
+            url=url,
             cwd=settings.CODEX_CWD,
             approval_policy=settings.CODEX_APPROVAL_POLICY,
             sandbox=settings.CODEX_SANDBOX,
@@ -219,7 +218,6 @@ class ChatSessionStore:
             initial_thread_id=initial_thread_id,
             on_thread_change=_persist_thread,
             reasoning_effort=settings.CODEX_REASONING_EFFORT,
-            is_admin=is_admin,
         )
         await client.connect()
         return client
