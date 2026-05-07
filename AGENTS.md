@@ -34,6 +34,8 @@ Reply in whatever language the user wrote in. Don't switch unless they do.
 - Default style: watercolor / soft, unless asked otherwise.
 - Save to `~/.codex/generated_images/` (server auto-picks for TG/MinIO).
 - End reply with: `![description](/home/codex/.codex/generated_images/…png)`.
+- `description` / caption — **same language as the user's request** (рос/укр/
+  англ — не дефолтити в англ). Та сама вимога, що в `## Language`.
 - Don't echo internal prompt fields (Use case / Asset type / Style / Subject /
   Composition) — one short sentence + image, that's it.
 
