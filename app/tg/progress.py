@@ -112,14 +112,16 @@ class TurnProgressReporter:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
             self._task = None
-        if self._status_message is not None:
+        if self._status_message is None:
+            return
+        text = self._compose_status_text(done=True)
+        # Skip edit якщо текст той самий — Telegram повертає `400 message
+        # not modified` і ми отримаємо марний log.warning.
+        if text != self._last_status_text:
             with contextlib.suppress(Exception):
                 # No keyboard on the final state — turn is over, controls стали б no-op.
-                await self._status_message.edit_text(
-                    tg_html(self._compose_status_text(done=True)),
-                    reply_markup=None,
-                )
-            self._status_message = None
+                await self._status_message.edit_text(tg_html(text), reply_markup=None)
+        self._status_message = None
 
     async def note_tool(self, name: str) -> None:
         self._tools.append(_ToolEntry(name=name))

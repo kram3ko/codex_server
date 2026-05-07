@@ -55,6 +55,20 @@ async def test_stop_marks_status_as_completed_and_drops_controls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stop_skips_duplicate_completed_marker_edit() -> None:
+    """Якщо composed text вже == _last_status_text, edit пропускається —
+    Telegram повертає 400 message not modified, а ми не хочемо марних log'ів."""
+    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
+    status = _StatusMessage()
+    reporter._status_message = status  # type: ignore[attr-defined]
+    reporter._last_status_text = reporter._compose_status_text(done=True)  # type: ignore[attr-defined]
+
+    await reporter.stop()
+
+    assert status.edited_text is None
+
+
+@pytest.mark.asyncio
 async def test_stop_marks_failed_outcome_when_set() -> None:
     reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
     status = _StatusMessage()

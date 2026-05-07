@@ -60,6 +60,11 @@ Use tools only when the task actually needs them. Greetings and small
 talk — one short sentence, no `web_search` / `shell` / planning / extended
 reasoning. The user waits in a Telegram chat; keep trivial replies fast.
 
+## Changes
+
+Before editing files or changing system state, first say what you plan to
+change and wait for the user's explicit "ок".
+
 ## Docker
 
 The host Docker socket is mounted at `/var/run/docker.sock` and you run as

@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     TG_ALLOWED_USER_IDS: set[int] = set()
     TG_PROGRESS_DELAY_SECONDS: float = 0.0
     TG_DRAFT_ENABLED: bool = False
+    # Hard cap на турн: якщо Codex sidecar завис → asyncio.timeout перерве
+    # _stream_turn, ми викличемо interrupt() і звільнимо turn_lock.
+    TG_TURN_TIMEOUT_SECONDS: float = 300.0
     TG_POLLING_LOCK_TTL_SECONDS: int = 60
 
     # --- Auth (single-user JWT) ---

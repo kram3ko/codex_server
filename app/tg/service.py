@@ -76,6 +76,7 @@ class TGBotService:
                 BotCommand(command="new", description="Новий thread (скинути контекст)"),
                 BotCommand(command="stop", description="Зупинити поточну відповідь"),
                 BotCommand(command="reset", description="Закрити сесію"),
+                BotCommand(command="restart", description="Перезапустити сервер"),
             ])
 
         dispatcher = self._build_dispatcher()

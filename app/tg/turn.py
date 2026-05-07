@@ -15,6 +15,7 @@ import contextlib
 import structlog
 from aiogram.types import Message
 
+from app.config import settings
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
 from app.services.bus.default import event_bus
@@ -152,7 +153,23 @@ class TurnRunner:
             current = asyncio.current_task()
             session.current_turn_task = current
             try:
-                await self._stream_turn(session, message, prepared, progress)
+                async with asyncio.timeout(settings.TG_TURN_TIMEOUT_SECONDS):
+                    await self._stream_turn(session, message, prepared, progress)
+            except TimeoutError:
+                progress.mark_outcome("failed")
+                log.error(
+                    "tg_codex_timeout",
+                    chat_id=message.chat.id,
+                    timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
+                )
+                with contextlib.suppress(Exception):
+                    await session.client.interrupt()
+                await message.answer(tg_html("Codex не відповів вчасно — turn зупинено."))
+                await self._emit_failure(
+                    session,
+                    code="turn_timeout",
+                    detail=f">{settings.TG_TURN_TIMEOUT_SECONDS}s",
+                )
             except asyncio.CancelledError:
                 progress.mark_outcome("interrupted")
                 raise
@@ -164,7 +181,7 @@ class TurnRunner:
                     error=str(exc),
                     chat_id=message.chat.id,
                 )
-                await message.answer(tg_html(f"{type(exc).__name__}: {exc}"))
+                await message.answer(tg_html(f"Помилка: {exc}"))
                 await self._emit_failure(session, exc_type=type(exc).__name__, detail=str(exc))
             finally:
                 if session.current_turn_task is current:
