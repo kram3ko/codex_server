@@ -50,9 +50,12 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     TG_BOT_TOKEN: str = ""
-    # Comma-separated whitelist of Telegram user ids. Empty set → bot accepts
-    # anyone (don't ship like that). Filter applied in tg/service.py.
-    TG_ALLOWED_USER_IDS: set[int] = set()
+    # Bootstrap-only: TG user_ids що отримають `UserRole.ADMIN` при першому
+    # створенні (`UserService.get_or_create_by_tg`). Існуючих юзерів promote'ить
+    # `ensure_admin_roles()` на startup. Дальше адмінів додавати через psql /
+    # майбутній RPC `UserService.PromoteToAdmin`. Empty set → нікого автоматично
+    # admin'ом не робимо.
+    TG_ADMIN_USER_IDS: set[int] = set()
     TG_PROGRESS_DELAY_SECONDS: float = 0.0
     TG_DRAFT_ENABLED: bool = False
     # Hard cap на турн: якщо Codex sidecar завис → asyncio.timeout перерве
@@ -68,7 +71,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_TTL_HOURS: int = 24
 
-    @field_validator("TG_ALLOWED_USER_IDS", mode="before")
+    @field_validator("TG_ADMIN_USER_IDS", mode="before")
     @classmethod
     def _split_user_ids(cls, value: object) -> object:
         if isinstance(value, int):

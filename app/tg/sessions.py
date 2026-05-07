@@ -21,6 +21,7 @@ import structlog
 
 from app.config import settings
 from app.db.base import SessionLocal
+from app.models import UserRole
 from app.services.chats.default import chat_service
 from app.services.codex.client import CodexClient
 from app.services.users.default import user_service
@@ -33,6 +34,7 @@ class ChatSession:
     client: CodexClient
     db_chat_id: int
     db_user_id: int
+    is_admin: bool = False
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     current_turn_task: asyncio.Task | None = None
     # Set by on_callback("turn:steer"); next user message goes to turn/steer
@@ -137,19 +139,25 @@ class ChatSessionStore:
         tg_chat_id: int,
         display_name: str | None,
     ) -> ChatSession:
-        db_user_id, db_chat_id, stored_thread_id = await self._bootstrap_db(
+        db_user_id, db_chat_id, stored_thread_id, is_admin = await self._bootstrap_db(
             tg_user_id, tg_chat_id, display_name,
         )
         initial = stored_thread_id if settings.CODEX_THREAD_REUSE_ENABLED else None
-        client = await self._open_codex_client(db_chat_id, initial)
+        client = await self._open_codex_client(db_chat_id, initial, is_admin=is_admin)
         log.info(
             "tg_session_opened",
             tg_chat_id=tg_chat_id,
             db_chat_id=db_chat_id,
             db_user_id=db_user_id,
+            is_admin=is_admin,
             rehydrated_thread=stored_thread_id is not None,
         )
-        return ChatSession(client=client, db_chat_id=db_chat_id, db_user_id=db_user_id)
+        return ChatSession(
+            client=client,
+            db_chat_id=db_chat_id,
+            db_user_id=db_user_id,
+            is_admin=is_admin,
+        )
 
     @staticmethod
     async def _close_one(session: ChatSession) -> None:
@@ -181,18 +189,21 @@ class ChatSessionStore:
         tg_user_id: int,
         tg_chat_id: int,
         display_name: str | None,
-    ) -> tuple[int, int, str | None]:
+    ) -> tuple[int, int, str | None, bool]:
         async with SessionLocal() as db:
             user = await user_service.get_or_create_by_tg(db, tg_user_id, display_name)
             chat = await chat_service.get_or_create_for_tg(db, user.id, tg_chat_id)
             stored_thread_id = chat.codex_thread_id
+            is_admin = user.role == UserRole.ADMIN
             await db.commit()
-            return user.id, chat.id, stored_thread_id
+            return user.id, chat.id, stored_thread_id, is_admin
 
     @staticmethod
     async def _open_codex_client(
         db_chat_id: int,
         initial_thread_id: str | None,
+        *,
+        is_admin: bool,
     ) -> CodexClient:
         async def _persist_thread(new_thread_id: str | None) -> None:
             async with SessionLocal() as db:
@@ -208,6 +219,7 @@ class ChatSessionStore:
             initial_thread_id=initial_thread_id,
             on_thread_change=_persist_thread,
             reasoning_effort=settings.CODEX_REASONING_EFFORT,
+            is_admin=is_admin,
         )
         await client.connect()
         return client

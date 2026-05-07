@@ -7,6 +7,14 @@
 import enum
 
 
+class UserRole(enum.StrEnum):
+    """Дві ролі: ADMIN — повний доступ (включаючи /restart, shell, file_change),
+    USER — все інше (image_gen, web_search, mcp, view). Default — USER."""
+
+    USER = "USER"
+    ADMIN = "ADMIN"
+
+
 class ChatSource(enum.StrEnum):
     WEB = "WEB"
     TELEGRAM = "TELEGRAM"
@@ -36,6 +44,7 @@ class EventKind(enum.StrEnum):
 
 # Postgres ENUM type names — single source of truth для Alembic міграцій.
 ENUM_NAMES = {
+    UserRole: "user_role",
     ChatSource: "chat_source",
     MessageRole: "message_role",
     EventKind: "event_kind",

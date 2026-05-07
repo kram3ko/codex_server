@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package codex.v1;
+
+import "google/protobuf/timestamp.proto";
+import "codex/v1/common.proto";
+
+// Upload = файл завантажений юзером (web drag-drop, TG attachment) АБО
+// згенерований Codex sidecar'ом (image_generation outputs). Binary живе
+// у S3/MinIO; тут лише метадата + s3_path для resolve.
+
+message Upload {
+  int64 id = 1;
+  optional int64 chat_id = 2;
+  string filename = 3;
+  string mime = 4;
+  int32 size = 5;
+  string s3_path = 6;
+  optional string extracted_text = 7;  // PDF/DOCX/MD витягнутий текст для context'у
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// Client-streaming chunk frame. Перший frame має `init`, наступні — `data`,
+// останній — `data` з порожнім bytes (signal end). Server тримає state per
+// stream (Connect-RPC stream context).
+message UploadChunk {
+  oneof payload {
+    UploadInit init = 1;
+    bytes data = 2;
+  }
+}
+
+message UploadInit {
+  optional int64 chat_id = 1;
+  string filename = 2;
+  string mime = 3;
+  int32 expected_size = 4;  // hint для valid'ації; 0 → unknown
+}
+
+message UploadResponse {
+  Upload upload = 1;
+  string presigned_url = 2;       // готова URL для render у UI без extra round-trip
+  int32 presigned_ttl_seconds = 3;
+}
+
+// Видати presigned URL для існуючого Upload (наприклад, для рендеру
+// `Attachment` у web — клієнт знає `source` з ChatEvent'а, шле сюди).
+message GetPresignedRequest {
+  oneof target {
+    int64 upload_id = 1;
+    string source = 2;  // S3 key чи повний URL з ChatEvent.Attachment.source
+  }
+  int32 ttl_seconds = 3;  // 0 → default 3600
+}
+
+message GetPresignedResponse {
+  string url = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message ListUploadsRequest {
+  optional int64 chat_id = 1;  // unset → всі юзера
+  Pagination pagination = 2;
+}
+
+message ListUploadsResponse {
+  repeated Upload uploads = 1;
+}
+
+message DeleteUploadRequest {
+  int64 upload_id = 1;
+}
+
+service UploadsService {
+  rpc Upload(stream UploadChunk) returns (UploadResponse);
+  rpc GetPresigned(GetPresignedRequest) returns (GetPresignedResponse);
+  rpc ListUploads(ListUploadsRequest) returns (ListUploadsResponse);
+  rpc DeleteUpload(DeleteUploadRequest) returns (Empty);
+}

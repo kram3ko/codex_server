@@ -1,9 +1,10 @@
-"""User CRUD. Tx boundary lives at the caller."""
+"""User CRUD + role bootstrap. Tx boundary lives at the caller."""
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User
+from app.config import settings
+from app.models import User, UserRole
 
 
 class UserService:
@@ -24,7 +25,12 @@ class UserService:
                 existing.display_name = display_name
                 await session.flush()
             return existing
-        user = User(tg_user_id=tg_user_id, display_name=display_name)
+        role = (
+            UserRole.ADMIN
+            if tg_user_id in settings.TG_ADMIN_USER_IDS
+            else UserRole.USER
+        )
+        user = User(tg_user_id=tg_user_id, display_name=display_name, role=role)
         session.add(user)
         await session.flush()
         return user
@@ -44,3 +50,21 @@ class UserService:
         session.add(user)
         await session.flush()
         return user
+
+    async def ensure_admin_roles(self, session: AsyncSession) -> int:
+        """Idempotent UPDATE: для кожного `tg_user_id` з env що уже є у БД як
+        USER → promote до ADMIN. Викликати на startup. Returns кількість
+        promoted рядків (для логування)."""
+        admins = settings.TG_ADMIN_USER_IDS
+        if not admins:
+            return 0
+        result = await session.execute(
+            update(User)
+            .where(
+                User.tg_user_id.in_(admins),
+                User.role == UserRole.USER,
+            )
+            .values(role=UserRole.ADMIN),
+        )
+        # SQLAlchemy AsyncSession.execute(update) returns CursorResult — rowcount є.
+        return result.rowcount or 0  # type: ignore[attr-defined]

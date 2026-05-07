@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package codex.v1;
+
+import "google/protobuf/timestamp.proto";
+import "codex/v1/common.proto";
+
+// Notes = персональна knowledge base. Postgres tsvector + GIN для full-text.
+// Серверний search через `websearch_to_tsquery('simple', :query)` + ts_rank.
+
+message Note {
+  int64 id = 1;
+  string title = 2;
+  string body = 3;
+  repeated string tags = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+// `id` unset → INSERT, set → UPDATE (upsert по id). Так клієнт юзає один
+// метод для save/edit замість двох роздільних.
+message SaveNoteRequest {
+  optional int64 id = 1;
+  string title = 2;
+  string body = 3;
+  repeated string tags = 4;
+}
+
+message GetNoteRequest {
+  int64 id = 1;
+}
+
+message SearchNotesRequest {
+  string query = 1;            // → websearch_to_tsquery('simple', :query)
+  repeated string tags = 2;    // AND-фільтр по тегах (опціонально)
+  Pagination pagination = 3;
+}
+
+message NoteHit {
+  Note note = 1;
+  float rank = 2;  // ts_rank, чим вище — тим релевантніше
+}
+
+message SearchNotesResponse {
+  repeated NoteHit hits = 1;
+}
+
+message ListNotesRequest {
+  repeated string tags = 1;
+  Pagination pagination = 2;
+}
+
+message ListNotesResponse {
+  repeated Note notes = 1;
+}
+
+message DeleteNoteRequest {
+  int64 id = 1;
+}
+
+service NotesService {
+  rpc SaveNote(SaveNoteRequest) returns (Note);
+  rpc GetNote(GetNoteRequest) returns (Note);
+  rpc SearchNotes(SearchNotesRequest) returns (SearchNotesResponse);
+  rpc ListNotes(ListNotesRequest) returns (ListNotesResponse);
+  rpc DeleteNote(DeleteNoteRequest) returns (Empty);
+}
