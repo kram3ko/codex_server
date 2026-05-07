@@ -58,9 +58,7 @@ services:
       - ./.codex:/home/codex/.codex:rw
       # Доступ до Docker daemon хоста для ручного reload контейнерів з Codex.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Workspace now mirrors the full repository root.
-      # Persona/instructions live у docker/codex/AGENTS.md; root має symlink
-      # на нього → Codex CLI читає AGENTS.md з workspace cwd автоматично.
+      # Workspace = весь репо. Admin Codex читає AGENTS.md з корня.
       - ./:/home/codex/workspace:rw
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4500/readyz || exit 1"]
@@ -79,6 +77,7 @@ services:
     volumes:
       - ./.codex-guest:/home/codex/.codex:rw
       - ./.codex/generated_images:/home/codex/.codex/generated_images:rw
+      - ./docker/codex/AGENTS-guest.md:/home/codex/workspace/AGENTS.md:ro
     expose:
       - "4500"
     healthcheck:
