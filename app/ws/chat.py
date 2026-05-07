@@ -36,6 +36,7 @@ from app.services.codex.events import (
     ErrorEvent,
     TokenEvent,
     ToolCallEvent,
+    ToolCallRecord,
     ToolResultEvent,
     event_to_frame,
 )
@@ -151,7 +152,7 @@ class ChatWebSocketHandler:
 
         final_text = ""
         streamed_text = ""
-        tool_calls: list[dict] = []
+        tool_calls: list[ToolCallRecord] = []
         attachments: list[Attachment] = []
         done_seen = False
         try:

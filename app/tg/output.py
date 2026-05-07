@@ -19,20 +19,13 @@ from app.services.codex.events import Attachment, AttachmentKind
 from app.services.tts.base import SpeechSynthesisError
 from app.services.tts.default import tts_service
 from app.tg.formatting import split_tg_message, tg_html
+from app.utils.paths import resolve_trusted_local_path
 
 log = structlog.get_logger(__name__)
 
 # OGG_OPUS — формат TG voice (`send_voice`); MP3 не підходить, треба send_audio.
 _VOICE_ENCODING = "OGG_OPUS"
 _TTS_TMP_DIR = Path(settings.CODEX_CWD) / "tg_uploads"
-
-_WORKSPACE_ROOT = Path(settings.CODEX_CWD).resolve()
-# Codex CLI пише image_generation у ~/.codex/generated_images/. Mountвимо
-# як trusted root окремо — інші системні шляхи блокуються.
-_TRUSTED_OUTPUT_ROOTS: tuple[Path, ...] = (
-    _WORKSPACE_ROOT,
-    Path("/home/codex/.codex/generated_images").resolve(),
-)
 
 
 async def send_text(bot: Bot, chat_id: int, text: str) -> None:
@@ -71,20 +64,6 @@ async def send_attachment(bot: Bot, chat_id: int, attachment: Attachment) -> Non
             await bot.send_document(chat_id=chat_id, document=file, caption=caption)
 
 
-def resolve_trusted_local_path(source: str) -> Path | None:
-    """Resolve a `source` to a local file under trusted roots, else None.
-    Remote URLs (http/https) and untrusted paths return None.
-    """
-    parsed = urlparse(source)
-    if parsed.scheme in {"http", "https"}:
-        return None
-    path = Path(source).expanduser()
-    path = (_WORKSPACE_ROOT / path).resolve() if not path.is_absolute() else path.resolve()
-    if not _is_inside_workspace(path) or not path.is_file():
-        return None
-    return path
-
-
 def _resolve_input_file(source: str) -> FSInputFile | URLInputFile:
     parsed = urlparse(source)
     if parsed.scheme in {"http", "https"}:
@@ -94,7 +73,3 @@ def _resolve_input_file(source: str) -> FSInputFile | URLInputFile:
         # Якщо тулза дала шлях поза trusted root — це баг, не фоллбек'имо.
         raise ValueError(f"untrusted attachment source: {source}")
     return FSInputFile(str(path))
-
-
-def _is_inside_workspace(path: Path) -> bool:
-    return any(path.is_relative_to(root) for root in _TRUSTED_OUTPUT_ROOTS)

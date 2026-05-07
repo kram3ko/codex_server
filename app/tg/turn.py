@@ -25,6 +25,7 @@ from app.services.codex.events import (
     ErrorEvent,
     TokenEvent,
     ToolCallEvent,
+    ToolCallRecord,
     ToolResultEvent,
 )
 from app.services.codex.history import messages_to_history_items
@@ -195,7 +196,7 @@ class TurnRunner:
         progress: TurnProgressReporter,
     ) -> None:
         buffer = ""
-        tool_calls: list[dict] = []
+        tool_calls: list[ToolCallRecord] = []
         attachments: list[Attachment] = []
         done_seen = False
 
@@ -246,7 +247,7 @@ class TurnRunner:
         prepared: PreparedTurn,
         final_text: str,
         attachments: list[Attachment],
-        tool_calls: list[dict],
+        tool_calls: list[ToolCallRecord],
         committed_prefix: str,
     ) -> None:
         if not final_text.strip() and not attachments:
@@ -284,7 +285,7 @@ class TurnRunner:
         prepared: PreparedTurn,
         buffer: str,
         attachments: list[Attachment],
-        tool_calls: list[dict],
+        tool_calls: list[ToolCallRecord],
         committed_prefix: str,
     ) -> None:
         log.warning(
@@ -339,7 +340,7 @@ class TurnRunner:
         session: ChatSession,
         final_text: str,
         attachments: list[Attachment],
-        tool_calls: list[dict],
+        tool_calls: list[ToolCallRecord],
         *,
         partial: bool = False,
     ) -> None:
@@ -408,7 +409,7 @@ async def cancel_turn(session: ChatSession) -> bool:
 
 
 def _build_assistant_meta(
-    tool_calls: list[dict],
+    tool_calls: list[ToolCallRecord],
     upload_ids: list[int],
     *,
     partial: bool,
@@ -425,7 +426,7 @@ def _build_assistant_meta(
 
 def _build_turn_payload(
     final_text: str,
-    tool_calls: list[dict],
+    tool_calls: list[ToolCallRecord],
     upload_ids: list[int],
     *,
     partial: bool,

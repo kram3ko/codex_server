@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Upload
 from app.services.codex.events import Attachment
 from app.services.storage.default import storage_service
-from app.tg.output import resolve_trusted_local_path
+from app.utils.paths import resolve_trusted_local_path
 
 log = structlog.get_logger(__name__)
 

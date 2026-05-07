@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.mcp.core import mcp_app
 from app.mcp.errors import ToolError
-from app.tg.output import resolve_trusted_local_path
+from app.utils.paths import resolve_trusted_local_path
 
 
 class _ShowImageBody(BaseModel):
@@ -48,7 +48,7 @@ class _ShowImageBody(BaseModel):
 )
 async def tool_show_image(body: _ShowImageBody) -> dict[str, Any]:
     local_path = resolve_trusted_local_path(body.path)
-    if local_path is None or not local_path.is_file():
+    if local_path is None:
         raise ToolError(
             f"file_not_found_or_untrusted: {body.path}",
             code="invalid_input",
