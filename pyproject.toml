@@ -5,7 +5,7 @@ description = "Personal Codex server: FastAPI + Telegram bot + web chat"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.136.1",
-    "uvicorn[standard]>=0.46.0",
+    "uvicorn>=0.46.0",
     "httpx>=0.28.1",
     "websockets>=16.0",
     "sqlalchemy[asyncio]>=2.0.49",

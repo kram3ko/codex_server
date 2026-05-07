@@ -4,6 +4,7 @@ services:
   codex-server:
     build: .
     container_name: codex-server
+    restart: unless-stopped
     ports:
       # 8000-8002 зайняті іншими контейнерами (SalesDep). Внутрішній порт 8000.
       - "8088:8000"
@@ -14,12 +15,13 @@ services:
       S3_ENDPOINT: http://minio:9000
       CODEX_APP_SERVER_URL: ws://codex-app-server:4500
     volumes:
-      - ./app:/app/app
       - ./:/home/codex/workspace:rw
       # Read-only mount Codex'ового generated_images — щоб FSInputFile
       # бачив файли що пише sidecar з image_generation tool.
       - ./.codex/generated_images:/home/codex/.codex/generated_images:ro
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      # Docker daemon API for /restart command (talks via httpx + UDS).
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       # Викликає наш HealthService.Check через Connect (як aism-py
       # використовує grpc_health.v1 у scripts/healthcheck.py).
@@ -47,10 +49,14 @@ services:
       context: .
       dockerfile: docker/codex/Dockerfile
     container_name: codex-app-server
+    restart: unless-stopped
+    user: "0:0"
     # No OPENAI_API_KEY — codex auth via mounted ./.codex/auth.json (subscription).
     volumes:
       # auth.json (для ChatGPT/Codex subscription mode, опційно)
       - ./.codex:/home/codex/.codex:rw
+      # Доступ до Docker daemon хоста для ручного reload контейнерів з Codex.
+      - /var/run/docker.sock:/var/run/docker.sock
       # Workspace now mirrors the full repository root.
       # Persona/instructions live у docker/codex/AGENTS.md; root має symlink
       # на нього → Codex CLI читає AGENTS.md з workspace cwd автоматично.
@@ -65,6 +71,7 @@ services:
   postgres:
     image: postgres:alpine
     container_name: codex-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: codex
       POSTGRES_PASSWORD: codex
@@ -84,6 +91,7 @@ services:
   redis:
     image: redis:8.6.2-alpine
     container_name: codex-redis
+    restart: unless-stopped
     command:
       - redis-server
       - --requirepass
@@ -101,6 +109,7 @@ services:
   minio:
     image: minio/minio:latest
     container_name: codex-minio
+    restart: unless-stopped
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # web console

@@ -56,3 +56,15 @@ def event_to_frame(ev: ChatEvent) -> dict[str, Any]:
     if tag is None:
         raise TypeError(f"unknown ChatEvent subtype: {type(ev).__name__}")
     return {"type": tag, **dataclasses.asdict(ev)}
+
+
+_TAG_TO_CLS: dict[str, type[ChatEvent]] = {tag: cls for cls, tag in _TYPE_TAG.items()}
+
+
+def frame_to_event(frame: dict[str, Any]) -> ChatEvent:
+    tag = frame.get("type")
+    cls = _TAG_TO_CLS.get(tag) if isinstance(tag, str) else None
+    if cls is None:
+        raise ValueError(f"unknown ChatEvent type tag: {tag!r}")
+    payload = {k: v for k, v in frame.items() if k != "type"}
+    return cls(**payload)

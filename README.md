@@ -28,7 +28,7 @@ Personal AI playground: FastAPI backend з Codex CLI app-server, Telegram bot
 cp .env.example .env             # заповнити токени
 docker-compose up                # FastAPI + Postgres + MinIO
 # або без docker:
-uv sync && uvicorn app.main:app --reload
+uv sync && uvicorn app.main:app
 ```
 
 ## Telegram bot
@@ -39,7 +39,7 @@ uv sync && uvicorn app.main:app --reload
 
 ```bash
 TG_BOT_TOKEN=...
-TG_ALLOWED_USER_ID=123456789
+TG_ALLOWED_USER_IDS=123456789
 ```
 
 У docker-compose FastAPI стартує polling автоматично. Пиши боту звичайний текст,

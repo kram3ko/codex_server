@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,8 +47,12 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     TG_BOT_TOKEN: str = ""
-    # None → bot answers anyone. Set to a numeric Telegram user id to restrict.
-    TG_ALLOWED_USER_ID: int | None = None
+    # Comma-separated whitelist of Telegram user ids. Empty set → bot accepts
+    # anyone (don't ship like that). Filter applied in tg/service.py.
+    TG_ALLOWED_USER_IDS: set[int] = set()
+    TG_PROGRESS_DELAY_SECONDS: float = 0.0
+    TG_DRAFT_ENABLED: bool = False
+    TG_POLLING_LOCK_TTL_SECONDS: int = 60
 
     # --- Auth (single-user JWT) ---
     # WEB_API_TOKEN — "пароль", який клієнт обмінює на короткоживучий JWT
@@ -56,6 +61,16 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "change-me-please"
     JWT_ALGORITHM: str = "HS256"
     JWT_TTL_HOURS: int = 24
+
+    @field_validator("TG_ALLOWED_USER_IDS", mode="before")
+    @classmethod
+    def _split_user_ids(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return set()
+            return {int(part) for part in stripped.split(",") if part.strip()}
+        return value
 
 
 settings = Settings()

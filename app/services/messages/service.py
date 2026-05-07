@@ -37,3 +37,17 @@ class MessageService:
             .limit(limit),
         )
         return list(rows.scalars())
+
+    async def list_recent(
+        self,
+        session: AsyncSession,
+        chat_id: int,
+        limit: int = 50,
+    ) -> list[Message]:
+        rows = await session.execute(
+            select(Message)
+            .where(Message.chat_id == chat_id)
+            .order_by(Message.id.desc())
+            .limit(limit),
+        )
+        return list(reversed(rows.scalars().all()))

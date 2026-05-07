@@ -13,12 +13,19 @@ from aiogram.types import Message
 
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
-from app.services.codex.events import DoneEvent, ErrorEvent, TokenEvent, ToolResultEvent
+from app.services.bus.default import event_bus
+from app.services.codex.events import (
+    DoneEvent,
+    ErrorEvent,
+    TokenEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+)
 from app.services.codex.history import messages_to_history_items
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.stt.base import STTBackend
-from app.services.uploads.persist import persist_codex_outputs
+from app.services.uploads.default import upload_service
 from app.tg.formatting import tg_html
 from app.tg.media import PreparedTurn, cleanup_attachments, prepare_turn
 from app.tg.output import AudioChunk, PhotoChunk, parse_final_text, send_chunks
@@ -72,7 +79,7 @@ class TurnRunner:
         progress = TurnProgressReporter(message)
         await progress.start()
         try:
-            await self._run_locked(session, message, prepared)
+            await self._run_locked(session, message, prepared, progress)
         finally:
             await progress.stop()
             await cleanup_attachments(prepared.cleanup_paths)
@@ -83,7 +90,7 @@ class TurnRunner:
         if session.client.current_thread_id is not None:
             return
         async with SessionLocal() as db:
-            recent = await message_service.list(
+            recent = await message_service.list_recent(
                 db, session.db_chat_id, limit=_HISTORY_REPLAY_LIMIT,
             )
         if recent and recent[-1].role is MessageRole.USER:
@@ -121,12 +128,13 @@ class TurnRunner:
         session: ChatSession,
         message: Message,
         prepared: PreparedTurn,
+        progress: TurnProgressReporter,
     ) -> None:
         async with session.turn_lock:
             current = asyncio.current_task()
             session.current_turn_task = current
             try:
-                await self._stream_turn(session, message, prepared)
+                await self._stream_turn(session, message, prepared, progress)
             except Exception as exc:  # noqa: BLE001
                 log.error(
                     "tg_codex_failed",
@@ -145,6 +153,7 @@ class TurnRunner:
         session: ChatSession,
         message: Message,
         prepared: PreparedTurn,
+        progress: TurnProgressReporter,
     ) -> None:
         buffer = ""
         tool_calls: list[dict] = []
@@ -155,12 +164,17 @@ class TurnRunner:
         done_seen = False
 
         async for ev in session.client.run_turn(prepared.text, attachments=prepared.attachments):
+            await event_bus.publish(session.db_chat_id, ev)
             match ev:
                 case TokenEvent(delta=delta):
                     buffer += delta
-                case ToolResultEvent(result=result):
+                    await progress.note_partial(buffer)
+                case ToolCallEvent(name=name):
+                    await progress.note_tool(name)
+                case ToolResultEvent(name=name, result=result, error=error):
                     if result:
                         tool_outputs.append(result)
+                    await progress.mark_tool_done(name, error=bool(error))
                 case ErrorEvent(code=code, detail=detail):
                     await message.answer(
                         tg_html(f"Codex error [{code}]: {detail or 'unknown error'}"),
@@ -253,7 +267,7 @@ class TurnRunner:
         tool_calls: list[dict],
     ) -> None:
         async with SessionLocal() as db:
-            upload_ids = await persist_codex_outputs(db, session.db_chat_id, final_text)
+            upload_ids = await upload_service.persist_codex_outputs(db, session.db_chat_id, final_text)
             meta: dict = {}
             if tool_calls:
                 meta["calls"] = tool_calls
@@ -282,7 +296,7 @@ class TurnRunner:
         tool_calls: list[dict],
     ) -> None:
         async with SessionLocal() as db:
-            upload_ids = await persist_codex_outputs(db, session.db_chat_id, final_text)
+            upload_ids = await upload_service.persist_codex_outputs(db, session.db_chat_id, final_text)
             meta: dict = {"partial": True}
             if tool_calls:
                 meta["calls"] = tool_calls

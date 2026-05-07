@@ -133,17 +133,27 @@ async def _send_audio(bot: Bot, chat_id: int, chunk: AudioChunk) -> None:
         await bot.send_message(chat_id=chat_id, text=tg_html(f"[audio failed] {chunk.src}: {exc}"))
 
 
+def resolve_trusted_local_path(src: str) -> Path | None:
+    """Resolve a markdown `src` to a local file under trusted roots, else None.
+    Remote URLs return None too — caller decides whether to wrap as URLInputFile.
+    """
+    parsed = urlparse(src)
+    if parsed.scheme in {"http", "https"}:
+        return None
+    path = Path(src).expanduser()
+    path = (_WORKSPACE_ROOT / path).resolve() if not path.is_absolute() else path.resolve()
+    if not _is_inside_workspace(path) or not path.is_file():
+        return None
+    return path
+
+
 def _resolve_input_file(src: str):
     parsed = urlparse(src)
     if parsed.scheme in {"http", "https"}:
         return URLInputFile(src)
-    path = Path(src).expanduser()
-    path = (_WORKSPACE_ROOT / path).resolve() if not path.is_absolute() else path.resolve()
-    if not _is_inside_workspace(path):
-        log.warning("tg_outgoing_path_outside_workspace", path=str(path))
-        return None
-    if not path.is_file():
-        log.warning("tg_outgoing_path_missing", path=str(path))
+    path = resolve_trusted_local_path(src)
+    if path is None:
+        log.warning("tg_outgoing_path_rejected", src=src)
         return None
     return FSInputFile(str(path))
 

@@ -18,6 +18,7 @@ Reconnect-семантика:
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+from enum import StrEnum
 from typing import Any
 from urllib.parse import urlparse
 
@@ -37,31 +38,53 @@ log = structlog.get_logger(__name__)
 
 _CLIENT_INFO = {"name": "codex-api", "version": "0.1.0"}
 
-_M_INITIALIZE = "initialize"
-_M_INITIALIZED = "initialized"
-_M_THREAD_START = "thread/start"
-_M_THREAD_RESUME = "thread/resume"
-_M_THREAD_INJECT_ITEMS = "thread/inject_items"
-_M_TURN_START = "turn/start"
-_M_TURN_STEER = "turn/steer"
-_M_TURN_INTERRUPT = "turn/interrupt"
 
-_N_TURN_STARTED = "turn/started"
-_N_TURN_COMPLETED = "turn/completed"
-_N_AGENT_MSG_DELTA = "item/agentMessage/delta"
-_N_ITEM_STARTED = "item/started"
-_N_ITEM_COMPLETED = "item/completed"
+class _Method(StrEnum):
+    INITIALIZE = "initialize"
+    INITIALIZED = "initialized"
+    THREAD_START = "thread/start"
+    THREAD_RESUME = "thread/resume"
+    THREAD_INJECT_ITEMS = "thread/inject_items"
+    TURN_START = "turn/start"
+    TURN_STEER = "turn/steer"
+    TURN_INTERRUPT = "turn/interrupt"
 
-# Codex CLI v2 ThreadItem types що НЕ є tool-call'ами (camelCase via serde).
-_NON_TOOL_ITEM_TYPES = frozenset({
-    "agentMessage",
-    "userMessage",
-    "hookPrompt",
-    "plan",
-    "reasoning",
-    "commandExecution",
-    "fileChange",
+
+class _Notif(StrEnum):
+    TURN_STARTED = "turn/started"
+    TURN_COMPLETED = "turn/completed"
+    AGENT_MSG_DELTA = "item/agentMessage/delta"
+    ITEM_STARTED = "item/started"
+    ITEM_COMPLETED = "item/completed"
+
+
+class _Item(StrEnum):
+    AGENT_MESSAGE = "agentMessage"
+    USER_MESSAGE = "userMessage"
+    HOOK_PROMPT = "hookPrompt"
+    PLAN = "plan"
+    REASONING = "reasoning"
+    COMMAND_EXECUTION = "commandExecution"
+    FILE_CHANGE = "fileChange"
+    DYNAMIC_TOOL_CALL = "dynamicToolCall"
+
+
+# Items that don't surface as progress events. agentMessage is hidden in the
+# `started` branch but extracted as a TokenEvent in `completed` (the long
+# fallback path when sidecar emits whole text instead of streaming deltas).
+_HIDDEN_ITEMS: frozenset[str] = frozenset({
+    _Item.USER_MESSAGE,
+    _Item.HOOK_PROMPT,
+    _Item.PLAN,
+    _Item.REASONING,
 })
+
+# Built-in Codex ops we surface as «pseudo-tools» in the progress bar so
+# the user sees activity instead of just "Thinking…".
+_BUILTIN_OP_LABELS: dict[str, str] = {
+    _Item.COMMAND_EXECUTION: "shell",
+    _Item.FILE_CHANGE: "file_change",
+}
 
 type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
 
@@ -125,7 +148,7 @@ class CodexClient:
 
     async def _try_resume(self, thread_id: str) -> bool:
         try:
-            await self._transport.request(_M_THREAD_RESUME, {"threadId": thread_id})
+            await self._transport.request(_Method.THREAD_RESUME, {"threadId": thread_id})
         except AppServerError as exc:
             if _is_thread_not_found(exc) or exc.code == -32601:
                 return False
@@ -135,7 +158,7 @@ class CodexClient:
 
     async def _open_new_thread(self) -> str:
         result = await self._transport.request(
-            _M_THREAD_START,
+            _Method.THREAD_START,
             {
                 "cwd": self._cwd,
                 "approvalPolicy": self._approval_policy,
@@ -164,7 +187,7 @@ class CodexClient:
 
         try:
             result = await self._transport.request(
-                _M_TURN_START,
+                _Method.TURN_START,
                 {"threadId": thread_id, "input": input_payload},
             )
         except AppServerError as exc:
@@ -190,7 +213,7 @@ class CodexClient:
         if not turn_id:
             return
         try:
-            await self._transport.request(_M_TURN_INTERRUPT, {"turnId": turn_id})
+            await self._transport.request(_Method.TURN_INTERRUPT, {"turnId": turn_id})
         except AppServerError as exc:
             if exc.code == -32601:
                 log.info("codex_interrupt_unsupported", turn_id=turn_id)
@@ -205,7 +228,7 @@ class CodexClient:
             return False
         try:
             await self._transport.request(
-                _M_TURN_STEER,
+                _Method.TURN_STEER,
                 {
                     "threadId": thread_id,
                     "input": [{"type": "text", "text": text}],
@@ -230,7 +253,7 @@ class CodexClient:
             return
         try:
             await self._transport.request(
-                _M_THREAD_INJECT_ITEMS,
+                _Method.THREAD_INJECT_ITEMS,
                 {"threadId": thread_id, "items": items},
             )
         except AppServerError as exc:
@@ -263,10 +286,10 @@ class CodexClient:
 
     async def _handshake(self) -> None:
         result = await self._transport.request(
-            _M_INITIALIZE,
+            _Method.INITIALIZE,
             {"clientInfo": _CLIENT_INFO, "capabilities": {}},
         )
-        await self._transport.notify(_M_INITIALIZED, {})
+        await self._transport.notify(_Method.INITIALIZED, {})
         self._initialized = True
         log.info(
             "codex_handshake_done",
@@ -301,6 +324,23 @@ class CodexClient:
                 new=new_thread_id,
                 error=str(exc),
             )
+
+
+def _builtin_op_args(item: dict[str, Any], item_type: str) -> dict[str, Any]:
+    if item_type == _Item.COMMAND_EXECUTION:
+        cmd = item.get("command") or item.get("commandLine") or ""
+        if isinstance(cmd, list):
+            cmd = " ".join(str(c) for c in cmd)
+        return {"command": str(cmd)}
+    if item_type == _Item.FILE_CHANGE:
+        return {"changes": item.get("changes") or []}
+    return {}
+
+
+def _builtin_op_result(item: dict[str, Any], item_type: str) -> str:
+    if item_type == _Item.COMMAND_EXECUTION:
+        return str(item.get("output") or item.get("stdout") or "")
+    return ""
 
 
 def _dynamic_tool_call_to_event(item: dict[str, Any]) -> ToolResultEvent:
@@ -345,45 +385,64 @@ def _extract_turn_id(result: Any) -> str | None:
 
 
 def _translate(note: Notification, accumulated: str) -> ChatEvent | None:
-    method = note.method
-    params = note.params
+    match note.method:
+        case _Notif.TURN_STARTED:
+            return None
+        case _Notif.AGENT_MSG_DELTA:
+            delta = note.params.get("delta", "")
+            return TokenEvent(delta=delta) if delta else None
+        case _Notif.ITEM_STARTED:
+            return _on_item_started(note.params.get("item") or {})
+        case _Notif.ITEM_COMPLETED:
+            return _on_item_completed(note.params.get("item") or {}, accumulated)
+        case _Notif.TURN_COMPLETED:
+            return DoneEvent(final_text=str(note.params.get("finalText") or accumulated))
+        case _:
+            return None
 
-    if method == _N_TURN_STARTED:
+
+def _on_item_started(item: dict[str, Any]) -> ChatEvent | None:
+    item_type = item.get("type") or ""
+    if item_type == _Item.AGENT_MESSAGE or item_type in _HIDDEN_ITEMS:
         return None
-
-    if method == _N_AGENT_MSG_DELTA:
-        delta = params.get("delta", "")
-        return TokenEvent(delta=delta) if delta else None
-
-    if method == _N_ITEM_STARTED:
-        item = params.get("item") or {}
-        if item.get("type") in _NON_TOOL_ITEM_TYPES:
-            return None
+    if item_type in _BUILTIN_OP_LABELS:
         return ToolCallEvent(
-            name=str(item.get("toolName", "")),
-            args=dict(item.get("arguments") or {}),
+            name=_BUILTIN_OP_LABELS[item_type],
+            args=_builtin_op_args(item, item_type),
         )
+    return ToolCallEvent(
+        name=str(item.get("toolName", "")),
+        args=dict(item.get("arguments") or {}),
+    )
 
-    if method == _N_ITEM_COMPLETED:
-        item = params.get("item") or {}
-        item_type = item.get("type")
-        # Codex може видати повний agent-message одним item замість серії
-        # `agentMessage/delta` — підхоплюємо як TokenEvent щоб накопичувач
-        # `accumulated` у run_turn зловив його у final_text.
-        if item_type == "agentMessage":
-            text = item.get("text") or ""
-            return TokenEvent(delta=text) if text else None
-        if item_type in _NON_TOOL_ITEM_TYPES:
-            return None
-        if item_type == "dynamicToolCall":
-            return _dynamic_tool_call_to_event(item)
+
+def _on_item_completed(item: dict[str, Any], accumulated: str) -> ChatEvent | None:
+    item_type = item.get("type") or ""
+    if item_type == _Item.AGENT_MESSAGE:
+        return _agent_message_to_token(item, accumulated)
+    if item_type in _HIDDEN_ITEMS:
+        return None
+    if item_type == _Item.DYNAMIC_TOOL_CALL:
+        return _dynamic_tool_call_to_event(item)
+    if item_type in _BUILTIN_OP_LABELS:
         return ToolResultEvent(
-            name=str(item.get("toolName", "")),
-            result=str(item.get("output", "")),
+            name=_BUILTIN_OP_LABELS[item_type],
+            result=_builtin_op_result(item, item_type),
             error=str(item["error"]) if item.get("error") else None,
         )
+    return ToolResultEvent(
+        name=str(item.get("toolName", "")),
+        result=str(item.get("output", "")),
+        error=str(item["error"]) if item.get("error") else None,
+    )
 
-    if method == _N_TURN_COMPLETED:
-        return DoneEvent(final_text=str(params.get("finalText") or accumulated))
 
-    return None
+def _agent_message_to_token(item: dict[str, Any], accumulated: str) -> ChatEvent | None:
+    # Sidecar may emit the whole agent-message as one item instead of streaming
+    # `agentMessage/delta`. Reconcile against `accumulated` to avoid double text.
+    text = item.get("text") or ""
+    if not text or accumulated.endswith(text):
+        return None
+    if text.startswith(accumulated):
+        return TokenEvent(delta=text[len(accumulated):])
+    return TokenEvent(delta=text)

@@ -1,10 +1,15 @@
 """Thin aiogram handlers — delegate to TurnRunner / ChatSessionStore."""
 
+import asyncio
+import os
+import signal
+
 import structlog
 from aiogram.types import CallbackQuery, Message
 
 from app.db.base import SessionLocal
 from app.models import EventKind
+from app.services.docker.default import docker_control
 from app.services.events.default import event_service
 from app.tg.formatting import tg_html
 from app.tg.progress import CB_TURN_NEW, CB_TURN_STEER, CB_TURN_STOP
@@ -12,6 +17,8 @@ from app.tg.sessions import ChatSessionStore
 from app.tg.turn import TurnRunner, cancel_turn
 
 log = structlog.get_logger(__name__)
+
+_SELF_CONTAINER_NAME = "codex-server"
 
 
 class TGHandlers:
@@ -60,6 +67,14 @@ class TGHandlers:
         await message.answer(
             tg_html("Turn interrupted." if cancelled else "No active turn to stop."),
         )
+
+    async def on_restart(self, message: Message) -> None:
+        log.warning(
+            "tg_restart_requested",
+            user_id=message.from_user.id if message.from_user else None,
+        )
+        await message.answer(tg_html("🔄 Перезапуск сервера..."))
+        asyncio.create_task(_restart_self())
 
     async def on_callback(self, query: CallbackQuery) -> None:
         if query.message is None or query.message.chat is None:
@@ -112,3 +127,13 @@ class TGHandlers:
             has_audio=bool(message.audio),
         )
         await self._runner.handle(message)
+
+
+async def _restart_self() -> None:
+    # Slight delay so the "Перезапуск..." message reaches Telegram before the
+    # container goes down.
+    await asyncio.sleep(0.3)
+    if await docker_control.restart_container(_SELF_CONTAINER_NAME):
+        return
+    log.warning("tg_restart_falling_back_to_sigterm")
+    os.kill(os.getpid(), signal.SIGTERM)

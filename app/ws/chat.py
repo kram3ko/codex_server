@@ -25,17 +25,21 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.config import settings
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
+from app.services.bus.default import event_bus
 from app.services.chats.default import chat_service
 from app.services.codex.client import CodexClient
 from app.services.codex.events import (
     DoneEvent,
     ErrorEvent,
+    TokenEvent,
     ToolCallEvent,
+    ToolResultEvent,
     event_to_frame,
 )
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.users.default import user_service
+from app.tg.output import AudioChunk, PhotoChunk, parse_final_text
 
 log = structlog.get_logger(__name__)
 
@@ -143,21 +147,31 @@ class ChatWebSocketHandler:
         await self._safe_send(ws, {"type": "chat", "chat_id": persisted_chat_id})
 
         final_text = ""
+        streamed_text = ""
         tool_calls: list[dict] = []
+        tool_outputs: list[str] = []
         done_seen = False
         try:
             async for ev in codex.run_turn(text):
-                if isinstance(ev, ToolCallEvent):
-                    tool_calls.append({"name": ev.name, "args": ev.args})
-                if isinstance(ev, ErrorEvent):
-                    await self._safe_send(ws, event_to_frame(ev))
-                    await self._emit_event(persisted_chat_id, user_pk, EventKind.TURN_FAILED,
-                                           {"code": ev.code, "detail": ev.detail})
-                    return
-                if isinstance(ev, DoneEvent):
-                    final_text = ev.final_text
-                    done_seen = True
-                    break
+                await event_bus.publish(persisted_chat_id, ev)
+                match ev:
+                    case TokenEvent(delta=delta):
+                        streamed_text += delta
+                    case ToolCallEvent(name=name, args=args):
+                        tool_calls.append({"name": name, "args": args})
+                    case ToolResultEvent(result=result) if result:
+                        tool_outputs.append(result)
+                    case ErrorEvent(code=code, detail=detail):
+                        await self._safe_send(ws, event_to_frame(ev))
+                        await self._emit_event(
+                            persisted_chat_id, user_pk, EventKind.TURN_FAILED,
+                            {"code": code, "detail": detail},
+                        )
+                        return
+                    case DoneEvent(final_text=ft):
+                        final_text = _compose_final_text(ft, tool_outputs)
+                        done_seen = True
+                        break
                 await self._safe_send(ws, event_to_frame(ev))
         except WebSocketDisconnect:
             raise
@@ -199,7 +213,11 @@ class ChatWebSocketHandler:
 
         await self._safe_send(
             ws,
-            {"type": "done", "chat_id": persisted_chat_id, "final_text": final_text},
+            {
+                "type": "done",
+                "chat_id": persisted_chat_id,
+                "final_text": _final_text_for_done_frame(final_text, streamed_text),
+            },
         )
 
     async def _resolve_web_user_pk(self) -> int:
@@ -234,3 +252,22 @@ class ChatWebSocketHandler:
 
 
 chat_ws_handler = ChatWebSocketHandler()
+
+
+def _compose_final_text(final_text: str, tool_outputs: list[str]) -> str:
+    tool_text = "\n\n".join(t for t in tool_outputs if t.strip())
+    if not final_text:
+        return tool_text
+    if not tool_text or _has_markdown_media(final_text) or not _has_markdown_media(tool_text):
+        return final_text
+    return f"{final_text.rstrip()}\n\n{tool_text}"
+
+
+def _final_text_for_done_frame(final_text: str, streamed_text: str) -> str:
+    if streamed_text and final_text == streamed_text:
+        return ""
+    return final_text
+
+
+def _has_markdown_media(text: str) -> bool:
+    return any(isinstance(c, (PhotoChunk, AudioChunk)) for c in parse_final_text(text))

@@ -332,16 +332,13 @@ pip-selfcheck.json
 *.sqlite
 *.sqlite3
 
-# Local uploads / scratch
-uploads/
-tmp/
+# Local uploads / scratch (root-only, otherwise collides with app/services/uploads)
+/uploads/
+/tmp/
 .scratch/
 
 # Local planning / spec docs (not for public repo)
 estimates/
-
-# Generated protobuf / Connect stubs — reproduce via ./scripts/gen-proto.sh
-app/grpc_generated/
 
 # Codex CLI auth / local workspace
 .codex/

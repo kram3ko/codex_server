@@ -12,6 +12,8 @@ RUN apk add --no-cache \
         coreutils \
         curl \
         wget \
+        docker-cli \
+        docker-cli-compose \
         git \
         grep \
         ripgrep \

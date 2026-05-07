@@ -77,6 +77,17 @@
 - pre-commit з ruff
 - Деплой: AWS Lightsail / Render
 
+### TODO
+
+- **Multi-bubble streaming в TG.** Зараз `progress.note_partial` truncate'ить
+  draft до останніх 4000 символів. Для довгих відповідей хвіст видно, початок
+  втрачається у preview (final response приходить повністю через
+  `_send_response → split_tg_message`, OK). Правильно: progress reporter
+  переймає володіння всім assistant text — committing bubbles при overflow,
+  TurnRunner після Done відправляє ТІЛЬКИ media chunks (Photo/Audio).
+  Edge case: коли Codex `final_text != buffer` (model cleaned up tokens)
+  потрібно UX-рішення про збереження стрімленого vs перезапис на final.
+
 ## Стан
 
 - Гілки: `main` (1 commit, ініт), `develop` (1 commit bootstrap, ~30 файлів зараз не закомічено).
