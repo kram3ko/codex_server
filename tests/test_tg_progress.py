@@ -43,6 +43,18 @@ async def test_stop_keeps_status_message_with_controls_as_completed_marker() -> 
     assert status.reply_markup is not None
 
 
+@pytest.mark.asyncio
+async def test_stop_skips_duplicate_completed_marker_edit() -> None:
+    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
+    status = _StatusMessage()
+    reporter._status_message = status  # type: ignore[attr-defined]
+    reporter._last_status_text = reporter._compose_status_text(done=True)  # type: ignore[attr-defined]
+
+    await reporter.stop()
+
+    assert status.edited_text is None
+
+
 def test_status_message_contains_progress_bar() -> None:
     reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
 

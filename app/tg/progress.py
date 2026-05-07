@@ -85,9 +85,13 @@ class TurnProgressReporter:
                 await self._task
             self._task = None
         if self._status_message is not None:
+            text = self._compose_status_text(done=True)
+            if text == self._last_status_text:
+                self._status_message = None
+                return
             with contextlib.suppress(Exception):
                 await self._status_message.edit_text(
-                    tg_html(self._compose_status_text(done=True)),
+                    tg_html(text),
                     reply_markup=_turn_controls(),
                 )
             self._status_message = None

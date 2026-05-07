@@ -11,6 +11,7 @@ import contextlib
 import structlog
 from aiogram.types import Message
 
+from app.config import settings
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
 from app.services.bus.default import event_bus
@@ -134,7 +135,22 @@ class TurnRunner:
             current = asyncio.current_task()
             session.current_turn_task = current
             try:
-                await self._stream_turn(session, message, prepared, progress)
+                async with asyncio.timeout(settings.TG_TURN_TIMEOUT_SECONDS):
+                    await self._stream_turn(session, message, prepared, progress)
+            except TimeoutError:
+                log.error(
+                    "tg_codex_timeout",
+                    chat_id=message.chat.id,
+                    timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
+                )
+                with contextlib.suppress(Exception):
+                    await session.client.interrupt()
+                await message.answer(tg_html("Codex не відповів вчасно — turn зупинено."))
+                await self._emit_failure(
+                    session,
+                    code="turn_timeout",
+                    detail=f">{settings.TG_TURN_TIMEOUT_SECONDS}s",
+                )
             except Exception as exc:  # noqa: BLE001
                 log.error(
                     "tg_codex_failed",
@@ -142,7 +158,7 @@ class TurnRunner:
                     error=str(exc),
                     chat_id=message.chat.id,
                 )
-                await message.answer(tg_html(f"{type(exc).__name__}: {exc}"))
+                await message.answer(tg_html(f"Помилка: {exc}"))
                 await self._emit_failure(session, exc_type=type(exc).__name__, detail=str(exc))
             finally:
                 if session.current_turn_task is current:
@@ -237,17 +253,13 @@ class TurnRunner:
             buffer_len=len(buffer),
         )
         tail = buffer.strip()
-        if tail:
-            await self._send_response(message, tail)
-            await self._persist_partial_assistant_turn(session, tail, tool_calls)
-            await message.answer(
-                tg_html("⚠ Stream dropped before completion. Use /reset to reopen session."),
-            )
+        if not tail:
+            await message.answer(tg_html("Codex закрив stream без відповіді."))
+            await self._emit_failure(session, code="stream_dropped", detail="no buffer")
             return
-        await message.answer(
-            tg_html("Codex stream dropped before any reply. Use /reset and try again."),
-        )
-        await self._emit_failure(session, code="stream_dropped", detail="no buffer")
+        await self._send_response(message, tail)
+        await self._persist_partial_assistant_turn(session, tail, tool_calls)
+        await message.answer(tg_html("⚠ Stream обірвався — текст може бути неповним."))
 
     @staticmethod
     async def _send_response(message: Message, final_text: str) -> None:

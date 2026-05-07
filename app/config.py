@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     TG_ALLOWED_USER_IDS: set[int] = set()
     TG_PROGRESS_DELAY_SECONDS: float = 0.0
     TG_DRAFT_ENABLED: bool = False
+    TG_TURN_TIMEOUT_SECONDS: float = 300.0
     TG_POLLING_LOCK_TTL_SECONDS: int = 60
 
     # --- Auth (single-user JWT) ---
@@ -64,13 +65,8 @@ class Settings(BaseSettings):
 
     @field_validator("TG_ALLOWED_USER_IDS", mode="before")
     @classmethod
-    def _split_user_ids(cls, value: object) -> object:
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return set()
-            return {int(part) for part in stripped.split(",") if part.strip()}
-        return value
+    def _wrap_single_int(cls, value: object) -> object:
+        return {value} if isinstance(value, int) else value
 
 
 settings = Settings()
