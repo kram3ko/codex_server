@@ -170,7 +170,10 @@ class TGBotService:
             if token is None:
                 return
             try:
-                renewed = await cache.eval(_RENEW_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token, ttl)
+                # redis-py overloads eval as sync|async — narrow for async client.
+                renewed = await cache.eval(  # type: ignore[misc]
+                    _RENEW_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token, ttl,
+                )
                 if not renewed:
                     log.error("tg_polling_lock_lost")
                     if self._dispatcher is not None:
@@ -190,7 +193,9 @@ class TGBotService:
         if token is None:
             return
         with contextlib.suppress(Exception):
-            await cache.eval(_RELEASE_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token)
+            await cache.eval(  # type: ignore[misc]
+                _RELEASE_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token,
+            )
         log.info("tg_polling_lock_released")
 
 

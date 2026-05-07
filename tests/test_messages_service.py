@@ -6,12 +6,20 @@ from app.models import Message
 from app.services.messages.service import MessageService
 
 
+class _Scalars:
+    def __init__(self, messages: list[Message]) -> None:
+        self._messages = messages
+
+    def all(self) -> list[Message]:
+        return self._messages
+
+
 class _Rows:
     def __init__(self, messages: list[Message]) -> None:
         self._messages = messages
 
-    def scalars(self) -> list[Message]:
-        return self._messages
+    def scalars(self) -> _Scalars:
+        return _Scalars(self._messages)
 
 
 class _Session:

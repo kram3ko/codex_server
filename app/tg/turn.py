@@ -267,7 +267,9 @@ class TurnRunner:
         tool_calls: list[dict],
     ) -> None:
         async with SessionLocal() as db:
-            upload_ids = await upload_service.persist_codex_outputs(db, session.db_chat_id, final_text)
+            upload_ids = await upload_service.persist_codex_outputs(
+                db, session.db_chat_id, final_text,
+            )
             meta: dict = {}
             if tool_calls:
                 meta["calls"] = tool_calls
@@ -296,7 +298,9 @@ class TurnRunner:
         tool_calls: list[dict],
     ) -> None:
         async with SessionLocal() as db:
-            upload_ids = await upload_service.persist_codex_outputs(db, session.db_chat_id, final_text)
+            upload_ids = await upload_service.persist_codex_outputs(
+                db, session.db_chat_id, final_text,
+            )
             meta: dict = {"partial": True}
             if tool_calls:
                 meta["calls"] = tool_calls

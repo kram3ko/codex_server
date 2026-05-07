@@ -9,7 +9,7 @@ class _OriginatorMessage:
     def __init__(self) -> None:
         self.answers: list[tuple[str, object | None]] = []
 
-    async def answer(self, text: str, *, reply_markup=None) -> "_StatusMessage":
+    async def answer(self, text: str, *, reply_markup=None) -> _StatusMessage:
         self.answers.append((text, reply_markup))
         return _StatusMessage()
 

@@ -44,7 +44,7 @@ class EventBus:
         try:
             yield self._iter(pubsub)
         finally:
-            with _suppress_redis_errors():
+            async with _suppress_redis_errors():
                 await pubsub.unsubscribe(channel)
                 await pubsub.aclose()
 
