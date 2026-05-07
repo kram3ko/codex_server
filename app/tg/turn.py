@@ -34,7 +34,7 @@ from app.services.stt.base import STTBackend
 from app.services.uploads.default import upload_service
 from app.tg.formatting import tg_html
 from app.tg.media import PreparedTurn, cleanup_attachments, prepare_turn
-from app.tg.output import send_attachment, send_text
+from app.tg.output import send_attachment, send_text, send_voice_reply
 from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSession, ChatSessionStore
 
@@ -204,7 +204,8 @@ class TurnRunner:
             match ev:
                 case TokenEvent(delta=delta):
                     buffer += delta
-                    await progress.note_partial(buffer)
+                    if not prepared.had_voice_input:
+                        await progress.note_partial(buffer)
                 case ToolCallEvent(name=name, args=args):
                     tool_calls.append({"name": name, "args": args})
                     await progress.note_tool(name)
@@ -234,7 +235,8 @@ class TurnRunner:
         if not done_seen:
             progress.mark_outcome("failed")
             await self._handle_dropped_stream(
-                session, message, buffer, attachments, tool_calls, progress.committed_text,
+                session, message, prepared, buffer, attachments, tool_calls,
+                progress.committed_text,
             )
 
     async def _handle_done(
@@ -250,7 +252,10 @@ class TurnRunner:
         if not final_text.strip() and not attachments:
             await self._handle_empty_response(session, message, prepared)
             return
-        await self._send_response(message, final_text, attachments, committed_prefix)
+        await self._send_response(
+            message, final_text, attachments, committed_prefix,
+            as_voice=prepared.had_voice_input,
+        )
         await self._persist_assistant_turn(session, final_text, attachments, tool_calls)
 
     async def _handle_empty_response(
@@ -276,6 +281,7 @@ class TurnRunner:
         self,
         session: ChatSession,
         message: Message,
+        prepared: PreparedTurn,
         buffer: str,
         attachments: list[Attachment],
         tool_calls: list[dict],
@@ -293,7 +299,10 @@ class TurnRunner:
             )
             await self._emit_failure(session, code="stream_dropped", detail="no buffer")
             return
-        await self._send_response(message, tail, attachments, committed_prefix)
+        await self._send_response(
+            message, tail, attachments, committed_prefix,
+            as_voice=prepared.had_voice_input,
+        )
         await self._persist_assistant_turn(session, tail, attachments, tool_calls, partial=True)
         await message.answer(
             tg_html("⚠ Stream dropped before completion. Use /reset to reopen session."),
@@ -305,13 +314,23 @@ class TurnRunner:
         final_text: str,
         attachments: list[Attachment],
         committed_prefix: str,
+        *,
+        as_voice: bool = False,
     ) -> None:
         # `handle()` уже відсік `message.chat is None`; bot гарантовано є, бо
         # це bot-handler. Assert замість if-return, щоб pyright звузив Optional.
         assert message.bot is not None and message.chat is not None
-        remainder = _strip_committed_prefix(final_text, committed_prefix)
-        if remainder:
-            await send_text(message.bot, message.chat.id, remainder)
+        # Voice mode шле повний текст одним голосовим (не shukamo "remainder", бо
+        # під час voice-input ми не стрімили бульбашки → committed_prefix=""). На
+        # помилку TTS — фолбек у текст, щоб юзер хоч щось отримав.
+        if as_voice and final_text.strip():
+            sent = await send_voice_reply(message.bot, message.chat.id, final_text)
+            if not sent:
+                await send_text(message.bot, message.chat.id, final_text)
+        else:
+            remainder = _strip_committed_prefix(final_text, committed_prefix)
+            if remainder:
+                await send_text(message.bot, message.chat.id, remainder)
         for attachment in attachments:
             await send_attachment(message.bot, message.chat.id, attachment)
 

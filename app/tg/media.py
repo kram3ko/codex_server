@@ -27,6 +27,7 @@ class PreparedTurn:
     text: str
     attachments: tuple[str, ...]
     cleanup_paths: tuple[str, ...]
+    had_voice_input: bool = False
 
 
 async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTurn:
@@ -38,6 +39,7 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
     text = (message.caption or message.text or "").strip()
     attachments: list[str] = []
     cleanup_paths: list[str] = []
+    had_voice_input = message.voice is not None
 
     try:
         if message.photo:
@@ -76,6 +78,7 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
         text=text,
         attachments=tuple(attachments),
         cleanup_paths=tuple(cleanup_paths),
+        had_voice_input=had_voice_input,
     )
 
 

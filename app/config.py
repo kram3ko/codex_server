@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     SPEECHMATICS_LANGUAGE: str = "auto"
     SPEECHMATICS_OPERATING_POINT: str = "enhanced"
 
+    # --- Text-to-speech (Google Cloud TTS, REST + API key) ---
+    GOOGLE_TTS_API_KEY: str = ""
+    GOOGLE_TTS_AUDIO_ENCODING: str = "MP3"
+
     # --- Postgres ---
     DATABASE_URL: str = "postgresql+asyncpg://codex:codex@localhost:5432/codex"
     DB_ECHO: bool = False
