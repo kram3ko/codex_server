@@ -64,17 +64,12 @@ class TurnRunner:
             display_name=message.from_user.full_name or message.from_user.username,
         )
 
-        if session.steer_pending:
-            session.steer_pending = False
-            if session.current_turn_task is not None and prepared.text:
-                ok = await session.client.steer(prepared.text)
-                if ok:
-                    await self._persist_user_turn(session, prepared)
-                    return
-                await message.answer(tg_html("Не вдалось додати — turn уже завершився"))
+        if session.consume_steer():
+            steered = await self._try_steer(session, message, prepared)
+            if steered:
+                return
 
         await self._persist_user_turn(session, prepared)
-        await self._seed_history_if_fresh_thread(session)
 
         progress = TurnProgressReporter(message)
         await progress.start()
@@ -100,6 +95,23 @@ class TurnRunner:
             return
         await session.client.ensure_thread()
         await session.client.inject_history(items)
+
+    async def _try_steer(
+        self,
+        session: ChatSession,
+        message: Message,
+        prepared: PreparedTurn,
+    ) -> bool:
+        """Append text to running turn. Returns True on success — caller skips
+        opening a new turn. False → fall through to a normal turn."""
+        if session.current_turn_task is None or not prepared.text:
+            return False
+        ok = await session.client.steer(prepared.text)
+        if not ok:
+            await message.answer(tg_html("Не вдалось додати — turn уже завершився"))
+            return False
+        await self._persist_user_turn(session, prepared)
+        return True
 
     async def _persist_user_turn(self, session: ChatSession, prepared: PreparedTurn) -> None:
         meta = {"attachments": list(prepared.attachments)} if prepared.attachments else None
@@ -131,11 +143,16 @@ class TurnRunner:
         progress: TurnProgressReporter,
     ) -> None:
         async with session.turn_lock:
+            await self._seed_history_if_fresh_thread(session)
             current = asyncio.current_task()
             session.current_turn_task = current
             try:
                 await self._stream_turn(session, message, prepared, progress)
+            except asyncio.CancelledError:
+                progress.mark_outcome("interrupted")
+                raise
             except Exception as exc:  # noqa: BLE001
+                progress.mark_outcome("failed")
                 log.error(
                     "tg_codex_failed",
                     exc_type=type(exc).__name__,
@@ -176,6 +193,7 @@ class TurnRunner:
                         tool_outputs.append(result)
                     await progress.mark_tool_done(name, error=bool(error))
                 case ErrorEvent(code=code, detail=detail):
+                    progress.mark_outcome("failed")
                     await message.answer(
                         tg_html(f"Codex error [{code}]: {detail or 'unknown error'}"),
                     )
@@ -191,11 +209,15 @@ class TurnRunner:
                         composed,
                         buffer,
                         tool_calls,
+                        progress.committed_text,
                     )
                     return
 
         if not done_seen:
-            await self._handle_dropped_stream(session, message, buffer, tool_calls)
+            progress.mark_outcome("failed")
+            await self._handle_dropped_stream(
+                session, message, buffer, tool_calls, progress.committed_text,
+            )
 
     async def _handle_done(
         self,
@@ -205,24 +227,34 @@ class TurnRunner:
         final_text: str,
         buffer: str,
         tool_calls: list[dict],
+        committed_prefix: str,
     ) -> None:
         if not final_text.strip():
-            log.warning(
-                "tg_empty_response",
-                attachments=len(prepared.attachments),
-                text_len=len(prepared.text),
-                buffer_len=len(buffer),
-            )
-            await message.answer(
-                tg_html(
-                    "Codex returned empty response. "
-                    "Try adding a caption or send the image again.",
-                ),
-            )
-            await self._emit_failure(session, code="empty_response", detail="no final text")
+            await self._handle_empty_response(session, message, prepared, buffer)
             return
-        await self._send_response(message, final_text)
+        await self._send_response(message, final_text, committed_prefix)
         await self._persist_assistant_turn(session, final_text, tool_calls)
+
+    async def _handle_empty_response(
+        self,
+        session: ChatSession,
+        message: Message,
+        prepared: PreparedTurn,
+        buffer: str,
+    ) -> None:
+        log.warning(
+            "tg_empty_response",
+            attachments=len(prepared.attachments),
+            text_len=len(prepared.text),
+            buffer_len=len(buffer),
+        )
+        await message.answer(
+            tg_html(
+                "Codex returned empty response. "
+                "Try adding a caption or send the image again.",
+            ),
+        )
+        await self._emit_failure(session, code="empty_response", detail="no final text")
 
     async def _handle_dropped_stream(
         self,
@@ -230,6 +262,7 @@ class TurnRunner:
         message: Message,
         buffer: str,
         tool_calls: list[dict],
+        committed_prefix: str,
     ) -> None:
         log.warning(
             "tg_codex_stream_ended_without_done",
@@ -237,23 +270,41 @@ class TurnRunner:
             buffer_len=len(buffer),
         )
         tail = buffer.strip()
-        if tail:
-            await self._send_response(message, tail)
-            await self._persist_partial_assistant_turn(session, tail, tool_calls)
-            await message.answer(
-                tg_html("⚠ Stream dropped before completion. Use /reset to reopen session."),
-            )
+        if not tail:
+            await self._announce_empty_drop(session, message)
             return
+        await self._send_response(message, tail, committed_prefix)
+        await self._persist_partial_assistant_turn(session, tail, tool_calls)
+        await message.answer(
+            tg_html("⚠ Stream dropped before completion. Use /reset to reopen session."),
+        )
+
+    async def _announce_empty_drop(
+        self,
+        session: ChatSession,
+        message: Message,
+    ) -> None:
         await message.answer(
             tg_html("Codex stream dropped before any reply. Use /reset and try again."),
         )
         await self._emit_failure(session, code="stream_dropped", detail="no buffer")
 
+    async def _send_response(
+        self,
+        message: Message,
+        final_text: str,
+        committed_prefix: str = "",
+    ) -> None:
+        remainder = _strip_committed_prefix(final_text, committed_prefix)
+        if not remainder:
+            return
+        await self._dispatch_chunks(message, remainder)
+
     @staticmethod
-    async def _send_response(message: Message, final_text: str) -> None:
-        chunks = parse_final_text(final_text)
+    async def _dispatch_chunks(message: Message, text: str) -> None:
+        chunks = parse_final_text(text)
         if not chunks:
-            await message.answer(tg_html(final_text))
+            await message.answer(tg_html(text))
             return
         bot = message.bot
         if bot is None or message.chat is None:
@@ -378,3 +429,18 @@ def _compose_final_text(final_text: str, buffer: str, tool_outputs: list[str]) -
 
 def _has_media(text: str) -> bool:
     return any(isinstance(chunk, (PhotoChunk, AudioChunk)) for chunk in parse_final_text(text))
+
+
+def _strip_committed_prefix(text: str, committed: str) -> str:
+    """Return only the portion of `text` that wasn't streamed yet as bubbles.
+
+    `committed` is a strict prefix of the assistant text we already published
+    via `progress.note_partial`. Sometimes the model rewrites earlier tokens
+    (rare with Codex но trapляється) — у такому разі prefix не співпаде, і ми
+    свідомо повертаємо повний `text`, нехай дублюється, ніж проковтнути final.
+    """
+    if not committed:
+        return text
+    if not text.startswith(committed):
+        return text
+    return text[len(committed):].lstrip()

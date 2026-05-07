@@ -15,11 +15,11 @@ services:
       S3_ENDPOINT: http://minio:9000
       CODEX_APP_SERVER_URL: ws://codex-app-server:4500
     volumes:
-      - ./:/home/codex/workspace:rw
-      # Read-only mount Codex'ового generated_images — щоб FSInputFile
-      # бачив файли що пише sidecar з image_generation tool.
+      # Source of truth — host repo as workspace AND uvicorn cwd.
+      - ./:/home/codex/workspace
+      # Codex sidecar's image_generation outputs (read by FSInputFile).
       - ./.codex/generated_images:/home/codex/.codex/generated_images:ro
-      # Docker daemon API for /restart command (talks via httpx + UDS).
+      # Docker daemon API for /restart (httpx + UDS).
       - /var/run/docker.sock:/var/run/docker.sock
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:

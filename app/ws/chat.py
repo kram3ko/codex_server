@@ -64,6 +64,7 @@ class ChatWebSocketHandler:
             approval_policy=settings.CODEX_APPROVAL_POLICY,
             sandbox=settings.CODEX_SANDBOX,
             request_timeout=settings.CODEX_REQUEST_TIMEOUT_SECONDS,
+            reasoning_effort=settings.CODEX_REASONING_EFFORT,
         )
         try:
             await codex.connect()

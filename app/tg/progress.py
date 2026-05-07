@@ -27,8 +27,23 @@ CB_TURN_STEER = "turn:steer"
 _ToolStatus = Literal["running", "done", "error"]
 _STATUS_ICONS: dict[_ToolStatus, str] = {"running": "🔧", "done": "✓", "error": "✗"}
 
+_TurnOutcome = Literal["success", "failed", "interrupted"]
+_OUTCOME_ICON: dict[_TurnOutcome, str] = {"success": "✓", "failed": "✗", "interrupted": "⏸"}
+_OUTCOME_LABEL: dict[_TurnOutcome, str] = {
+    "success": "Завершено",
+    "failed": "Помилка",
+    "interrupted": "Зупинено",
+}
+
 _DRAFT_TEXT_MAX = 4000
 _PROGRESS_BAR_WIDTH = 12
+
+# Multi-bubble streaming: чим більший chunk — тим менше edit'ів, тим менше
+# ratelimit-ризику. ~180 char-chunks з ≥1.2s паузою = ~50/min worst case,
+# Telegram per-chat send limit ≈ 30/min, тому throttle 1.2s — захист.
+_STREAM_MIN_CHARS = 180
+_STREAM_BUBBLE_MAX = 3500
+_STREAM_THROTTLE_S = 1.2
 
 
 @dataclass(slots=True)
@@ -71,9 +86,22 @@ class TurnProgressReporter:
         self._last_draft_at: float = 0.0
         self._status_message: Message | None = None
         self._last_status_text: str = ""
+        self._outcome: _TurnOutcome = "success"
+        self._committed_text: str = ""
+        self._stream_throttle_at: float = 0.0
         self._draft_lock = asyncio.Lock()
         self._status_lock = asyncio.Lock()
+        self._stream_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
+
+    @property
+    def committed_text(self) -> str:
+        """Text already published as separate bubbles via `note_partial`."""
+        return self._committed_text
+
+    def mark_outcome(self, outcome: _TurnOutcome) -> None:
+        """Caller signals final state; reflected у stop()'s edit."""
+        self._outcome = outcome
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="tg_turn_progress")
@@ -86,9 +114,10 @@ class TurnProgressReporter:
             self._task = None
         if self._status_message is not None:
             with contextlib.suppress(Exception):
+                # No keyboard on the final state — turn is over, controls стали б no-op.
                 await self._status_message.edit_text(
                     tg_html(self._compose_status_text(done=True)),
-                    reply_markup=_turn_controls(),
+                    reply_markup=None,
                 )
             self._status_message = None
 
@@ -106,10 +135,37 @@ class TurnProgressReporter:
         await self._render_draft(force=True)
 
     async def note_partial(self, full_text: str) -> None:
-        # Stub for future multi-bubble streaming (PLAN.md). Final text is
-        # delivered via send_chunks at end-of-turn; partial buffer would
-        # truncate prematurely here.
-        return
+        """Multi-bubble streaming: commit `full_text` tail as standalone TG
+        bubbles when it grows past the threshold and throttle window passes.
+
+        Caller stores the cumulative buffer; we publish only the un-emitted
+        tail и tracking `_committed_text` so `TurnRunner` can deduplicate
+        when the final answer arrives.
+        """
+        if not full_text:
+            return
+        bot = self._message.bot
+        if bot is None or self._message.chat is None:
+            return
+        async with self._stream_lock:
+            now = time.monotonic()
+            if now - self._stream_throttle_at < _STREAM_THROTTLE_S:
+                return
+            tail = full_text[len(self._committed_text):]
+            if len(tail) < _STREAM_MIN_CHARS:
+                return
+            cut = _find_stream_split(tail)
+            raw_chunk = tail[:cut]
+            visible = raw_chunk.strip()
+            if not visible:
+                return
+            try:
+                await self._message.answer(tg_html(visible))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("tg_stream_chunk_failed", error=str(exc))
+                return
+            self._committed_text += raw_chunk
+            self._stream_throttle_at = now
 
     async def _run(self) -> None:
         try:
@@ -153,11 +209,14 @@ class TurnProgressReporter:
 
     def _compose_status_text(self, *, done: bool = False) -> str:
         elapsed = int(time.monotonic() - self._started_at)
-        icon = "✓" if done else "⏳"
-        label = "Завершено" if done else "Thinking…"
+        if done:
+            icon = _OUTCOME_ICON[self._outcome]
+            label = _OUTCOME_LABEL[self._outcome]
+        else:
+            icon = "⏳"
+            label = "Thinking…"
         lines = [f"{icon} {label} {elapsed}s", _progress_bar(elapsed, done=done)]
-        for entry in self._tools:
-            lines.append(f"{_STATUS_ICONS[entry.status]} {entry.name}")
+        lines.extend(f"{_STATUS_ICONS[entry.status]} {entry.name}" for entry in self._tools)
         return "\n".join(lines)
 
     async def _render_draft(self, *, force: bool = False) -> None:
@@ -193,6 +252,18 @@ class TurnProgressReporter:
                 f"{_STATUS_ICONS[entry.status]} {entry.name}" for entry in self._tools
             )
         return ""
+
+
+def _find_stream_split(tail: str) -> int:
+    """Pick a natural break inside the first `_STREAM_BUBBLE_MAX` chars."""
+    if len(tail) <= _STREAM_BUBBLE_MAX:
+        return len(tail)
+    window = tail[:_STREAM_BUBBLE_MAX]
+    for sep in ("\n\n", "\n", ". ", " "):
+        idx = window.rfind(sep)
+        if idx >= _STREAM_MIN_CHARS:
+            return idx + len(sep)
+    return _STREAM_BUBBLE_MAX
 
 
 def _progress_bar(elapsed: int, *, done: bool = False) -> str:

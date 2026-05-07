@@ -37,7 +37,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHON_GIL=0 \
     PATH=/app/.venv/bin:$PATH
 
-WORKDIR /app
+# Runtime cwd = workspace (host repo mounts here); Codex CLI sidecar
+# uses the same path so both processes see one source of truth.
+WORKDIR /home/codex/workspace
 COPY alembic.ini ./
 COPY migrations/ ./migrations/
 COPY app/ ./app/

@@ -29,8 +29,12 @@ class EventBus:
         return f"chat:{chat_id}:events"
 
     async def publish(self, chat_id: int, event: ChatEvent) -> None:
+        """Best-effort fan-out. Bus failures must not poison the turn."""
         frame = event_to_frame(event)
-        await self._redis.publish(self.channel_for(chat_id), json.dumps(frame))
+        try:
+            await self._redis.publish(self.channel_for(chat_id), json.dumps(frame))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("bus_publish_failed", chat_id=chat_id, error=str(exc))
 
     @asynccontextmanager
     async def subscribe(self, chat_id: int) -> AsyncIterator[AsyncIterator[ChatEvent]]:

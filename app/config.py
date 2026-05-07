@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Disable якщо побачимо проблеми (silent-finalization тощо) — кожен turn
     # тоді відкриватиме fresh thread.
     CODEX_THREAD_REUSE_ENABLED: bool = True
+    # Reasoning effort на кожен turn. Enum: none/minimal/low/medium/high/xhigh.
+    # Default `medium` — Codex CLI baseline. Override через env коли треба.
+    CODEX_REASONING_EFFORT: str = "medium"
 
     # --- Speech-to-text (Speechmatics batch v2) ---
     # `language='auto'` triggers Speechmatics Language Identification.
@@ -65,6 +68,8 @@ class Settings(BaseSettings):
     @field_validator("TG_ALLOWED_USER_IDS", mode="before")
     @classmethod
     def _split_user_ids(cls, value: object) -> object:
+        if isinstance(value, int):
+            return {value}
         if isinstance(value, str):
             stripped = value.strip()
             if not stripped:

@@ -101,11 +101,13 @@ class CodexClient:
         request_timeout: float = 60.0,
         initial_thread_id: str | None = None,
         on_thread_change: ThreadChangeCallback | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self._url = url
         self._cwd = cwd
         self._approval_policy = approval_policy
         self._sandbox = sandbox
+        self._reasoning_effort = reasoning_effort
         self._transport = AppServerClient(url=url, request_timeout=request_timeout)
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
@@ -182,16 +184,10 @@ class CodexClient:
         attachments: tuple[str, ...] = (),
     ) -> AsyncIterator[ChatEvent]:
         await self._ensure_alive()
-        thread_id = await self.ensure_thread()
         input_payload = self._build_input(text, attachments)
-
-        try:
-            result = await self._transport.request(
-                _Method.TURN_START,
-                {"threadId": thread_id, "input": input_payload},
-            )
-        except AppServerError as exc:
-            yield ErrorEvent(code="codex_error", detail=str(exc))
+        result = await self._begin_turn_with_retry(input_payload)
+        if isinstance(result, ErrorEvent):
+            yield result
             return
 
         self._current_turn_id = _extract_turn_id(result)
@@ -272,6 +268,47 @@ class CodexClient:
 
     async def close(self) -> None:
         await self._transport.close()
+
+    async def _begin_turn_with_retry(
+        self,
+        input_payload: list[dict[str, Any]],
+    ) -> dict[str, Any] | ErrorEvent:
+        """One optimistic turn/start; on stale-thread → drop cache + retry once."""
+        thread_id = await self.ensure_thread()
+        try:
+            return await self._transport.request(
+                _Method.TURN_START,
+                self._build_turn_params(thread_id, input_payload),
+            )
+        except AppServerError as exc:
+            if not _is_thread_not_found(exc):
+                return ErrorEvent(code="codex_error", detail=str(exc))
+        log.info("codex_thread_stale_retrying", stale_thread_id=thread_id)
+        await self._invalidate_thread()
+        thread_id = await self.ensure_thread()
+        try:
+            return await self._transport.request(
+                _Method.TURN_START,
+                self._build_turn_params(thread_id, input_payload),
+            )
+        except AppServerError as exc:
+            return ErrorEvent(code="codex_error", detail=str(exc))
+
+    async def _invalidate_thread(self) -> None:
+        self._thread_id = None
+        self._thread_resumed_or_started = False
+        self._current_turn_id = None
+        await self._emit_thread_change(None)
+
+    def _build_turn_params(
+        self,
+        thread_id: str,
+        input_payload: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"threadId": thread_id, "input": input_payload}
+        if self._reasoning_effort:
+            params["effort"] = self._reasoning_effort
+        return params
 
     @staticmethod
     def _build_input(text: str, attachments: tuple[str, ...]) -> list[dict[str, Any]]:

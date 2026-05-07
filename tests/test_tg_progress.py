@@ -3,8 +3,18 @@ import pytest
 from app.tg.progress import TurnProgressReporter
 
 
+class _StubChat:
+    id = 1
+
+
+class _StubBot:
+    pass
+
+
 class _OriginatorMessage:
     message_id = 42
+    bot = _StubBot()
+    chat = _StubChat()
 
     def __init__(self) -> None:
         self.answers: list[tuple[str, object | None]] = []
@@ -29,7 +39,7 @@ class _StatusMessage:
 
 
 @pytest.mark.asyncio
-async def test_stop_keeps_status_message_with_controls_as_completed_marker() -> None:
+async def test_stop_marks_status_as_completed_and_drops_controls() -> None:
     reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
     status = _StatusMessage()
     reporter._status_message = status  # type: ignore[attr-defined]
@@ -40,7 +50,22 @@ async def test_stop_keeps_status_message_with_controls_as_completed_marker() -> 
     assert status.edited_text is not None
     assert status.edited_text.startswith("✓ Завершено")
     assert "▓▓▓▓▓▓▓▓▓▓▓▓" in status.edited_text
-    assert status.reply_markup is not None
+    # Controls must be cleared after the turn — pressing them would be a no-op.
+    assert status.reply_markup is None
+
+
+@pytest.mark.asyncio
+async def test_stop_marks_failed_outcome_when_set() -> None:
+    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
+    status = _StatusMessage()
+    reporter._status_message = status  # type: ignore[attr-defined]
+    reporter.mark_outcome("failed")
+
+    await reporter.stop()
+
+    assert status.edited_text is not None
+    assert status.edited_text.startswith("✗ Помилка")
+    assert status.reply_markup is None
 
 
 def test_status_message_contains_progress_bar() -> None:
@@ -65,13 +90,34 @@ async def test_refresh_status_creates_message_without_tools() -> None:
 
 
 @pytest.mark.asyncio
-async def test_partial_text_is_not_rendered_as_draft() -> None:
-    reporter = TurnProgressReporter(
-        _OriginatorMessage(),  # type: ignore[arg-type]
-        draft_enabled=True,
-    )
+async def test_note_partial_holds_back_short_buffer() -> None:
+    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
+    short = "теж замало щоб публікувати окремою бульбашкою"
 
-    await reporter.note_partial("streamed assistant text")
+    await reporter.note_partial(short)
 
-    assert reporter._compose_draft_text() == ""  # type: ignore[attr-defined]
-    assert reporter._last_draft_text == ""  # type: ignore[attr-defined]
+    assert reporter.committed_text == ""
+
+
+@pytest.mark.asyncio
+async def test_note_partial_publishes_chunk_when_buffer_grows_past_threshold() -> None:
+    originator = _OriginatorMessage()
+    reporter = TurnProgressReporter(originator)  # type: ignore[arg-type]
+    chunk = "Привіт. " * 40  # > _STREAM_MIN_CHARS
+
+    await reporter.note_partial(chunk)
+
+    assert len(originator.answers) == 1
+    assert reporter.committed_text.startswith(chunk[:50])
+
+
+@pytest.mark.asyncio
+async def test_note_partial_throttles_consecutive_calls() -> None:
+    originator = _OriginatorMessage()
+    reporter = TurnProgressReporter(originator)  # type: ignore[arg-type]
+    big = "Привіт. " * 40
+
+    await reporter.note_partial(big)
+    await reporter.note_partial(big + "ще трошки тексту, але одразу після першого виклику")
+
+    assert len(originator.answers) == 1, "second call must hit throttle window"
