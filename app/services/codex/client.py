@@ -22,6 +22,7 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlparse
 
+import orjson
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -108,7 +109,53 @@ def _image_attachment(source: str, caption: str = "") -> tuple[Attachment, ...]:
     return (Attachment(kind=AttachmentKind.IMAGE, source=source, caption=caption),)
 
 
+def _mcp_attachments(item: dict[str, Any]) -> tuple[Attachment, ...]:
+    """Витягти `Attachment` з MCP-результату.
+
+    fastapi-mcp серіалізує наш FastAPI return-dict як один text-content
+    блок (`{"type": "text", "text": "<json>"}`). Парсимо JSON, шукаємо `path`
+    + опціональний `caption`. Path-валідацію довіряємо тулі (`show_image`
+    перевіряє trusted root); pipeline далі сам через
+    `upload_service.persist_attachments` відсіє все що не під trusted root.
+
+    Інші тули (без `path` у відповіді) → пуста tuple, behaviour не змінюється.
+    """
+    result = item.get("result")
+    if not isinstance(result, dict):
+        return ()
+    for block in result.get("content") or []:
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        text = block.get("text") or ""
+        try:
+            data = orjson.loads(text)
+        except orjson.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        path = data.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        caption = data.get("caption")
+        return _image_attachment(path, caption if isinstance(caption, str) else "")
+    return ()
+
+
 type _ItemExtractor[T] = Callable[[dict[str, Any]], T]
+type _LabelGetter = str | _ItemExtractor[str]
+
+
+# Optional UI-label override per MCP tool (operation_id → human label). Empty
+# dict ⇒ label == operation_id raw — додавати рядки сюди коли захочеш
+# локалізації або емодзі-префіксу для прогрес-бульбашки. Унікальний source of
+# truth — `_mcp_label` нижче.
+_MCP_TOOL_LABELS: dict[str, str] = {}
+
+
+def _mcp_label(item: dict[str, Any]) -> str:
+    """MCP item → label: friendly override якщо є, інакше operation_id."""
+    tool = item.get("tool") or "mcp"
+    return _MCP_TOOL_LABELS.get(tool, tool)
 
 
 class _BuiltinSpec(BaseModel):
@@ -117,7 +164,12 @@ class _BuiltinSpec(BaseModel):
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-    label: str = Field(description="UI-label для progress бара (короткий tool-name).")
+    label: _LabelGetter = Field(
+        description=(
+            "UI-label. Статичний str для билт-інів (`shell`, `image_generation`),"
+            " або callable(item)→str для динамічних (MCP — лейбл з operation_id)."
+        ),
+    )
     args: _ItemExtractor[dict[str, Any]] = Field(
         default=lambda _: {},
         description="Extract args dict з raw item payload для ToolCallEvent.args.",
@@ -131,12 +183,15 @@ class _BuiltinSpec(BaseModel):
         description="Extract структурні media-артефакти для ToolResultEvent.attachments.",
     )
 
+    def _resolve_label(self, item: dict[str, Any]) -> str:
+        return self.label(item) if callable(self.label) else self.label
+
     def to_started(self, item: dict[str, Any]) -> ToolCallEvent:
-        return ToolCallEvent(name=self.label, args=self.args(item))
+        return ToolCallEvent(name=self._resolve_label(item), args=self.args(item))
 
     def to_completed(self, item: dict[str, Any]) -> ToolResultEvent:
         return ToolResultEvent(
-            name=self.label,
+            name=self._resolve_label(item),
             text=self.text(item),
             attachments=self.attachments(item),
             error=item.get("error"),
@@ -161,15 +216,19 @@ _BUILTINS: dict[str, _BuiltinSpec] = {
         args=lambda item: {"query": item["query"]},
     ),
     _Item.MCP_TOOL_CALL: _BuiltinSpec(
-        label="mcp",
+        label=_mcp_label,
         args=lambda item: {"server": item["server"], "tool": item["tool"]},
+        attachments=_mcp_attachments,
     ),
     _Item.IMAGE_GENERATION: _BuiltinSpec(
         label="image_generation",
+        # `revisedPrompt` від OpenAI Image API завжди англ — тримаємо у args
+        # для меми/трейсу, але НЕ робимо з нього TG caption: модель пише власну
+        # відповідь у мові юзера окремою бульбашкою перед фото.
         args=lambda item: {"prompt": item.get("revisedPrompt", "")},
         text=lambda item: item.get("revisedPrompt", ""),
         attachments=lambda item: (
-            _image_attachment(item["savedPath"], item.get("revisedPrompt", ""))
+            _image_attachment(item["savedPath"], "")
             if item.get("savedPath") else ()
         ),
     ),

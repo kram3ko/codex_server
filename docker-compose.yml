@@ -53,6 +53,10 @@ services:
     restart: unless-stopped
     user: "0:0"
     # No OPENAI_API_KEY — codex auth via mounted ./.codex/auth.json (subscription).
+    environment:
+      # Bearer для виклику нашого MCP endpoint'у на codex-server. Той самий
+      # токен має бути в codex-server (через .env → settings.MCP_CALLBACK_TOKEN).
+      MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
     volumes:
       # auth.json (для ChatGPT/Codex subscription mode, опційно)
       - ./.codex:/home/codex/.codex:rw
@@ -74,6 +78,8 @@ services:
     container_name: codex-app-server-guest
     restart: unless-stopped
     user: "0:0"
+    environment:
+      MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
     volumes:
       - ./.codex-guest:/home/codex/.codex:rw
       - ./.codex/generated_images:/home/codex/.codex/generated_images:rw

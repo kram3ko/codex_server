@@ -125,6 +125,7 @@ class TGHandlers:
             has_document=bool(message.document),
             has_voice=bool(message.voice),
             has_audio=bool(message.audio),
+            has_video_note=bool(message.video_note),
         )
         await self._runner.handle(message)
 

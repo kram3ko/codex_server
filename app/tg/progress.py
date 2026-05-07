@@ -258,13 +258,14 @@ class TurnProgressReporter:
 
 def _find_stream_split(tail: str) -> int:
     """Pick a natural break inside the first `_STREAM_BUBBLE_MAX` chars."""
-    if len(tail) <= _STREAM_BUBBLE_MAX:
-        return len(tail)
+
     window = tail[:_STREAM_BUBBLE_MAX]
     for sep in ("\n\n", "\n", ". ", " "):
         idx = window.rfind(sep)
         if idx >= _STREAM_MIN_CHARS:
             return idx + len(sep)
+    if len(tail) <= _STREAM_BUBBLE_MAX:
+        return len(tail)
     return _STREAM_BUBBLE_MAX
 
 

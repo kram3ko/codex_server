@@ -129,7 +129,9 @@ class TGBotService:
         # повідомлення — будь-який TG user (Codex sidecar guard блокує
         # shell/file_change для не-ADMIN ролі на app-сервері).
         admin_filter = F.from_user.id.in_(admins) if admins else F
-        incoming_filter = F.photo | F.document | F.text | F.voice | F.audio
+        incoming_filter = (
+            F.photo | F.document | F.text | F.voice | F.audio | F.video_note
+        )
         dispatcher.message.register(self._handlers.on_start, CommandStart())
         dispatcher.message.register(self._handlers.on_new, Command("new"))
         dispatcher.message.register(self._handlers.on_reset, Command("reset"))

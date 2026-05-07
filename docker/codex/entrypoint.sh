@@ -1,6 +1,8 @@
 #!/bin/sh
 # Codex CLI app-server: всі native tools увімкнено, workspace = /home/codex/workspace.
-# Без MCP, без авторизації на WS (порт 4500 у docker-network, наружу не публікується).
+# MCP server `codex_app` — наш FastAPI на codex-server:8000/mcp/streamable з
+# `show_image` тулою. Bearer береться з env MCP_CALLBACK_TOKEN, той самий що
+# валідується settings.MCP_CALLBACK_TOKEN на стороні FastAPI.
 
 set -eu
 
@@ -24,6 +26,13 @@ unified_exec = true
 # для destructive команд у цій папці.
 [projects."/home/codex/workspace"]
 trust_level = "trusted"
+
+# Streamable-HTTP MCP server у codex-server (FastAPI sub-app /mcp). Тули:
+# show_image. Bearer auth — env_var вибирається Codex CLI runtime'ом, ми
+# монтуємо його з .env через docker-compose.
+[mcp_servers.codex_app]
+url = "http://codex-server:8000/mcp/streamable"
+bearer_token_env_var = "MCP_CALLBACK_TOKEN"
 EOF
 
 exec codex app-server --listen ws://0.0.0.0:4500

@@ -23,6 +23,7 @@ from app.grpc_generated.codex.v1.message_connect import MessageServiceASGIApplic
 from app.grpc_generated.codex.v1.notes_connect import NotesServiceASGIApplication
 from app.grpc_generated.codex.v1.uploads_connect import UploadsServiceASGIApplication
 from app.grpc_generated.codex.v1.user_connect import UserServiceASGIApplication
+from app.mcp import mcp_app, mount_mcp_server
 from app.rpc.auth import AuthRPC
 from app.rpc.chat import ChatRPC
 from app.rpc.event import EventRPC
@@ -75,6 +76,12 @@ connect_router = ConnectRouter(
     ]
 )
 app.mount("/api", connect_router)  # type: ignore[arg-type]
+
+# MCP sub-app: streamable-HTTP transport на /mcp/streamable. mount_mcp_server()
+# мусить бути викликаний ДО app.mount, бо fastapi-mcp дискаверить ендпоінти на
+# момент маунту. Тули реєструються через side-effect import у `app.mcp`.
+mount_mcp_server()
+app.mount("/mcp", mcp_app)
 
 app.include_router(health_router)
 app.include_router(chat_ws_router)

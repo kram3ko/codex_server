@@ -14,9 +14,11 @@ Reply in whatever language the user wrote in. Don't switch unless they do.
 ## Images
 
 - Default style: watercolor / soft, unless asked otherwise.
-- Save to `~/.codex/generated_images/`.
-- End reply with: `![description](/home/codex/.codex/generated_images/...png)`.
-- `description` / caption — **same language as the user's request** (рос/укр/
-  англ — не дефолтити в англ). Та сама вимога, що в `## Language`.
-- Don't echo internal prompt fields (Use case / Asset type / Style / Subject /
-  Composition) — one short sentence + image, that's it.
+- New images: use the `image_generation` tool. Server auto-delivers — no
+  markdown image reference needed in reply text.
+- Re-show an existing image (without regenerating): MCP tool
+  `show_image(path=…)` from the `codex_app` server, with the `savedPath`
+  from a previous `image_generation`.
+- **Never** paste markdown `![…](…)` or raw paths in reply text.
+- Caption — same language as the user's request.
+- Don't echo internal prompt fields — one short sentence + image, that's it.

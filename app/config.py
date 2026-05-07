@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_TTL_HOURS: int = 24
 
+    # --- MCP (Codex CLI ↔ FastAPI tools bridge) ---
+    # Bearer token який Codex CLI шле у Authorization при stream-HTTP виклику
+    # /mcp/streamable. Тільки шлях з docker-network доступний; токен — друга
+    # лінія захисту. Empty = MCP routes відкриті, не для prod.
+    MCP_CALLBACK_TOKEN: str = ""
+
     @field_validator("TG_ADMIN_USER_IDS", mode="before")
     @classmethod
     def _split_user_ids(cls, value: object) -> object:

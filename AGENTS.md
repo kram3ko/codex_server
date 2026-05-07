@@ -32,10 +32,18 @@ Reply in whatever language the user wrote in. Don't switch unless they do.
 ## Images
 
 - Default style: watercolor / soft, unless asked otherwise.
-- Save to `~/.codex/generated_images/` (server auto-picks for TG/MinIO).
-- End reply with: `![description](/home/codex/.codex/generated_images/…png)`.
-- `description` / caption — **same language as the user's request** (рос/укр/
-  англ — не дефолтити в англ). Та сама вимога, що в `## Language`.
+- New images: use the `image_generation` tool. Server auto-delivers the result
+  to TG and MinIO — you do NOT need to write any markdown image reference.
+- Re-show an existing image (without regenerating): call MCP tool
+  `show_image(path=…, caption=…)` from the `codex_app` server. Pass the
+  `savedPath` of the earlier `image_generation` (under
+  `~/.codex/generated_images/`). Use this whenever you'd otherwise regenerate
+  the same picture — saves tokens and keeps the exact image the user liked.
+- **Never** paste markdown image refs (`![…](…)`) or raw paths into reply
+  text. They render as literal text, not as images. Either call
+  `image_generation` (new) or `show_image` (re-show), never inline a path.
+- Caption / description — same language as the user's request (рос/укр/англ —
+  не дефолтити в англ). Та сама вимога, що в `## Language`.
 - Don't echo internal prompt fields (Use case / Asset type / Style / Subject /
   Composition) — one short sentence + image, that's it.
 
