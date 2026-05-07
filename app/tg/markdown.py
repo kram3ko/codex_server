@@ -2,6 +2,7 @@
 
 import html
 from typing import ClassVar
+from urllib.parse import urlparse
 
 from markdown_it import MarkdownIt
 from markdown_it.renderer import RendererHTML
@@ -10,6 +11,9 @@ from markdown_it.token import Token
 _TG_MESSAGE_LIMIT = 4096
 _PRE_OPEN = "<pre>"
 _PRE_CLOSE = "</pre>"
+# TG приймає http(s)/tg/mailto у `<a href>`. Решта (`javascript:`, `file:`,
+# `data:`) — або 400, або XSS-вектор → дроп до plain text.
+_ALLOWED_LINK_SCHEMES = frozenset({"http", "https", "tg", "mailto"})
 
 
 class _TelegramHtmlRenderer(RendererHTML):
@@ -20,7 +24,6 @@ class _TelegramHtmlRenderer(RendererHTML):
         "em_open":     "<i>", "em_close":     "</i>",
         "s_open":      "<s>", "s_close":      "</s>",
         "heading_open": "<b>", "heading_close": "</b>\n\n",
-        "link_close":  "</a>",
         "softbreak":   "\n", "hardbreak": "\n",
         "hr":          "─" * 12 + "\n\n",
     }
@@ -95,8 +98,17 @@ class _TelegramHtmlRenderer(RendererHTML):
         return f"<code>{html.escape(tokens[idx].content)}</code>"
 
     def link_open(self, tokens, idx, options, env):  # noqa: ARG002
-        href = tokens[idx].attrGet("href") or ""
-        return f'<a href="{html.escape(str(href), quote=True)}">'
+        href = str(tokens[idx].attrGet("href") or "")
+        if urlparse(href).scheme.lower() not in _ALLOWED_LINK_SCHEMES:
+            env["_skip_link_close"] = env.get("_skip_link_close", 0) + 1
+            return ""
+        return f'<a href="{html.escape(href, quote=True)}">'
+
+    def link_close(self, tokens, idx, options, env):  # noqa: ARG002
+        if env.get("_skip_link_close"):
+            env["_skip_link_close"] -= 1
+            return ""
+        return "</a>"
 
     def image(self, tokens, idx, options, env):  # noqa: ARG002
         # TG inline-картинок у тексті не підтримує — лишаємо тільки alt.
@@ -152,6 +164,8 @@ class TelegramMarkdown:
         return _split_chunks(rendered, _TG_MESSAGE_LIMIT)
 
     def to_plain(self, text: str) -> str:
+        """TTS-orient strip: ⚠ links → alt-text без URL (інакше Google озвучує
+        весь URL вголос), code blocks → сирий зміст без фенсів."""
         if not text.strip():
             return ""
         return _render_plain(self._md.parse(text)).strip()

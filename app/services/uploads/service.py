@@ -10,6 +10,7 @@ Two entry points:
 Remote URLs (http/https) пропускаються — вони не наш hosting.
 """
 
+import asyncio
 import mimetypes
 import tempfile
 import uuid
@@ -63,12 +64,16 @@ class UploadService:
         mime: str,
         chunks: AsyncIterator[bytes],
     ) -> Upload:
-        """Buffer bytes у tempfile до EOF, потім upload у S3 і записати row."""
+        """Buffer bytes у tempfile до EOF, потім upload у S3 і записати row.
+
+        `tmp.write` синхронний — для великих документів (10MB+) обертаємо
+        у `to_thread`, інакше блокуємо event loop і всі інші turn'и простоюють.
+        """
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp:
             tmp_path = Path(tmp.name)
             async for chunk in chunks:
                 if chunk:
-                    tmp.write(chunk)
+                    await asyncio.to_thread(tmp.write, chunk)
         try:
             return await self._persist_local_file(
                 session, chat_id, tmp_path, filename=filename, mime=mime,

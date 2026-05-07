@@ -6,6 +6,7 @@ tuple[Attachment, ...]` — markdown-парсинг тут не потрібен
 """
 
 import contextlib
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -14,7 +15,6 @@ import structlog
 from aiogram import Bot
 from aiogram.types import FSInputFile, URLInputFile
 
-from app.config import settings
 from app.services.codex.events import Attachment, AttachmentKind
 from app.services.tts.base import SpeechSynthesisError
 from app.services.tts.default import tts_service
@@ -25,7 +25,8 @@ log = structlog.get_logger(__name__)
 
 # OGG_OPUS — формат TG voice (`send_voice`); MP3 не підходить, треба send_audio.
 _VOICE_ENCODING = "OGG_OPUS"
-_TTS_TMP_DIR = Path(settings.CODEX_CWD) / "tg_uploads"
+# /tmp (а не workspace) щоб ogg-ки не сипались у git-tracked репо.
+_TTS_TMP_DIR = Path(tempfile.gettempdir()) / "codex_tts"
 
 
 async def send_text(bot: Bot, chat_id: int, text: str) -> None:

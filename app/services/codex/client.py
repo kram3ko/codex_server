@@ -17,6 +17,7 @@ Reconnect-семантика:
 """
 
 import asyncio
+import mimetypes
 from collections.abc import AsyncIterator, Awaitable, Callable
 from enum import StrEnum
 from typing import Any
@@ -112,13 +113,12 @@ def _image_attachment(source: str, caption: str = "") -> tuple[Attachment, ...]:
 def _mcp_attachments(item: dict[str, Any]) -> tuple[Attachment, ...]:
     """Витягти `Attachment` з MCP-результату.
 
-    fastapi-mcp серіалізує наш FastAPI return-dict як один text-content
-    блок (`{"type": "text", "text": "<json>"}`). Парсимо JSON, шукаємо `path`
-    + опціональний `caption`. Path-валідацію довіряємо тулі (`show_image`
-    перевіряє trusted root); pipeline далі сам через
-    `upload_service.persist_attachments` відсіє все що не під trusted root.
+    Контракт: MCP-тула повертає `{"path": "<image>", "caption": "..."}`.
+    Path має бути image MIME (mimetypes.guess_type) — інакше ризик надіслати
+    .env / .json як photo. Trusted-root перевіряється далі у
+    `upload_service.persist_attachments`.
 
-    Інші тули (без `path` у відповіді) → пуста tuple, behaviour не змінюється.
+    Інші тули (без image-`path` у відповіді) → пуста tuple.
     """
     result = item.get("result")
     if not isinstance(result, dict):
@@ -135,6 +135,10 @@ def _mcp_attachments(item: dict[str, Any]) -> tuple[Attachment, ...]:
             continue
         path = data.get("path")
         if not isinstance(path, str) or not path:
+            continue
+        mime, _ = mimetypes.guess_type(path)
+        if mime is None or not mime.startswith("image/"):
+            log.warning("mcp_attachment_non_image_dropped", path=path, mime=mime)
             continue
         caption = data.get("caption")
         return _image_attachment(path, caption if isinstance(caption, str) else "")

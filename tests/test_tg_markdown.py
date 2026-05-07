@@ -89,3 +89,16 @@ def test_empty_input_returns_no_chunks() -> None:
 
 def test_escape_safe_for_plain_messages() -> None:
     assert tg_markdown.escape("a < b & c > d") == "a &lt; b &amp; c &gt; d"
+
+
+def test_link_scheme_whitelist_drops_unsafe_href() -> None:
+    """Unsafe схеми (`javascript:`, `file:`, etc) не мають створювати <a href>."""
+    out = "".join(tg_markdown.render_html("see [a](https://x.com) and [b](http://y.com)"))
+    assert '<a href="https://x.com">a</a>' in out
+    assert '<a href="http://y.com">b</a>' in out
+
+    # markdown-it дефолтно блокує javascript:/file: ще на парс-стадії — текст
+    # лишається літерально. Наш guard — defense-in-depth для майбутніх схем.
+    out = "".join(tg_markdown.render_html("[chat](tg://user?id=42) [m](mailto:a@b.c)"))
+    assert '<a href="tg://user?id=42">chat</a>' in out
+    assert '<a href="mailto:a@b.c">m</a>' in out

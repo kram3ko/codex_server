@@ -1,6 +1,8 @@
 """User CRUD + role bootstrap. Tx boundary lives at the caller."""
 
-from sqlalchemy import select, update
+from typing import cast
+
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -66,5 +68,4 @@ class UserService:
             )
             .values(role=UserRole.ADMIN),
         )
-        # SQLAlchemy AsyncSession.execute(update) returns CursorResult — rowcount є.
-        return result.rowcount or 0  # type: ignore[attr-defined]
+        return cast(CursorResult, result).rowcount or 0

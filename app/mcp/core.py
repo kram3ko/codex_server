@@ -32,15 +32,8 @@ mcp_app = FastAPI(
 
 @mcp_app.middleware("http")
 async def mcp_auth_middleware(request: Request, call_next):
-    """Validate Bearer token on every MCP request.
-
-    Empty `MCP_CALLBACK_TOKEN` lets requests through — useful у dev. У prod
-    обов'язково задається через .env, інакше будь-хто з docker-network'у
-    зможе викликати тули.
-    """
+    """Validate Bearer token on every MCP request. Always required."""
     expected = settings.MCP_CALLBACK_TOKEN
-    if not expected:
-        return await call_next(request)
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return JSONResponse(
@@ -73,7 +66,13 @@ def mount_mcp_server() -> None:
     Викликати ПІСЛЯ side-effect import'у тул, інакше fastapi-mcp не побачить
     зареєстровані ендпоінти. Підсумкова URL для Codex CLI:
     `http://codex-server:8000/mcp/streamable`.
+    Кидає RuntimeError якщо `MCP_CALLBACK_TOKEN` порожній — fail-closed.
     """
+    if not settings.MCP_CALLBACK_TOKEN:
+        raise RuntimeError(
+            "MCP_CALLBACK_TOKEN is empty — refusing to mount MCP. "
+            "Generate з `openssl rand -hex 32` і пропиши у .env.",
+        )
     mcp = FastApiMCP(
         mcp_app,
         name="Codex Server Tools",
