@@ -34,6 +34,7 @@ from app.services.codex.events import (
     Attachment,
     DoneEvent,
     ErrorEvent,
+    TokenEvent,
     ToolCallEvent,
     ToolResultEvent,
     event_to_frame,
@@ -149,6 +150,7 @@ class ChatWebSocketHandler:
         await self._safe_send(ws, {"type": "chat", "chat_id": persisted_chat_id})
 
         final_text = ""
+        streamed_text = ""
         tool_calls: list[dict] = []
         attachments: list[Attachment] = []
         done_seen = False
@@ -156,6 +158,8 @@ class ChatWebSocketHandler:
             async for ev in codex.run_turn(text):
                 await event_bus.publish(persisted_chat_id, ev)
                 match ev:
+                    case TokenEvent(delta=delta):
+                        streamed_text += delta
                     case ToolCallEvent(name=name, args=args):
                         tool_calls.append({"name": name, "args": args})
                     case ToolResultEvent(attachments=tool_files):
@@ -224,7 +228,11 @@ class ChatWebSocketHandler:
 
         await self._safe_send(
             ws,
-            {"type": "done", "chat_id": persisted_chat_id, "final_text": final_text},
+            {
+                "type": "done",
+                "chat_id": persisted_chat_id,
+                "final_text": _final_text_for_done_frame(final_text, streamed_text),
+            },
         )
 
     async def _resolve_web_user_pk(self) -> int:
@@ -260,3 +268,15 @@ class ChatWebSocketHandler:
 
 
 chat_ws_handler = ChatWebSocketHandler()
+
+
+def _final_text_for_done_frame(final_text: str, streamed_text: str) -> str:
+    """Dedup для frontend: якщо клієнт уже зібрав full text з token-deltas,
+    шлемо порожній final_text у `done` frame щоб не показати дубль.
+
+    Рідкий випадок (sidecar emit'ить весь agentMessage одним item'ом замість
+    стрімінгу) — final_text != streamed_text → повний текст.
+    """
+    if streamed_text and final_text == streamed_text:
+        return ""
+    return final_text
