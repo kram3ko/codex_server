@@ -342,6 +342,7 @@ estimates/
 
 # Codex CLI auth / local workspace
 .codex/
+.codex-guest/
 workspace/
 
 # Claude Code local settings (per-machine)

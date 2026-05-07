@@ -76,8 +76,6 @@ services:
     container_name: codex-app-server-guest
     restart: unless-stopped
     user: "0:0"
-    profiles:
-      - guest
     volumes:
       - ./.codex-guest:/home/codex/.codex:rw
       - ./.codex/generated_images:/home/codex/.codex/generated_images:rw
