@@ -1,7 +1,7 @@
 """Telegram media preparation for Codex turns.
 
-Supports text, photos, image documents, and voice/audio transcription.
-Video is intentionally not handled.
+Supports text, photos, image documents, voice/audio transcription, and
+video notes (кружечки) — їх аудіодоріжка транскрибується як voice.
 """
 
 import contextlib
@@ -27,6 +27,7 @@ class PreparedTurn:
     text: str
     attachments: tuple[str, ...]
     cleanup_paths: tuple[str, ...]
+    had_voice_input: bool = False
 
 
 async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTurn:
@@ -38,6 +39,7 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
     text = (message.caption or message.text or "").strip()
     attachments: list[str] = []
     cleanup_paths: list[str] = []
+    had_voice_input = message.voice is not None or message.video_note is not None
 
     try:
         if message.photo:
@@ -56,6 +58,12 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
         if message.voice:
             voice_text = await _transcribe_media(message, message.voice, transcriber, ".ogg")
             text = _merge_text(text, voice_text, label="Voice transcript")
+
+        if message.video_note:
+            note_text = await _transcribe_media(
+                message, message.video_note, transcriber, ".mp4",
+            )
+            text = _merge_text(text, note_text, label="Voice transcript")
 
         if message.audio:
             audio_text = await _transcribe_media(
@@ -76,6 +84,7 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
         text=text,
         attachments=tuple(attachments),
         cleanup_paths=tuple(cleanup_paths),
+        had_voice_input=had_voice_input,
     )
 
 

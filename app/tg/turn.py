@@ -25,6 +25,7 @@ from app.services.codex.events import (
     ErrorEvent,
     TokenEvent,
     ToolCallEvent,
+    ToolCallRecord,
     ToolResultEvent,
 )
 from app.services.codex.history import messages_to_history_items
@@ -32,9 +33,9 @@ from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.stt.base import STTBackend
 from app.services.uploads.default import upload_service
-from app.tg.formatting import tg_html
+from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn, cleanup_attachments, prepare_turn
-from app.tg.output import send_attachment, send_text
+from app.tg.output import send_attachment, send_text, send_voice_reply
 from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSession, ChatSessionStore
 
@@ -114,7 +115,7 @@ class TurnRunner:
             return False
         ok = await session.client.steer(prepared.text)
         if not ok:
-            await message.answer(tg_html("Не вдалось додати — turn уже завершився"))
+            await message.answer(tg_markdown.escape("Не вдалось додати — turn уже завершився"))
             return False
         await self._persist_user_turn(session, prepared)
         return True
@@ -164,7 +165,9 @@ class TurnRunner:
                 )
                 with contextlib.suppress(Exception):
                     await session.client.interrupt()
-                await message.answer(tg_html("Codex не відповів вчасно — turn зупинено."))
+                await message.answer(tg_markdown.escape(
+                    "Codex не відповів вчасно — turn зупинено.",
+                ))
                 await self._emit_failure(
                     session,
                     code="turn_timeout",
@@ -181,7 +184,7 @@ class TurnRunner:
                     error=str(exc),
                     chat_id=message.chat.id,
                 )
-                await message.answer(tg_html(f"Помилка: {exc}"))
+                await message.answer(tg_markdown.escape(f"Помилка: {exc}"))
                 await self._emit_failure(session, exc_type=type(exc).__name__, detail=str(exc))
             finally:
                 if session.current_turn_task is current:
@@ -195,7 +198,7 @@ class TurnRunner:
         progress: TurnProgressReporter,
     ) -> None:
         buffer = ""
-        tool_calls: list[dict] = []
+        tool_calls: list[ToolCallRecord] = []
         attachments: list[Attachment] = []
         done_seen = False
 
@@ -204,7 +207,8 @@ class TurnRunner:
             match ev:
                 case TokenEvent(delta=delta):
                     buffer += delta
-                    await progress.note_partial(buffer)
+                    if not prepared.had_voice_input:
+                        await progress.note_partial(buffer)
                 case ToolCallEvent(name=name, args=args):
                     tool_calls.append({"name": name, "args": args})
                     await progress.note_tool(name)
@@ -214,7 +218,7 @@ class TurnRunner:
                 case ErrorEvent(code=code, detail=detail):
                     progress.mark_outcome("failed")
                     await message.answer(
-                        tg_html(f"Codex error [{code}]: {detail or 'unknown error'}"),
+                        tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
                     )
                     await self._emit_failure(session, code=code, detail=detail)
                     return
@@ -234,7 +238,8 @@ class TurnRunner:
         if not done_seen:
             progress.mark_outcome("failed")
             await self._handle_dropped_stream(
-                session, message, buffer, attachments, tool_calls, progress.committed_text,
+                session, message, prepared, buffer, attachments, tool_calls,
+                progress.committed_text,
             )
 
     async def _handle_done(
@@ -244,13 +249,16 @@ class TurnRunner:
         prepared: PreparedTurn,
         final_text: str,
         attachments: list[Attachment],
-        tool_calls: list[dict],
+        tool_calls: list[ToolCallRecord],
         committed_prefix: str,
     ) -> None:
         if not final_text.strip() and not attachments:
             await self._handle_empty_response(session, message, prepared)
             return
-        await self._send_response(message, final_text, attachments, committed_prefix)
+        await self._send_response(
+            message, final_text, attachments, committed_prefix,
+            as_voice=prepared.had_voice_input,
+        )
         await self._persist_assistant_turn(session, final_text, attachments, tool_calls)
 
     async def _handle_empty_response(
@@ -265,7 +273,7 @@ class TurnRunner:
             text_len=len(prepared.text),
         )
         await message.answer(
-            tg_html(
+            tg_markdown.escape(
                 "Codex returned empty response. "
                 "Try adding a caption or send the image again.",
             ),
@@ -276,9 +284,10 @@ class TurnRunner:
         self,
         session: ChatSession,
         message: Message,
+        prepared: PreparedTurn,
         buffer: str,
         attachments: list[Attachment],
-        tool_calls: list[dict],
+        tool_calls: list[ToolCallRecord],
         committed_prefix: str,
     ) -> None:
         log.warning(
@@ -288,15 +297,18 @@ class TurnRunner:
         )
         tail = buffer.strip()
         if not tail and not attachments:
-            await message.answer(
-                tg_html("Codex stream dropped before any reply. Use /reset and try again."),
-            )
+            await message.answer(tg_markdown.escape(
+                "Codex stream dropped before any reply. Use /reset and try again.",
+            ))
             await self._emit_failure(session, code="stream_dropped", detail="no buffer")
             return
-        await self._send_response(message, tail, attachments, committed_prefix)
+        await self._send_response(
+            message, tail, attachments, committed_prefix,
+            as_voice=prepared.had_voice_input,
+        )
         await self._persist_assistant_turn(session, tail, attachments, tool_calls, partial=True)
         await message.answer(
-            tg_html("⚠ Stream dropped before completion. Use /reset to reopen session."),
+            tg_markdown.escape("⚠ Stream dropped before completion. Use /reset to reopen session."),
         )
 
     @staticmethod
@@ -305,13 +317,23 @@ class TurnRunner:
         final_text: str,
         attachments: list[Attachment],
         committed_prefix: str,
+        *,
+        as_voice: bool = False,
     ) -> None:
         # `handle()` уже відсік `message.chat is None`; bot гарантовано є, бо
         # це bot-handler. Assert замість if-return, щоб pyright звузив Optional.
         assert message.bot is not None and message.chat is not None
-        remainder = _strip_committed_prefix(final_text, committed_prefix)
-        if remainder:
-            await send_text(message.bot, message.chat.id, remainder)
+        # Voice mode шле повний текст одним голосовим (не shukamo "remainder", бо
+        # під час voice-input ми не стрімили бульбашки → committed_prefix=""). На
+        # помилку TTS — фолбек у текст, щоб юзер хоч щось отримав.
+        if as_voice and final_text.strip():
+            sent = await send_voice_reply(message.bot, message.chat.id, final_text)
+            if not sent:
+                await send_text(message.bot, message.chat.id, final_text)
+        else:
+            remainder = _strip_committed_prefix(final_text, committed_prefix)
+            if remainder:
+                await send_text(message.bot, message.chat.id, remainder)
         for attachment in attachments:
             await send_attachment(message.bot, message.chat.id, attachment)
 
@@ -320,7 +342,7 @@ class TurnRunner:
         session: ChatSession,
         final_text: str,
         attachments: list[Attachment],
-        tool_calls: list[dict],
+        tool_calls: list[ToolCallRecord],
         *,
         partial: bool = False,
     ) -> None:
@@ -389,7 +411,7 @@ async def cancel_turn(session: ChatSession) -> bool:
 
 
 def _build_assistant_meta(
-    tool_calls: list[dict],
+    tool_calls: list[ToolCallRecord],
     upload_ids: list[int],
     *,
     partial: bool,
@@ -406,7 +428,7 @@ def _build_assistant_meta(
 
 def _build_turn_payload(
     final_text: str,
-    tool_calls: list[dict],
+    tool_calls: list[ToolCallRecord],
     upload_ids: list[int],
     *,
     partial: bool,

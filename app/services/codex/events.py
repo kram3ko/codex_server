@@ -8,10 +8,17 @@ Pydantic v2 моделі — кожне поле з `Field(description=...)`, т
 """
 
 from enum import StrEnum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypedDict
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ToolCallRecord(TypedDict):
+    """Згорнутий tool-call для `messages.meta.calls` (mirror `ToolCallEvent.{name, args}`)."""
+
+    name: str
+    args: dict[str, Any]
 
 
 class AttachmentKind(StrEnum):

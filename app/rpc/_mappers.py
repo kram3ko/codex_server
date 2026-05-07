@@ -14,6 +14,8 @@ from app.grpc_generated.codex.v1 import (
     chat_pb2,
     event_pb2,
     message_pb2,
+    notes_pb2,
+    uploads_pb2,
     user_pb2,
 )
 from app.models import (
@@ -23,6 +25,8 @@ from app.models import (
     EventKind,
     Message,
     MessageRole,
+    Note,
+    Upload,
     User,
 )
 
@@ -108,3 +112,30 @@ def event_to_pb(e: Event) -> event_pb2.Event:
 
 def event_kind_from_pb(value: int) -> EventKind | None:
     return _EVENT_KIND_FROM_PB.get(value)
+
+
+def note_to_pb(n: Note) -> notes_pb2.Note:
+    return notes_pb2.Note(
+        id=n.id,
+        title=n.title,
+        body=n.body,
+        tags=list(n.tags),
+        created_at=to_ts(n.created_at),
+        updated_at=to_ts(n.updated_at),
+    )
+
+
+def upload_to_pb(u: Upload) -> uploads_pb2.Upload:
+    msg = uploads_pb2.Upload(
+        id=u.id,
+        filename=u.filename,
+        mime=u.mime,
+        size=u.size,
+        s3_path=u.s3_path,
+        created_at=to_ts(u.created_at),
+    )
+    if u.chat_id is not None:
+        msg.chat_id = u.chat_id
+    if u.extracted_text is not None:
+        msg.extracted_text = u.extracted_text
+    return msg

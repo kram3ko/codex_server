@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # OPENAI_API_KEY живе тільки у .env → docker-compose передає його у
     # codex-app-server контейнер. Нашій FastAPI його не треба як settings.
     CODEX_APP_SERVER_URL: str = "ws://localhost:4500"
+    CODEX_GUEST_APP_SERVER_URL: str = "ws://codex-app-server-guest:4500"
     CODEX_CWD: str = "/home/codex/workspace"
     CODEX_APPROVAL_POLICY: str = "never"
     CODEX_SANDBOX: str = "danger-full-access"
@@ -30,6 +31,10 @@ class Settings(BaseSettings):
     SPEECHMATICS_API_KEY: str = ""
     SPEECHMATICS_LANGUAGE: str = "auto"
     SPEECHMATICS_OPERATING_POINT: str = "enhanced"
+
+    # --- Text-to-speech (Google Cloud TTS, REST + API key) ---
+    GOOGLE_TTS_API_KEY: str = ""
+    GOOGLE_TTS_AUDIO_ENCODING: str = "MP3"
 
     # --- Postgres ---
     DATABASE_URL: str = "postgresql+asyncpg://codex:codex@localhost:5432/codex"
@@ -50,9 +55,12 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     TG_BOT_TOKEN: str = ""
-    # Comma-separated whitelist of Telegram user ids. Empty set → bot accepts
-    # anyone (don't ship like that). Filter applied in tg/service.py.
-    TG_ALLOWED_USER_IDS: set[int] = set()
+    # Bootstrap-only: TG user_ids що отримають `UserRole.ADMIN` при першому
+    # створенні (`UserService.get_or_create_by_tg`). Існуючих юзерів promote'ить
+    # `ensure_admin_roles()` на startup. Дальше адмінів додавати через psql /
+    # майбутній RPC `UserService.PromoteToAdmin`. Empty set → нікого автоматично
+    # admin'ом не робимо.
+    TG_ADMIN_USER_IDS: set[int] = set()
     TG_PROGRESS_DELAY_SECONDS: float = 0.0
     TG_DRAFT_ENABLED: bool = False
     # Hard cap на турн: якщо Codex sidecar завис → asyncio.timeout перерве
@@ -68,7 +76,13 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_TTL_HOURS: int = 24
 
-    @field_validator("TG_ALLOWED_USER_IDS", mode="before")
+    # --- MCP (Codex CLI ↔ FastAPI tools bridge) ---
+    # Bearer token який Codex CLI шле у Authorization при stream-HTTP виклику
+    # /mcp/streamable. Тільки шлях з docker-network доступний; токен — друга
+    # лінія захисту. Empty = MCP routes відкриті, не для prod.
+    MCP_CALLBACK_TOKEN: str = ""
+
+    @field_validator("TG_ADMIN_USER_IDS", mode="before")
     @classmethod
     def _split_user_ids(cls, value: object) -> object:
         if isinstance(value, int):

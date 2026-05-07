@@ -21,6 +21,8 @@ dependencies = [
     "alembic>=1.18.4",
     "connectrpc>=0.10.0",
     "orjson>=3.11.9",
+    "fastapi-mcp>=0.4.0",
+    "markdown-it-py>=4.2.0",
 ]
 
 [dependency-groups]

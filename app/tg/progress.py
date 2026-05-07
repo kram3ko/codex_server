@@ -15,7 +15,7 @@ from aiogram.enums import ChatAction
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.config import settings
-from app.tg.formatting import tg_html
+from app.tg.markdown import tg_markdown
 
 log = structlog.get_logger(__name__)
 
@@ -120,7 +120,7 @@ class TurnProgressReporter:
         if text != self._last_status_text:
             with contextlib.suppress(Exception):
                 # No keyboard on the final state — turn is over, controls стали б no-op.
-                await self._status_message.edit_text(tg_html(text), reply_markup=None)
+                await self._status_message.edit_text(tg_markdown.escape(text), reply_markup=None)
         self._status_message = None
 
     async def note_tool(self, name: str) -> None:
@@ -144,10 +144,9 @@ class TurnProgressReporter:
         tail и tracking `_committed_text` so `TurnRunner` can deduplicate
         when the final answer arrives.
         """
-        if not full_text:
+        if not full_text or tg_markdown.has_unclosed_fence(full_text):
             return
-        bot = self._message.bot
-        if bot is None or self._message.chat is None:
+        if self._message.bot is None or self._message.chat is None:
             return
         async with self._stream_lock:
             now = time.monotonic()
@@ -162,7 +161,8 @@ class TurnProgressReporter:
             if not visible:
                 return
             try:
-                await self._message.answer(tg_html(visible))
+                for piece in tg_markdown.render_html(visible):
+                    await self._message.answer(piece)
             except Exception as exc:  # noqa: BLE001
                 log.warning("tg_stream_chunk_failed", error=str(exc))
                 return
@@ -193,7 +193,7 @@ class TurnProgressReporter:
         text = self._compose_status_text()
         if text == self._last_status_text:
             return
-        rendered = tg_html(text)
+        rendered = tg_markdown.escape(text)
         async with self._status_lock:
             try:
                 if self._status_message is None:
@@ -258,13 +258,14 @@ class TurnProgressReporter:
 
 def _find_stream_split(tail: str) -> int:
     """Pick a natural break inside the first `_STREAM_BUBBLE_MAX` chars."""
-    if len(tail) <= _STREAM_BUBBLE_MAX:
-        return len(tail)
+
     window = tail[:_STREAM_BUBBLE_MAX]
     for sep in ("\n\n", "\n", ". ", " "):
         idx = window.rfind(sep)
         if idx >= _STREAM_MIN_CHARS:
             return idx + len(sep)
+    if len(tail) <= _STREAM_BUBBLE_MAX:
+        return len(tail)
     return _STREAM_BUBBLE_MAX
 
 

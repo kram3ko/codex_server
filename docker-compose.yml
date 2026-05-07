@@ -14,6 +14,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       S3_ENDPOINT: http://minio:9000
       CODEX_APP_SERVER_URL: ws://codex-app-server:4500
+      CODEX_GUEST_APP_SERVER_URL: ws://codex-app-server-guest:4500
     volumes:
       # Source of truth — host repo as workspace AND uvicorn cwd.
       - ./:/home/codex/workspace
@@ -52,15 +53,39 @@ services:
     restart: unless-stopped
     user: "0:0"
     # No OPENAI_API_KEY — codex auth via mounted ./.codex/auth.json (subscription).
+    environment:
+      # Bearer для виклику нашого MCP endpoint'у на codex-server. Той самий
+      # токен має бути в codex-server (через .env → settings.MCP_CALLBACK_TOKEN).
+      MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
     volumes:
       # auth.json (для ChatGPT/Codex subscription mode, опційно)
       - ./.codex:/home/codex/.codex:rw
       # Доступ до Docker daemon хоста для ручного reload контейнерів з Codex.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Workspace now mirrors the full repository root.
-      # Persona/instructions live у docker/codex/AGENTS.md; root має symlink
-      # на нього → Codex CLI читає AGENTS.md з workspace cwd автоматично.
+      # Workspace = весь репо. Admin Codex читає AGENTS.md з корня.
       - ./:/home/codex/workspace:rw
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4500/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  codex-app-server-guest:
+    build:
+      context: .
+      dockerfile: docker/codex/Dockerfile
+    container_name: codex-app-server-guest
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+    volumes:
+      - ./.codex-guest:/home/codex/.codex:rw
+      - ./.codex/generated_images:/home/codex/.codex/generated_images:rw
+      - ./docker/codex/AGENTS-guest.md:/home/codex/workspace/AGENTS.md:ro
+    expose:
+      - "4500"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4500/readyz || exit 1"]
       interval: 10s
