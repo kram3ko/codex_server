@@ -156,6 +156,8 @@ class TurnProgressReporter:
             if len(tail) < _STREAM_MIN_CHARS:
                 return
             cut = _find_stream_split(tail)
+            if cut is None:
+                return
             raw_chunk = tail[:cut]
             visible = raw_chunk.strip()
             if not visible:
@@ -256,16 +258,19 @@ class TurnProgressReporter:
         return ""
 
 
-def _find_stream_split(tail: str) -> int:
-    """Pick a natural break inside the first `_STREAM_BUBBLE_MAX` chars."""
+def _find_stream_split(tail: str) -> int | None:
+    """Pick a natural break inside the first `_STREAM_BUBBLE_MAX` chars.
 
+    None → defer: тейл < bubble max і нема break — чекаємо ще дельт, інакше
+    порвемо слово типу `wait_agent` яке Codex стрімить по частинах.
+    """
     window = tail[:_STREAM_BUBBLE_MAX]
     for sep in ("\n\n", "\n", ". ", " "):
         idx = window.rfind(sep)
         if idx >= _STREAM_MIN_CHARS:
             return idx + len(sep)
     if len(tail) <= _STREAM_BUBBLE_MAX:
-        return len(tail)
+        return None
     return _STREAM_BUBBLE_MAX
 
 
