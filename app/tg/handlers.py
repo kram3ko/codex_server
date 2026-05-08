@@ -21,7 +21,7 @@ log = structlog.get_logger(__name__)
 _SELF_CONTAINER_NAME = "codex-server"
 # codex-cli рестартим перед собою — щоб новий sidecar встиг піднятись поки
 # codex-server ще down. Порядок: cli → self (self іде останнім, бо kill'не процес).
-_RESTART_PEERS = ("codex-cli",)
+_RESTART_PEERS = ("codex-cli", "codex-cli-guest")
 
 
 class TGHandlers:
