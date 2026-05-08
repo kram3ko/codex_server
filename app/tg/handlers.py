@@ -19,6 +19,9 @@ from app.tg.turn import TurnRunner, cancel_turn
 log = structlog.get_logger(__name__)
 
 _SELF_CONTAINER_NAME = "codex-server"
+# codex-cli рестартим перед собою — щоб новий sidecar встиг піднятись поки
+# codex-server ще down. Порядок: cli → self (self іде останнім, бо kill'не процес).
+_RESTART_PEERS = ("codex-cli",)
 
 
 class TGHandlers:
@@ -136,6 +139,9 @@ async def _restart_self() -> None:
     # Slight delay so the "Перезапуск..." message reaches Telegram before the
     # container goes down.
     await asyncio.sleep(0.3)
+    for peer in _RESTART_PEERS:
+        if not await docker_control.restart_container(peer):
+            log.warning("tg_restart_peer_failed", container=peer)
     if await docker_control.restart_container(_SELF_CONTAINER_NAME):
         return
     log.warning("tg_restart_falling_back_to_sigterm")
