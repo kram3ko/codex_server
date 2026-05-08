@@ -15,6 +15,8 @@ services:
       S3_ENDPOINT: http://minio:9000
       CODEX_CLI_URL: ws://codex-cli:4500
       CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_PRELOAD: ${GUNICORN_PRELOAD:-true}
     volumes:
       # Source of truth — host repo as workspace AND uvicorn cwd.
       - ./:/home/codex/workspace
@@ -22,13 +24,8 @@ services:
       - ./.codex/generated_images:/home/codex/.codex/generated_images:ro
       # Docker daemon API for /restart (httpx + UDS).
       - /var/run/docker.sock:/var/run/docker.sock
-    # --preload: app імпортується в master 1 раз, потім fork. Fork-safe бо
-    # connection pools (DB/Redis/S3) і lifespan ресурси — lazy, per-worker.
-    command: >-
-      gunicorn app.main:app
-      -k uvicorn.workers.UvicornWorker
-      -w 2 -b 0.0.0.0:8000
-      --preload --timeout 60
+    # Конфіг — gunicorn.conf.py (env-driven: GUNICORN_WORKERS, GUNICORN_PRELOAD).
+    command: gunicorn app.main:app -c gunicorn.conf.py
     healthcheck:
       # Викликає наш HealthService.Check через Connect (як aism-py
       # використовує grpc_health.v1 у scripts/healthcheck.py).

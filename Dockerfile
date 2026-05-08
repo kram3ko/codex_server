@@ -44,6 +44,7 @@ ENV PYTHONUNBUFFERED=1 \
 # uses the same path so both processes see one source of truth.
 WORKDIR /home/codex/workspace
 COPY alembic.ini ./
+COPY gunicorn.conf.py ./
 COPY migrations/ ./migrations/
 COPY app/ ./app/
 COPY docker/server/entrypoint.sh /usr/local/bin/entrypoint.sh
