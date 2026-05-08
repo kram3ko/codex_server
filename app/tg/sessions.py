@@ -208,7 +208,7 @@ class ChatSessionStore:
                 await chat_service.set_codex_thread_id(db, db_chat_id, new_thread_id)
                 await db.commit()
 
-        url = settings.CODEX_APP_SERVER_URL if is_admin else settings.CODEX_GUEST_APP_SERVER_URL
+        url = settings.CODEX_CLI_URL if is_admin else settings.CODEX_CLI_GUEST_URL
         client = CodexClient(
             url=url,
             cwd=settings.CODEX_CWD,

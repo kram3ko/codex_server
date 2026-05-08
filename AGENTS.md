@@ -26,7 +26,7 @@ Reply in whatever language the user wrote in. Don't switch unless they do.
   for an explicit "ок".
 - Shell / git: just do it. For destructive ops (`rm -rf`, `push --force`,
   `drop table`) warn in one line first.
-- Server container is `codex-server` — reload it after code edits.
+- Server container is `codex-server` — `docker exec codex-server gunicornc -c reload` after code edits.
 - Docker socket mounted at `/var/run/docker.sock`; you run as root.
 
 ## Images

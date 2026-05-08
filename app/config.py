@@ -11,9 +11,9 @@ class Settings(BaseSettings):
 
     # --- Codex sidecar ---
     # OPENAI_API_KEY живе тільки у .env → docker-compose передає його у
-    # codex-app-server контейнер. Нашій FastAPI його не треба як settings.
-    CODEX_APP_SERVER_URL: str = "ws://localhost:4500"
-    CODEX_GUEST_APP_SERVER_URL: str = "ws://codex-app-server-guest:4500"
+    # codex-cli контейнер. Нашому FastAPI він не треба як settings.
+    CODEX_CLI_URL: str = "ws://localhost:4500"
+    CODEX_CLI_GUEST_URL: str = "ws://codex-cli-guest:4500"
     CODEX_CWD: str = "/home/codex/workspace"
     CODEX_APPROVAL_POLICY: str = "never"
     CODEX_SANDBOX: str = "danger-full-access"

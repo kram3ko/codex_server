@@ -63,7 +63,7 @@ class ChatWebSocketHandler:
         await websocket.accept()
         user_pk = await self._resolve_web_user_pk()
         codex = CodexClient(
-            url=settings.CODEX_APP_SERVER_URL,
+            url=settings.CODEX_CLI_URL,
             cwd=settings.CODEX_CWD,
             approval_policy=settings.CODEX_APPROVAL_POLICY,
             sandbox=settings.CODEX_SANDBOX,
