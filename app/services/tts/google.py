@@ -78,7 +78,6 @@ class GoogleTTS:
             encoding=encoding,
             text_length=len(text),
             bytes=out_path.stat().st_size,
-            detected=language_code is None,
         )
         return out_path
 

@@ -24,6 +24,7 @@ dependencies = [
     "orjson>=3.11.9",
     "fastmcp>=3.2.4",
     "markdown-it-py>=4.2.0",
+    "langid>=1.1.6",
 ]
 
 [dependency-groups]
