@@ -214,7 +214,9 @@ def _safe_cut(text: str, limit: int) -> tuple[int, bool]:
         idx = text.rfind(sep, 0, limit)
         while idx > 0 and inside(idx):
             idx = text.rfind(sep, 0, idx)
-        if idx > limit // 2:
+        # Пробіл — беремо будь-який, інакше character-cut посеред слова.
+        threshold = 0 if sep == " " else limit // 2
+        if idx > threshold:
             return idx + len(sep), False
     # Усе вікно всередині <pre> — ріжемо по newline у коді, балансуємо теги.
     safe_limit = limit - len("</code></pre>")
