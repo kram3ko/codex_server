@@ -112,7 +112,7 @@ services:
       - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U codex -d codex"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 10
 
@@ -130,7 +130,7 @@ services:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 10
 
@@ -149,7 +149,7 @@ services:
       - minio_data:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 10
 
