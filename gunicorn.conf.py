@@ -22,7 +22,9 @@ worker_class = "uvicorn.workers.UvicornWorker"
 workers = int(os.environ.get("GUNICORN_WORKERS", "2"))
 preload_app = _bool(os.environ.get("GUNICORN_PRELOAD", "true"))
 timeout = 60
-graceful_timeout = int(os.environ.get("GUNICORN_GRACEFUL_TIMEOUT", "8"))
+# Default 30s. Compose має stop_grace_period > цього (35s) щоб docker
+# SIGKILL не випередив graceful drain — best-practice 2026.
+graceful_timeout = int(os.environ.get("GUNICORN_GRACEFUL_TIMEOUT", "30"))
 
 def on_starting(server):
     server.log.info(

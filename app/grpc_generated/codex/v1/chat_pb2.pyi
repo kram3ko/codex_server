@@ -1,6 +1,7 @@
 import datetime
 
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
+from google.protobuf import struct_pb2 as _struct_pb2
 from codex.v1 import common_pb2 as _common_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
@@ -71,3 +72,87 @@ class DeleteChatRequest(_message.Message):
     CHAT_ID_FIELD_NUMBER: _ClassVar[int]
     chat_id: int
     def __init__(self, chat_id: _Optional[int] = ...) -> None: ...
+
+class RunTurnRequest(_message.Message):
+    __slots__ = ("chat_id", "text")
+    CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    chat_id: int
+    text: str
+    def __init__(self, chat_id: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
+
+class ChatEvent(_message.Message):
+    __slots__ = ("token", "tool_call", "tool_result", "done", "error")
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    TOOL_CALL_FIELD_NUMBER: _ClassVar[int]
+    TOOL_RESULT_FIELD_NUMBER: _ClassVar[int]
+    DONE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    token: TokenEvent
+    tool_call: ToolCallEvent
+    tool_result: ToolResultEvent
+    done: DoneEvent
+    error: ErrorEvent
+    def __init__(self, token: _Optional[_Union[TokenEvent, _Mapping]] = ..., tool_call: _Optional[_Union[ToolCallEvent, _Mapping]] = ..., tool_result: _Optional[_Union[ToolResultEvent, _Mapping]] = ..., done: _Optional[_Union[DoneEvent, _Mapping]] = ..., error: _Optional[_Union[ErrorEvent, _Mapping]] = ...) -> None: ...
+
+class TokenEvent(_message.Message):
+    __slots__ = ("delta",)
+    DELTA_FIELD_NUMBER: _ClassVar[int]
+    delta: str
+    def __init__(self, delta: _Optional[str] = ...) -> None: ...
+
+class ToolCallEvent(_message.Message):
+    __slots__ = ("name", "args")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    ARGS_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    args: _struct_pb2.Struct
+    def __init__(self, name: _Optional[str] = ..., args: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+
+class Attachment(_message.Message):
+    __slots__ = ("kind", "source", "caption")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    CAPTION_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    source: str
+    caption: str
+    def __init__(self, kind: _Optional[str] = ..., source: _Optional[str] = ..., caption: _Optional[str] = ...) -> None: ...
+
+class ToolResultEvent(_message.Message):
+    __slots__ = ("name", "text", "attachments", "error")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    ATTACHMENTS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    text: str
+    attachments: _containers.RepeatedCompositeFieldContainer[Attachment]
+    error: str
+    def __init__(self, name: _Optional[str] = ..., text: _Optional[str] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., error: _Optional[str] = ...) -> None: ...
+
+class DoneEvent(_message.Message):
+    __slots__ = ("chat_id", "final_text")
+    CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    FINAL_TEXT_FIELD_NUMBER: _ClassVar[int]
+    chat_id: int
+    final_text: str
+    def __init__(self, chat_id: _Optional[int] = ..., final_text: _Optional[str] = ...) -> None: ...
+
+class ErrorEvent(_message.Message):
+    __slots__ = ("code", "detail")
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    DETAIL_FIELD_NUMBER: _ClassVar[int]
+    code: str
+    detail: str
+    def __init__(self, code: _Optional[str] = ..., detail: _Optional[str] = ...) -> None: ...
+
+class InterruptTurnRequest(_message.Message):
+    __slots__ = ("chat_id",)
+    CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    chat_id: int
+    def __init__(self, chat_id: _Optional[int] = ...) -> None: ...
+
+class InterruptTurnResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...

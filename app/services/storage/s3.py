@@ -53,11 +53,18 @@ class S3Storage:
 
     async def presigned_url(self, key: str, expires_s: int = 3600) -> str:
         async with self._client() as s3:
-            return await s3.generate_presigned_url(
+            url = await s3.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self._bucket, "Key": key},
                 ExpiresIn=expires_s,
             )
+        # Browser-reachable host: rewrite internal endpoint (docker DNS)
+        # to public one if differ. Підпис S3 v4 валідний бо включає тільки
+        # шлях/час/сігнатуру, не хост у канонічному запиті.
+        public = settings.S3_PUBLIC_ENDPOINT
+        if public and public != self._endpoint:
+            url = url.replace(self._endpoint, public, 1)
+        return url
 
     async def delete(self, key: str) -> None:
         async with self._client() as s3:

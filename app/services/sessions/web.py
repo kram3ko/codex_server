@@ -29,8 +29,7 @@ class WebSessionStore(BaseChatSessionStore[int, None]):
                 db_user_id=user.id,
                 db_chat_id=chat.id,
                 stored_thread_id=chat.codex_thread_id,
-                # Preserve the existing web path behavior: browser chat uses
-                # the primary admin sidecar, not the guest sidecar.
+                # Browser chat uses the primary admin sidecar, not guest.
                 is_admin=True,
             )
 

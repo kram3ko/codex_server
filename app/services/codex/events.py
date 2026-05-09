@@ -176,13 +176,22 @@ def _mcp_attachments(item: dict[str, Any]) -> tuple[Attachment, ...]:
     """Витягти `Attachment` з MCP-результату.
 
     Контракт: MCP-тула повертає `{"path": "<image>", "caption": "..."}`.
-    Path має бути image MIME (mimetypes.guess_type) — інакше ризик надіслати
-    .env / .json як photo. Trusted-root перевіряється далі у
-    `upload_service.persist_attachments`.
+    MCP SDK може покласти його у `structuredContent` (typed) або всередині
+    text-блоків `content[].text` як JSON-стрінг — підтримуємо обидва. Path
+    має бути image MIME — інакше ризик надіслати .env/.json як photo.
     """
     result = item.get("result")
     if not isinstance(result, dict):
         return ()
+
+    # Prefer typed structuredContent (newer MCP feature).
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict):
+        attachment = _attachment_from_dict(structured)
+        if attachment is not None:
+            return (attachment,)
+
+    # Fallback: text blocks з JSON-payload.
     for block in result.get("content") or []:
         if not isinstance(block, dict) or block.get("type") != "text":
             continue
@@ -193,15 +202,25 @@ def _mcp_attachments(item: dict[str, Any]) -> tuple[Attachment, ...]:
             continue
         if not isinstance(data, dict):
             continue
-        path = data.get("path")
-        if not isinstance(path, str) or not path:
-            continue
-        mime, _ = mimetypes.guess_type(path)
-        if mime is None or not mime.startswith("image/"):
-            continue
-        caption = data.get("caption")
-        return _image_attachment(path, caption if isinstance(caption, str) else "")
+        attachment = _attachment_from_dict(data)
+        if attachment is not None:
+            return (attachment,)
     return ()
+
+
+def _attachment_from_dict(data: dict[str, Any]) -> Attachment | None:
+    path = data.get("path")
+    if not isinstance(path, str) or not path:
+        return None
+    mime, _ = mimetypes.guess_type(path)
+    if mime is None or not mime.startswith("image/"):
+        return None
+    caption = data.get("caption")
+    return Attachment(
+        kind=AttachmentKind.IMAGE,
+        source=path,
+        caption=caption if isinstance(caption, str) else "",
+    )
 
 
 type _ItemExtractor[T] = Callable[[dict[str, Any]], T]

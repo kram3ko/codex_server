@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # --- Object storage (MinIO local / R2 prod) ---
     STORAGE_BACKEND: str = "s3"  # s3 | dropbox | gdrive (future)
     S3_ENDPOINT: str = "http://localhost:9000"
+    # Browser-facing prefix/endpoint для presigned URLs.
+    # У compose: S3_ENDPOINT=http://minio:9000 (internal),
+    # S3_PUBLIC_ENDPOINT=/minio (same-origin proxy via web/nginx).
+    S3_PUBLIC_ENDPOINT: str = ""
     S3_ACCESS_KEY_ID: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
     S3_BUCKET: str = "personal-codex"
@@ -61,7 +65,7 @@ class Settings(BaseSettings):
     # Idle cap на турн: якщо Codex sidecar мовчить довше цього часу між
     # events/chunks → interrupt() і звільняємо turn_lock.
     TG_TURN_TIMEOUT_SECONDS: float = 300.0
-    WS_TURN_TIMEOUT_SECONDS: float = 300.0
+    WEB_TURN_TIMEOUT_SECONDS: float = 300.0
     TG_POLLING_LOCK_TTL_SECONDS: int = 60
 
     # --- Auth (single-user JWT) ---

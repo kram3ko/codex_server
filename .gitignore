@@ -293,6 +293,12 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+node_modules/
+web/dist/
+web/src/gen/
+!scripts/
+!scripts/gen-proto.sh
+
 ### venv ###
 # Virtualenv
 # http://iamzed.com/2009/05/07/a-primer-on-virtualenv/

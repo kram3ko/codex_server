@@ -3,6 +3,7 @@ syntax = "proto3";
 package codex.v1;
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 import "codex/v1/common.proto";
 
 // Chat = одна розмова (web або telegram). Тримає `codex_thread_id` для
@@ -48,9 +49,64 @@ message DeleteChatRequest {
   int64 chat_id = 1;
 }
 
+message RunTurnRequest {
+  optional int64 chat_id = 1;
+  string text = 2;
+}
+
+message ChatEvent {
+  oneof kind {
+    TokenEvent token = 1;
+    ToolCallEvent tool_call = 2;
+    ToolResultEvent tool_result = 3;
+    DoneEvent done = 4;
+    ErrorEvent error = 5;
+  }
+}
+
+message TokenEvent {
+  string delta = 1;
+}
+
+message ToolCallEvent {
+  string name = 1;
+  google.protobuf.Struct args = 2;
+}
+
+message Attachment {
+  string kind = 1;
+  string source = 2;
+  string caption = 3;
+}
+
+message ToolResultEvent {
+  string name = 1;
+  string text = 2;
+  repeated Attachment attachments = 3;
+  optional string error = 4;
+}
+
+message DoneEvent {
+  int64 chat_id = 1;
+  string final_text = 2;
+}
+
+message ErrorEvent {
+  string code = 1;
+  optional string detail = 2;
+}
+
+message InterruptTurnRequest {
+  int64 chat_id = 1;
+}
+
+message InterruptTurnResponse {}
+
 service ChatService {
   rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
   rpc GetChat(GetChatRequest) returns (Chat);
   rpc RenameChat(RenameChatRequest) returns (Chat);
   rpc DeleteChat(DeleteChatRequest) returns (Empty);
+  rpc RunTurn(RunTurnRequest) returns (stream ChatEvent);
+  rpc InterruptTurn(InterruptTurnRequest) returns (InterruptTurnResponse);
 }
