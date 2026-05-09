@@ -23,6 +23,10 @@
 
   let container = $state<HTMLDivElement | null>(null);
   let stickToBottom = $state(true);
+  let showCompleted = $state(false);
+
+  const runningTools = $derived(tools.filter((t) => t.status === "running"));
+  const completedTools = $derived(tools.filter((t) => t.status !== "running"));
 
   function onscroll() {
     if (!container) return;
@@ -52,9 +56,24 @@
 
     {#if tools.length}
       <div class="ml-11 max-w-[760px] space-y-2">
-        {#each tools as tool (tool.id)}
+        {#each runningTools as tool (tool.id)}
           <ToolCall event={tool} />
         {/each}
+        {#if completedTools.length}
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-left text-xs text-[var(--color-text-muted)] transition hover:bg-[oklch(96%_0.01_100/0.04)]"
+            onclick={() => (showCompleted = !showCompleted)}
+          >
+            <span>{showCompleted ? "▼" : "▶"}</span>
+            <span>{completedTools.length} completed</span>
+          </button>
+          {#if showCompleted}
+            {#each completedTools as tool (tool.id)}
+              <ToolCall event={tool} />
+            {/each}
+          {/if}
+        {/if}
       </div>
     {/if}
 
