@@ -31,10 +31,10 @@ class CodexUsage:
 
 class CodexUsageService:
     async def latest(self, client: CodexClient) -> CodexUsage | None:
-        payload = await client.read_rate_limits()
-        if payload is None:
+        snapshot = await client.read_rate_limits()
+        if snapshot is None:
             return None
-        return _parse_usage(payload)
+        return _parse_usage(snapshot)
 
 
 def _parse_usage(payload: dict[str, Any]) -> CodexUsage:

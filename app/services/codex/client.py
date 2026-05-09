@@ -293,6 +293,7 @@ class CodexClient:
            treat as gone and open a fresh one.
         3. No id → `thread/start` opens a new thread.
         """
+        await self._ensure_alive()
         if self._thread_id is not None and self._thread_resumed_or_started:
             return self._thread_id
 
@@ -402,6 +403,7 @@ class CodexClient:
         thread_id = self._thread_id
         if not thread_id or not items:
             return
+        await self._ensure_alive()
         try:
             await self._transport.request(
                 _Method.THREAD_INJECT_ITEMS,
@@ -414,13 +416,18 @@ class CodexClient:
 
     async def read_rate_limits(self) -> dict[str, Any] | None:
         """Returns Codex plan rate-limit snapshot (account-level, no thread).
-        None коли sidecar не expose'ить метод (-32601)."""
+
+        Sidecar wrap'ить snapshot у `{rateLimits: {...}}` — розгортаємо тут,
+        щоб caller отримав готові primary/secondary/planType. None коли
+        sidecar не expose'ить метод (-32601)."""
         try:
-            return await self._transport.request(_Method.ACCOUNT_RATE_LIMITS_READ)
+            result = await self._transport.request(_Method.ACCOUNT_RATE_LIMITS_READ)
         except AppServerError as exc:
             if exc.code == -32601:
                 return None
             raise
+        snapshot = result.get("rateLimits")
+        return snapshot if isinstance(snapshot, dict) else None
 
     async def start_new_thread(self) -> None:
         prev = self._thread_id
