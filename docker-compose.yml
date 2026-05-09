@@ -1,6 +1,6 @@
 services:
   # FastAPI + Telegram bot polling. Спілкується з Codex CLI (sidecar
-  # codex-app-server) через ws://codex-app-server:4500.
+  # codex-cli) через ws://codex-cli:4500.
   codex-server:
     build: .
     container_name: codex-server
@@ -13,16 +13,17 @@ services:
       DATABASE_URL: postgresql+asyncpg://codex:codex@postgres:5432/codex
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       S3_ENDPOINT: http://minio:9000
-      CODEX_APP_SERVER_URL: ws://codex-app-server:4500
-      CODEX_GUEST_APP_SERVER_URL: ws://codex-app-server-guest:4500
+      CODEX_CLI_URL: ws://codex-cli:4500
+      CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_PRELOAD: ${GUNICORN_PRELOAD:-true}
     volumes:
       # Source of truth — host repo as workspace AND uvicorn cwd.
       - ./:/home/codex/workspace
       # Codex sidecar's image_generation outputs (read by FSInputFile).
       - ./.codex/generated_images:/home/codex/.codex/generated_images:ro
-      # Docker daemon API for /restart (httpx + UDS).
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    # Конфіг — gunicorn.conf.py (env-driven: GUNICORN_WORKERS, GUNICORN_PRELOAD).
+    command: gunicorn app.main:app -c gunicorn.conf.py
     healthcheck:
       # Викликає наш HealthService.Check через Connect (як aism-py
       # використовує grpc_health.v1 у scripts/healthcheck.py).
@@ -40,16 +41,18 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-      codex-app-server:
+      codex-cli:
+        condition: service_healthy
+      codex-cli-guest:
         condition: service_healthy
 
   # Codex CLI у режимі WebSocket app-server. Окремий контейнер з бінарником
   # codex від OpenAI. Не публікуємо порт назовні — тільки docker-network.
-  codex-app-server:
+  codex-cli:
     build:
       context: .
       dockerfile: docker/codex/Dockerfile
-    container_name: codex-app-server
+    container_name: codex-cli
     restart: unless-stopped
     user: "0:0"
     # No OPENAI_API_KEY — codex auth via mounted ./.codex/auth.json (subscription).
@@ -57,6 +60,9 @@ services:
       # Bearer для виклику нашого MCP endpoint'у на codex-server. Той самий
       # токен має бути в codex-server (через .env → settings.MCP_CALLBACK_TOKEN).
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+      # Codex запускає `docker compose ...` з cwd /home/codex/workspace —
+      # без цього Compose адресував би "workspace" project замість нашого.
+      COMPOSE_PROJECT_NAME: codex_server
     volumes:
       # auth.json (для ChatGPT/Codex subscription mode, опційно)
       - ./.codex:/home/codex/.codex:rw
@@ -71,15 +77,16 @@ services:
       retries: 5
       start_period: 10s
 
-  codex-app-server-guest:
+  codex-cli-guest:
     build:
       context: .
       dockerfile: docker/codex/Dockerfile
-    container_name: codex-app-server-guest
+    container_name: codex-cli-guest
     restart: unless-stopped
     user: "0:0"
     environment:
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+      COMPOSE_PROJECT_NAME: codex_server
     volumes:
       - ./.codex-guest:/home/codex/.codex:rw
       - ./.codex/generated_images:/home/codex/.codex/generated_images:rw
@@ -109,7 +116,7 @@ services:
       - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U codex -d codex"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 10
 
@@ -127,7 +134,7 @@ services:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 10
 
@@ -146,7 +153,7 @@ services:
       - minio_data:/data
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 10
 

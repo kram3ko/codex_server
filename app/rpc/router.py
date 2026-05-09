@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from connectrpc.server import ConnectASGIApplication
+from starlette.types import Receive, Scope, Send
 
 
 class ConnectRouter:
@@ -18,7 +19,7 @@ class ConnectRouter:
     def __init__(self, services: Iterable[ConnectASGIApplication[Any]]) -> None:
         self._services = list(services)
 
-    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "lifespan"):
             return
 
@@ -37,9 +38,11 @@ class ConnectRouter:
                 await service(scope, receive, send)
                 return
 
-        await send({
-            "type": "http.response.start",
-            "status": 404,
-            "headers": [(b"content-type", b"text/plain")],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 404,
+                "headers": [(b"content-type", b"text/plain")],
+            }
+        )
         await send({"type": "http.response.body", "body": b"not found"})

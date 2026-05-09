@@ -38,6 +38,22 @@ class ChatService:
         await session.flush()
         return chat
 
+    async def get_or_create_for_web(self, session: AsyncSession, user_id: int) -> Chat:
+        existing = (
+            await session.execute(
+                select(Chat)
+                .where(
+                    Chat.source == ChatSource.WEB,
+                    Chat.user_id == user_id,
+                )
+                .order_by(Chat.id.asc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if existing is not None:
+            return existing
+        return await self.create_web_chat(session, user_id)
+
     async def set_codex_thread_id(
         self,
         session: AsyncSession,

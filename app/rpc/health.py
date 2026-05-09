@@ -77,7 +77,7 @@ async def _probe_codex_sidecar() -> bool:
     """Cheap WS-handshake to confirm sidecar accepts connections."""
     with contextlib.suppress(Exception):
         async with websockets.connect(
-            settings.CODEX_APP_SERVER_URL,
+            settings.CODEX_CLI_URL,
             open_timeout=2.0,
             close_timeout=1.0,
         ):

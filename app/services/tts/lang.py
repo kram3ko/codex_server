@@ -1,6 +1,6 @@
-"""Heuristic language detection + Google voice mapping for TTS."""
+"""Language detection (langid restricted to uk/ru/en) + Google voice mapping."""
 
-_DEFAULT_LANGUAGE_CODE = "uk-UA"
+from langid.langid import LanguageIdentifier, model
 
 # Chirp3-HD-Kore — Google's newest HD female voice, same timbre across all
 # languages (звучить як одна людина перемикається мовами). Якщо мови розширюємо —
@@ -11,20 +11,30 @@ _VOICE_BY_LANGUAGE: dict[str, str] = {
     "en-US": "en-US-Chirp3-HD-Kore",
 }
 
-_UA_MARKERS = frozenset("їєіґЇЄІҐ")
+_LANGID_TO_BCP47: dict[str, str] = {
+    "uk": "uk-UA",
+    "ru": "ru-RU",
+    "en": "en-US",
+}
+
+_DEFAULT_LANGUAGE_CODE = "uk-UA"
+# Нижче цього confidence (langid `norm_probs=True` → [0..1]) — амбівалентно
+# (типу "так" однаково uk/ru). Беремо default замість гадання.
+_CONFIDENCE_THRESHOLD = 0.55
+
+_identifier = LanguageIdentifier.from_modelstring(model, norm_probs=True)
+_identifier.set_languages(list(_LANGID_TO_BCP47.keys()))
 
 
 def detect_language_code(text: str) -> str:
     """Return BCP-47 code for `text`. Falls back to uk-UA on empty/ambiguous input."""
-    sample = text[:500]
-    cyrillic = sum(1 for c in sample if "Ѐ" <= c <= "ӿ")
-    latin = sum(1 for c in sample if c.isascii() and c.isalpha())
-
-    if cyrillic > latin:
-        return "uk-UA" if any(c in _UA_MARKERS for c in sample) else "ru-RU"
-    if latin > 0:
-        return "en-US"
-    return _DEFAULT_LANGUAGE_CODE
+    sample = text.strip()[:500]
+    if not sample:
+        return _DEFAULT_LANGUAGE_CODE
+    code, confidence = _identifier.classify(sample)
+    if confidence < _CONFIDENCE_THRESHOLD:
+        return _DEFAULT_LANGUAGE_CODE
+    return _LANGID_TO_BCP47.get(code, _DEFAULT_LANGUAGE_CODE)
 
 
 def voice_for_language(language_code: str) -> str | None:

@@ -13,7 +13,10 @@ class Note(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list[str]] = mapped_column(
-        ARRAY(String), nullable=False, default=list, server_default="{}",
+        ARRAY(String),
+        nullable=False,
+        default=list,
+        server_default="{}",
     )
     search_vector: Mapped[str] = mapped_column(
         TSVECTOR,

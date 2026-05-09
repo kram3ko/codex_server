@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 import structlog
 from redis.asyncio import Redis
+from redis.asyncio.client import PubSub
 
 from app.services.codex.events import ChatEvent, bytes_to_event, event_to_bytes
 
@@ -51,7 +52,7 @@ class EventBus:
                 await pubsub.aclose()
 
     @staticmethod
-    async def _iter(pubsub) -> AsyncIterator[ChatEvent]:  # type: ignore[no-untyped-def]
+    async def _iter(pubsub: PubSub) -> AsyncIterator[ChatEvent]:
         async for message in pubsub.listen():
             if message.get("type") != "message":
                 continue

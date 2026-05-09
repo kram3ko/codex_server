@@ -1,15 +1,15 @@
 """Thin aiogram handlers — delegate to TurnRunner / ChatSessionStore."""
 
-import asyncio
-import os
-import signal
+from datetime import UTC, datetime
 
 import structlog
 from aiogram.types import CallbackQuery, Message
 
+from app.config import settings
 from app.db.base import SessionLocal
 from app.models import EventKind
-from app.services.docker.default import docker_control
+from app.services.codex_usage.default import codex_usage_service
+from app.services.codex_usage.service import CodexUsage, UsageWindow
 from app.services.events.default import event_service
 from app.tg.markdown import tg_markdown
 from app.tg.progress import CB_TURN_NEW, CB_TURN_STEER, CB_TURN_STOP
@@ -18,8 +18,6 @@ from app.tg.turn import TurnRunner, cancel_turn
 
 log = structlog.get_logger(__name__)
 
-_SELF_CONTAINER_NAME = "codex-server"
-
 
 class TGHandlers:
     def __init__(self, sessions: ChatSessionStore, runner: TurnRunner) -> None:
@@ -27,17 +25,21 @@ class TGHandlers:
         self._runner = runner
 
     async def on_start(self, message: Message) -> None:
-        await message.answer(tg_markdown.escape(
-            "Bot is running. Send text, photo, or voice — Codex will reply here.",
-        ))
+        await message.answer(
+            tg_markdown.escape(
+                "Bot is running. Send text, photo, or voice — Codex will reply here.",
+            )
+        )
 
     async def on_reset(self, message: Message) -> None:
         if message.chat is None:
             return
         existed = await self._sessions.reset(message.chat.id)
-        await message.answer(tg_markdown.escape(
-            "Session reset." if existed else "No active session.",
-        ))
+        await message.answer(
+            tg_markdown.escape(
+                "Session reset." if existed else "No active session.",
+            )
+        )
 
     async def on_new(self, message: Message) -> None:
         """Start a new Codex thread without tearing down the WS session."""
@@ -70,13 +72,22 @@ class TGHandlers:
             tg_markdown.escape("Turn interrupted." if cancelled else "No active turn to stop."),
         )
 
-    async def on_restart(self, message: Message) -> None:
-        log.warning(
-            "tg_restart_requested",
-            user_id=message.from_user.id if message.from_user else None,
-        )
-        await message.answer(tg_markdown.escape("🔄 Перезапуск сервера..."))
-        asyncio.create_task(_restart_self())
+    async def on_codex_usage(self, message: Message) -> None:
+        if message.from_user is None or message.from_user.id not in settings.TG_ADMIN_USER_IDS:
+            return
+        if message.chat is None:
+            return
+        session = await self._sessions.get(message.chat.id)
+        if session is None:
+            await message.answer(
+                tg_markdown.escape("Спочатку напиши боту хоч одне повідомлення."),
+            )
+            return
+        usage = await codex_usage_service.latest(session.client)
+        if usage is None:
+            await message.answer(tg_markdown.escape("Sidecar не expose'ить rate-limits RPC."))
+            return
+        await message.answer(tg_markdown.escape(_format_codex_usage(usage)))
 
     async def on_callback(self, query: CallbackQuery) -> None:
         if query.message is None or query.message.chat is None:
@@ -107,9 +118,11 @@ class TGHandlers:
                 return
             session.steer_pending = True
             await query.answer("Напиши доповнення наступним повідомленням")
-            await query.message.answer(tg_markdown.escape(
-                "✏️ Напиши що додати — наступне повідомлення піде у поточний turn",
-            ))
+            await query.message.answer(
+                tg_markdown.escape(
+                    "✏️ Напиши що додати — наступне повідомлення піде у поточний turn",
+                )
+            )
         else:
             await query.answer()
 
@@ -132,11 +145,45 @@ class TGHandlers:
         await self._runner.handle(message)
 
 
-async def _restart_self() -> None:
-    # Slight delay so the "Перезапуск..." message reaches Telegram before the
-    # container goes down.
-    await asyncio.sleep(0.3)
-    if await docker_control.restart_container(_SELF_CONTAINER_NAME):
-        return
-    log.warning("tg_restart_falling_back_to_sigterm")
-    os.kill(os.getpid(), signal.SIGTERM)
+def _format_codex_usage(usage: CodexUsage) -> str:
+    plan = usage.plan_type or "unknown"
+    lines = [f"📊 Codex usage · {plan}", ""]
+    if usage.primary is not None:
+        lines.extend(_format_window("5h", usage.primary))
+    if usage.secondary is not None:
+        if len(lines) > 2:
+            lines.append("")
+        lines.extend(_format_window("week", usage.secondary))
+    if usage.updated_at is not None:
+        lines.extend(("", f"updated {_format_dt(usage.updated_at)}"))
+    return "\n".join(lines)
+
+
+def _format_window(label: str, window: UsageWindow) -> list[str]:
+    used = round(window.used_percent)
+    left = round(window.left_percent)
+    return [
+        f"{label}   {_usage_dots(window.used_percent)} {used}% used",
+        f"left {left}%",
+        f"reset {_format_dt(window.resets_at)}",
+    ]
+
+
+def _usage_dots(used_percent: float, *, width: int = 10) -> str:
+    filled = max(0, min(width, round(width * used_percent / 100)))
+    icon = _usage_icon(used_percent)
+    return icon * filled + "⚪" * (width - filled)
+
+
+def _usage_icon(used_percent: float) -> str:
+    if used_percent >= 80:
+        return "🔴"
+    if used_percent >= 50:
+        return "🟡"
+    return "🟢"
+
+
+def _format_dt(value: datetime | None) -> str:
+    if value is None:
+        return "unknown"
+    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")

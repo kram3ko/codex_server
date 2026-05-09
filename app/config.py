@@ -11,19 +11,14 @@ class Settings(BaseSettings):
 
     # --- Codex sidecar ---
     # OPENAI_API_KEY живе тільки у .env → docker-compose передає його у
-    # codex-app-server контейнер. Нашій FastAPI його не треба як settings.
-    CODEX_APP_SERVER_URL: str = "ws://localhost:4500"
-    CODEX_GUEST_APP_SERVER_URL: str = "ws://codex-app-server-guest:4500"
+    # codex-cli контейнер. Нашому FastAPI він не треба як settings.
+    CODEX_CLI_URL: str = "ws://localhost:4500"
+    CODEX_CLI_GUEST_URL: str = "ws://codex-cli-guest:4500"
     CODEX_CWD: str = "/home/codex/workspace"
     CODEX_APPROVAL_POLICY: str = "never"
     CODEX_SANDBOX: str = "danger-full-access"
-    CODEX_REQUEST_TIMEOUT_SECONDS: float = 500.0
-    # Reuse stored codex_thread_id for token economy (sidecar resumes from disk).
-    # Disable якщо побачимо проблеми (silent-finalization тощо) — кожен turn
-    # тоді відкриватиме fresh thread.
+    CODEX_REQUEST_TIMEOUT_SECONDS: float = 600.0
     CODEX_THREAD_REUSE_ENABLED: bool = True
-    # Reasoning effort на кожен turn. Enum: none/minimal/low/medium/high/xhigh.
-    # Default `medium` — Codex CLI baseline. Override через env коли треба.
     CODEX_REASONING_EFFORT: str = "medium"
 
     # --- Speech-to-text (Speechmatics batch v2) ---
@@ -63,9 +58,10 @@ class Settings(BaseSettings):
     TG_ADMIN_USER_IDS: set[int] = set()
     TG_PROGRESS_DELAY_SECONDS: float = 0.0
     TG_DRAFT_ENABLED: bool = False
-    # Hard cap на турн: якщо Codex sidecar завис → asyncio.timeout перерве
-    # _stream_turn, ми викличемо interrupt() і звільнимо turn_lock.
+    # Idle cap на турн: якщо Codex sidecar мовчить довше цього часу між
+    # events/chunks → interrupt() і звільняємо turn_lock.
     TG_TURN_TIMEOUT_SECONDS: float = 300.0
+    WS_TURN_TIMEOUT_SECONDS: float = 300.0
     TG_POLLING_LOCK_TTL_SECONDS: int = 60
 
     # --- Auth (single-user JWT) ---

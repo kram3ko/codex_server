@@ -97,7 +97,10 @@ class UploadsRPC(UploadsProtocol):
         chat_id = request.chat_id if request.HasField("chat_id") else None
         async with SessionLocal() as db:
             uploads = await upload_service.list(
-                db, chat_id=chat_id, limit=limit, offset=offset,
+                db,
+                chat_id=chat_id,
+                limit=limit,
+                offset=offset,
             )
         return uploads_pb2.ListUploadsResponse(uploads=[upload_to_pb(u) for u in uploads])
 

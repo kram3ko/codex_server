@@ -17,15 +17,19 @@ def messages_to_history_items(messages: list[Message]) -> list[dict[str, Any]]:
         if not text:
             continue
         if msg.role is MessageRole.USER:
-            items.append({
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": text}],
-            })
+            items.append(
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": text}],
+                }
+            )
         else:
-            items.append({
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": text}],
-            })
+            items.append(
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}],
+                }
+            )
     return items

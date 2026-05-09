@@ -23,7 +23,7 @@ from app.grpc_generated.codex.v1.message_connect import MessageServiceASGIApplic
 from app.grpc_generated.codex.v1.notes_connect import NotesServiceASGIApplication
 from app.grpc_generated.codex.v1.uploads_connect import UploadsServiceASGIApplication
 from app.grpc_generated.codex.v1.user_connect import UserServiceASGIApplication
-from app.mcp import mcp_app, mount_mcp_server
+from app.mcp import mcp_http_app
 from app.rpc.auth import AuthRPC
 from app.rpc.chat import ChatRPC
 from app.rpc.event import EventRPC
@@ -37,24 +37,32 @@ from app.services.auth.default import auth_service
 from app.services.cache.default import cache
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
+from app.ws.sessions import web_sessions
 
 log = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    log.info("app_startup")
-    async with SessionLocal() as db:
-        promoted = await user_service.ensure_admin_roles(db)
-        await db.commit()
-        if promoted:
-            log.info("user_roles_admin_promoted", count=promoted)
-    await tg_bot_service.start()
-    yield
-    log.info("app_shutdown")
-    await tg_bot_service.stop()
-    await cache.aclose()
-    await engine.dispose()
+    # FastMCP lifespan стартує StreamableHTTPSessionManager — обов'язково wrap.
+    async with mcp_http_app.lifespan(_app):
+        log.info("app_startup")
+        async with SessionLocal() as db:
+            promoted = await user_service.ensure_admin_roles(db)
+            await db.commit()
+            if promoted:
+                log.info("user_roles_admin_promoted", count=promoted)
+        await tg_bot_service.start()
+        yield
+        log.info("app_shutdown")
+        cancelled = await tg_bot_service.interrupt_active_turns()
+        cancelled += await web_sessions.interrupt_all_turns()
+        if cancelled:
+            log.info("app_shutdown_turns_interrupted", count=cancelled)
+        await tg_bot_service.stop()
+        await web_sessions.close_all()
+        await cache.aclose()
+        await engine.dispose()
 
 
 app = FastAPI(
@@ -75,13 +83,10 @@ connect_router = ConnectRouter(
         UploadsServiceASGIApplication(UploadsRPC()),
     ]
 )
-app.mount("/api", connect_router)  # type: ignore[arg-type]
+app.mount("/api", connect_router)
 
-# MCP sub-app: streamable-HTTP transport на /mcp/streamable. mount_mcp_server()
-# мусить бути викликаний ДО app.mount, бо fastapi-mcp дискаверить ендпоінти на
-# момент маунту. Тули реєструються через side-effect import у `app.mcp`.
-mount_mcp_server()
-app.mount("/mcp", mcp_app)
+# FastMCP streamable-HTTP — URL: /mcp/streamable.
+app.mount("/mcp", mcp_http_app)
 
 app.include_router(health_router)
 app.include_router(chat_ws_router)

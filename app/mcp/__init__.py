@@ -1,14 +1,9 @@
-"""MCP sub-app — auth, tools, mount.
+"""FastMCP server + ASGI app. Side-effect import тул ДО build — інакше
+FastMCP не побачить @mcp.tool на момент створення routes."""
 
-`main.py` робить:
-    from app.mcp import mcp_app, mount_mcp_server
-    mount_mcp_server()
-    app.mount("/mcp", mcp_app)
+from app.mcp.core import build_mcp_http_app, mcp
+from app.mcp.tools import *  # noqa: F401,F403 — register @mcp.tool decorators
 
-Side-effect import тул мусить бути ДО `mount_mcp_server()`.
-"""
+mcp_http_app = build_mcp_http_app()
 
-from app.mcp.core import mcp_app, mount_mcp_server
-from app.mcp.tools import *  # noqa: F401,F403 — register tool endpoints
-
-__all__ = ["mcp_app", "mount_mcp_server"]
+__all__ = ["mcp", "mcp_http_app"]

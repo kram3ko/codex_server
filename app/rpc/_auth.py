@@ -1,7 +1,7 @@
 """JWT authentication helper for Connect-RPC handlers.
 
-Pulls `Authorization: Bearer <jwt>` from `RequestContext.headers`, validates
-through `auth_service`, and resolves to a DB User row. Use:
+Pulls `Authorization: Bearer <jwt>` from `RequestContext.request_headers`,
+validates through `auth_service`, and resolves to a DB User row. Use:
 
     user = await require_user(ctx)
 """
@@ -20,7 +20,7 @@ _WEB_USER_EMAIL = "web@codex.local"
 
 
 def jwt_subject(ctx: RequestContext) -> str:
-    headers = ctx.headers  # type: ignore[attr-defined]  # connectrpc generic narrow
+    headers = ctx.request_headers()
     auth = headers.get("authorization") or headers.get("Authorization") or ""
     if not auth.lower().startswith("bearer "):
         raise ConnectError(Code.UNAUTHENTICATED, "missing bearer token")

@@ -38,15 +38,15 @@ Personal AI playground: FastAPI backend з Codex CLI app-server, Telegram bot
 cp .env.example .env             # заповнити: TG_BOT_TOKEN, TG_ADMIN_USER_IDS,
                                  # REDIS_PASSWORD, SPEECHMATICS_API_KEY,
                                  # GOOGLE_TTS_API_KEY, MCP_CALLBACK_TOKEN
-docker compose up -d             # codex-server + codex-app-server +
-                                 # codex-app-server-guest + postgres + redis + minio
+docker compose up -d             # codex-server + codex-cli +
+                                 # codex-cli-guest + postgres + redis + minio
 ```
 
 Перед першим запуском гостьового sidecar — авторизуватись окремо (alt-ChatGPT
 аккаунт, не admin):
 
 ```bash
-docker compose run --rm codex-app-server-guest codex login --device-auth
+docker compose run --rm codex-cli-guest codex login --device-auth
 ```
 
 Без docker (тільки FastAPI, без Codex sidecar):
@@ -120,7 +120,7 @@ Google озвучує без зірочок/backtick'ів.
   через `/var/run/docker.sock` (без `docker` CLI в образі). Admin-only.
 - **Тести:** `uv run --group test pytest -q` (37 тестів).
 - **Lint/types:** `uv run --group lint ruff check app/ tests/` + `pyright app/`.
-- **Гарячий редеплой коду:** edit → save → `docker compose restart codex-server`
+- **Гарячий редеплой коду:** edit → save → `docker exec codex-server gunicornc -c reload`
   (workspace mount = source of truth, alembic зробить pending міграції).
 
 ## Структура
@@ -175,8 +175,8 @@ codex_server/
 │                               tg_turn, user_service)
 ├── docker/codex/               Dockerfile + entrypoint + AGENTS-guest.md
 ├── docker/server/              entrypoint.sh
-├── docker-compose.yml          codex-server + codex-app-server +
-│                               codex-app-server-guest + postgres + redis + minio
+├── docker-compose.yml          codex-server + codex-cli +
+│                               codex-cli-guest + postgres + redis + minio
 ├── pyproject.toml              Python 3.14 + deps
 ├── AGENTS.md                   Codex CLI persona contract (admin)
 ├── estimates/INTEGRATION.md    phase-by-phase status

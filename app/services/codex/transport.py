@@ -26,6 +26,10 @@ log = structlog.get_logger(__name__)
 _JSONRPC_VERSION = "2.0"
 _DEFAULT_REQUEST_TIMEOUT = 60.0
 _NOTIFICATION_QUEUE_MAX = 1000
+# Sidecar може transient'но не resolv'итись (recreate, DNS прогрів) одразу
+# після свого старту. Кілька коротких retry поглинають це вікно.
+_CONNECT_RETRIES = 3
+_CONNECT_BACKOFF_S = 1.5
 
 
 class AppServerError(RuntimeError):
@@ -83,19 +87,25 @@ class AppServerClient:
         async with self._connect_lock:
             if self._ws is not None:
                 return
-            headers = (
-                {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
-            )
+            headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
             log.info(
                 "app_server_connecting",
                 url=self._url,
                 authenticated=bool(self._auth_token),
             )
-            self._ws = await websockets.connect(
-                self._url,
-                max_size=100 * 1024 * 1024,
-                additional_headers=headers,
-            )
+            for attempt in range(1, _CONNECT_RETRIES + 1):
+                try:
+                    self._ws = await websockets.connect(
+                        self._url,
+                        max_size=100 * 1024 * 1024,
+                        additional_headers=headers,
+                    )
+                    break
+                except (OSError, websockets.WebSocketException) as exc:
+                    if attempt == _CONNECT_RETRIES:
+                        raise
+                    log.warning("app_server_connect_retry", attempt=attempt, error=str(exc))
+                    await asyncio.sleep(_CONNECT_BACKOFF_S * attempt)
             self._reader_task = asyncio.create_task(
                 self._read_loop(),
                 name="codex_app_server_reader",

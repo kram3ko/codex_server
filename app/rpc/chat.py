@@ -70,6 +70,7 @@ class ChatRPC(ChatProtocol):
             await db.commit()
         return common_pb2.Empty()
 
+
 def _resolve_limit(p: common_pb2.Pagination) -> int:
     limit = p.limit if p.limit > 0 else _DEFAULT_LIMIT
     return min(limit, _MAX_LIMIT)

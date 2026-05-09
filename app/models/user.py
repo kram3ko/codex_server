@@ -11,10 +11,16 @@ class User(Base):
     __tablename__ = "users"
 
     tg_user_id: Mapped[int | None] = mapped_column(
-        BigInteger, unique=True, nullable=True, index=True,
+        BigInteger,
+        unique=True,
+        nullable=True,
+        index=True,
     )
     email: Mapped[str | None] = mapped_column(
-        String(255), unique=True, nullable=True, index=True,
+        String(255),
+        unique=True,
+        nullable=True,
+        index=True,
     )
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(
