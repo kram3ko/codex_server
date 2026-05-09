@@ -17,27 +17,23 @@ Reconnect-семантика:
 """
 
 import asyncio
-import mimetypes
 from collections.abc import AsyncIterator, Awaitable, Callable
 from enum import StrEnum
 from typing import Any
 from urllib.parse import urlparse
 
-import orjson
 import structlog
-from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.codex.events import (
-    Attachment,
-    AttachmentKind,
     ChatEvent,
     DoneEvent,
     ErrorEvent,
     TokenEvent,
-    ToolCallEvent,
-    ToolResultEvent,
 )
-from app.services.codex.transport import AppServerClient, AppServerError, Notification
+from app.services.codex.events import (
+    translate_notification as _translate,
+)
+from app.services.codex.transport import AppServerClient, AppServerError
 
 log = structlog.get_logger(__name__)
 
@@ -55,195 +51,6 @@ class _Method(StrEnum):
     TURN_INTERRUPT = "turn/interrupt"
     ACCOUNT_RATE_LIMITS_READ = "account/rateLimits/read"
 
-
-class _Notif(StrEnum):
-    TURN_STARTED = "turn/started"
-    TURN_COMPLETED = "turn/completed"
-    AGENT_MSG_DELTA = "item/agentMessage/delta"
-    ITEM_STARTED = "item/started"
-    ITEM_COMPLETED = "item/completed"
-
-
-class _Item(StrEnum):
-    # Source of truth: openai/codex codex-rs/app-server-protocol/src/protocol/v2/item.rs
-    AGENT_MESSAGE = "agentMessage"
-    USER_MESSAGE = "userMessage"
-    HOOK_PROMPT = "hookPrompt"
-    PLAN = "plan"
-    REASONING = "reasoning"
-    COMMAND_EXECUTION = "commandExecution"
-    FILE_CHANGE = "fileChange"
-    MCP_TOOL_CALL = "mcpToolCall"
-    DYNAMIC_TOOL_CALL = "dynamicToolCall"
-    COLLAB_AGENT_TOOL_CALL = "collabAgentToolCall"
-    WEB_SEARCH = "webSearch"
-    IMAGE_VIEW = "imageView"
-    IMAGE_GENERATION = "imageGeneration"
-    ENTERED_REVIEW_MODE = "enteredReviewMode"
-    EXITED_REVIEW_MODE = "exitedReviewMode"
-    CONTEXT_COMPACTION = "contextCompaction"
-
-
-# Items that don't surface as progress events. agentMessage is hidden in the
-# `started` branch but extracted as a TokenEvent in `completed` (the long
-# fallback path when sidecar emits whole text instead of streaming deltas).
-_HIDDEN_ITEMS: frozenset[str] = frozenset(
-    {
-        _Item.USER_MESSAGE,
-        _Item.HOOK_PROMPT,
-        _Item.PLAN,
-        _Item.REASONING,
-        _Item.COLLAB_AGENT_TOOL_CALL,
-        _Item.ENTERED_REVIEW_MODE,
-        _Item.EXITED_REVIEW_MODE,
-        _Item.CONTEXT_COMPACTION,
-    }
-)
-
-
-def _command_args(item: dict[str, Any]) -> dict[str, Any]:
-    # `command` був list[str] у v1, став str у v2 — shape-bridge між версіями.
-    cmd = item["command"]
-    if isinstance(cmd, list):
-        cmd = " ".join(str(c) for c in cmd)
-    return {"command": cmd}
-
-
-def _image_attachment(source: str, caption: str = "") -> tuple[Attachment, ...]:
-    return (Attachment(kind=AttachmentKind.IMAGE, source=source, caption=caption),)
-
-
-def _mcp_attachments(item: dict[str, Any]) -> tuple[Attachment, ...]:
-    """Витягти `Attachment` з MCP-результату.
-
-    Контракт: MCP-тула повертає `{"path": "<image>", "caption": "..."}`.
-    Path має бути image MIME (mimetypes.guess_type) — інакше ризик надіслати
-    .env / .json як photo. Trusted-root перевіряється далі у
-    `upload_service.persist_attachments`.
-
-    Інші тули (без image-`path` у відповіді) → пуста tuple.
-    """
-    result = item.get("result")
-    if not isinstance(result, dict):
-        return ()
-    for block in result.get("content") or []:
-        if not isinstance(block, dict) or block.get("type") != "text":
-            continue
-        text = block.get("text") or ""
-        try:
-            data = orjson.loads(text)
-        except orjson.JSONDecodeError:
-            continue
-        if not isinstance(data, dict):
-            continue
-        path = data.get("path")
-        if not isinstance(path, str) or not path:
-            continue
-        mime, _ = mimetypes.guess_type(path)
-        if mime is None or not mime.startswith("image/"):
-            log.warning("mcp_attachment_non_image_dropped", path=path, mime=mime)
-            continue
-        caption = data.get("caption")
-        return _image_attachment(path, caption if isinstance(caption, str) else "")
-    return ()
-
-
-type _ItemExtractor[T] = Callable[[dict[str, Any]], T]
-type _LabelGetter = str | _ItemExtractor[str]
-
-
-# Optional UI-label override per MCP tool (operation_id → human label). Empty
-# dict ⇒ label == operation_id raw — додавати рядки сюди коли захочеш
-# локалізації або емодзі-префіксу для прогрес-бульбашки. Унікальний source of
-# truth — `_mcp_label` нижче.
-_MCP_TOOL_LABELS: dict[str, str] = {}
-
-
-def _mcp_label(item: dict[str, Any]) -> str:
-    """MCP item → label: friendly override якщо є, інакше operation_id."""
-    tool = item.get("tool") or "mcp"
-    return _MCP_TOOL_LABELS.get(tool, tool)
-
-
-class _BuiltinSpec(BaseModel):
-    """Декларативний опис builtin-Codex item'у: як його показати у TG progress
-    і як зібрати ToolResultEvent (text + attachments)."""
-
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    label: _LabelGetter = Field(
-        description=(
-            "UI-label. Статичний str для билт-інів (`shell`, `image_generation`),"
-            " або callable(item)→str для динамічних (MCP — лейбл з operation_id)."
-        ),
-    )
-    args: _ItemExtractor[dict[str, Any]] = Field(
-        default=lambda _: {},
-        description="Extract args dict з raw item payload для ToolCallEvent.args.",
-    )
-    text: _ItemExtractor[str] = Field(
-        default=lambda _: "",
-        description="Extract text-вивід тулзи для ToolResultEvent.text.",
-    )
-    attachments: _ItemExtractor[tuple[Attachment, ...]] = Field(
-        default=lambda _: (),
-        description="Extract структурні media-артефакти для ToolResultEvent.attachments.",
-    )
-
-    def _resolve_label(self, item: dict[str, Any]) -> str:
-        return self.label(item) if callable(self.label) else self.label
-
-    def to_started(self, item: dict[str, Any]) -> ToolCallEvent:
-        return ToolCallEvent(name=self._resolve_label(item), args=self.args(item))
-
-    def to_completed(self, item: dict[str, Any]) -> ToolResultEvent:
-        return ToolResultEvent(
-            name=self._resolve_label(item),
-            text=self.text(item),
-            attachments=self.attachments(item),
-            error=item.get("error"),
-        )
-
-
-# Codex builtin item-types які surface'имо як pseudo-tools у progress'і.
-# Поля required у Rust (див. v2/item.rs) → юзаємо `item[...]` без fallback'а.
-# Решта camelCase variants (collabAgent…, enteredReviewMode…) — у _HIDDEN_ITEMS.
-_BUILTINS: dict[str, _BuiltinSpec] = {
-    _Item.COMMAND_EXECUTION: _BuiltinSpec(
-        label="shell",
-        args=_command_args,
-        text=lambda item: item.get("aggregatedOutput") or "",
-    ),
-    _Item.FILE_CHANGE: _BuiltinSpec(
-        label="file_change",
-        args=lambda item: {"changes": item["changes"]},
-    ),
-    _Item.WEB_SEARCH: _BuiltinSpec(
-        label="web_search",
-        args=lambda item: {"query": item["query"]},
-    ),
-    _Item.MCP_TOOL_CALL: _BuiltinSpec(
-        label=_mcp_label,
-        args=lambda item: {"server": item["server"], "tool": item["tool"]},
-        attachments=_mcp_attachments,
-    ),
-    _Item.IMAGE_GENERATION: _BuiltinSpec(
-        label="image_generation",
-        # `revisedPrompt` від OpenAI Image API завжди англ — тримаємо у args
-        # для меми/трейсу, але НЕ робимо з нього TG caption: модель пише власну
-        # відповідь у мові юзера окремою бульбашкою перед фото.
-        args=lambda item: {"prompt": item.get("revisedPrompt", "")},
-        text=lambda item: item.get("revisedPrompt", ""),
-        attachments=lambda item: (
-            _image_attachment(item["savedPath"], "") if item.get("savedPath") else ()
-        ),
-    ),
-    _Item.IMAGE_VIEW: _BuiltinSpec(
-        label="image_view",
-        args=lambda item: {"path": item["path"]},
-        attachments=lambda item: _image_attachment(item["path"]),
-    ),
-}
 
 type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
 
@@ -537,36 +344,6 @@ class CodexClient:
             )
 
 
-def _dynamic_tool_call_to_event(item: dict[str, Any]) -> ToolResultEvent:
-    """Codex CLI dynamicToolCall (image_generation тощо) → typed event.
-
-    `contentItems[].inputImage.imageUrl` стає `Attachment(kind=IMAGE, …)`,
-    `inputText` зливається у `text`. Каллер шле binary напряму, без markdown
-    round-trip'у через regex.
-    """
-    text_parts: list[str] = []
-    attachments: list[Attachment] = []
-    tool_name: str = item["tool"]
-    for content in item["contentItems"]:
-        match content["type"]:
-            case "inputText":
-                text_parts.append(content["text"])
-            case "inputImage":
-                attachments.append(
-                    Attachment(
-                        kind=AttachmentKind.IMAGE,
-                        source=content["imageUrl"],
-                        caption=tool_name,
-                    )
-                )
-    return ToolResultEvent(
-        name=tool_name,
-        text="\n\n".join(p for p in text_parts if p.strip()),
-        attachments=tuple(attachments),
-        error=item.get("error"),
-    )
-
-
 def _is_thread_not_found(exc: AppServerError) -> bool:
     """Sidecar restarted → stored thread_id stale, retry with fresh thread."""
     return exc.code == -32600 and "thread not found" in str(exc).lower()
@@ -574,75 +351,3 @@ def _is_thread_not_found(exc: AppServerError) -> bool:
 
 def _extract_turn_id(result: dict[str, Any]) -> str:
     return result["turn"]["id"]
-
-
-def _translate(note: Notification, accumulated: str) -> ChatEvent | None:
-    match note.method:
-        case _Notif.TURN_STARTED:
-            return None
-        case _Notif.AGENT_MSG_DELTA:
-            delta: str = note.params["delta"]
-            return TokenEvent(delta=delta) if delta else None
-        case _Notif.ITEM_STARTED:
-            return _on_item_started(note.params["item"])
-        case _Notif.ITEM_COMPLETED:
-            return _on_item_completed(note.params["item"], accumulated)
-        case _Notif.TURN_COMPLETED:
-            return DoneEvent(final_text=note.params.get("finalText", accumulated))
-        case _:
-            return None
-
-
-def _on_item_started(item: dict[str, Any]) -> ChatEvent | None:
-    item_type: str = item["type"]
-    if item_type == _Item.AGENT_MESSAGE or item_type in _HIDDEN_ITEMS:
-        return None
-    spec = _BUILTINS.get(item_type)
-    if spec is not None:
-        return spec.to_started(item)
-    return _generic_tool_call(item)
-
-
-def _on_item_completed(item: dict[str, Any], accumulated: str) -> ChatEvent | None:
-    item_type: str = item["type"]
-    if item_type == _Item.AGENT_MESSAGE:
-        return _agent_message_to_token(item, accumulated)
-    if item_type in _HIDDEN_ITEMS:
-        return None
-    if item_type == _Item.DYNAMIC_TOOL_CALL:
-        return _dynamic_tool_call_to_event(item)
-    spec = _BUILTINS.get(item_type)
-    if spec is not None:
-        return spec.to_completed(item)
-    return _generic_tool_result(item)
-
-
-def _generic_tool_call(item: dict[str, Any]) -> ToolCallEvent | None:
-    tool_name = item.get("toolName")
-    if tool_name is None:
-        log.warning("codex_unknown_item_started", item_type=item["type"], keys=list(item.keys()))
-        return None
-    return ToolCallEvent(name=tool_name, args=item.get("arguments", {}))
-
-
-def _generic_tool_result(item: dict[str, Any]) -> ToolResultEvent | None:
-    tool_name = item.get("toolName")
-    if tool_name is None:
-        log.warning("codex_unknown_item_completed", item_type=item["type"], keys=list(item.keys()))
-        return None
-    return ToolResultEvent(
-        name=tool_name,
-        text=item.get("output", ""),
-        error=item.get("error"),
-    )
-
-
-def _agent_message_to_token(item: dict[str, Any], accumulated: str) -> ChatEvent | None:
-    # Sidecar may emit the whole agent-message as one item instead of streaming
-    # `agentMessage/delta`. Reconcile against `accumulated` to avoid double text.
-    text: str = item["text"]
-    if not text or accumulated.endswith(text):
-        return None
-    if text.startswith(accumulated):
-        return TokenEvent(delta=text[len(accumulated) :])
-    return TokenEvent(delta=text)

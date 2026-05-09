@@ -28,10 +28,11 @@ from app.services.codex.events import (
     ToolCallEvent,
     ToolCallRecord,
     ToolResultEvent,
+    iterate_with_idle_timeout,
 )
-from app.services.codex.history import messages_to_history_items
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
+from app.services.sessions.store import cancel_session_turn, quarantine_key
 from app.services.stt.base import STTBackend
 from app.services.uploads.default import upload_service
 from app.tg.markdown import tg_markdown
@@ -41,9 +42,6 @@ from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSession, ChatSessionStore
 
 log = structlog.get_logger(__name__)
-
-_HISTORY_REPLAY_LIMIT = 10
-_QUARANTINE_KEY_PREFIX = "codex:thread:quarantine:"
 
 
 class TurnRunner:
@@ -89,22 +87,7 @@ class TurnRunner:
 
     @staticmethod
     async def _seed_history_if_fresh_thread(session: ChatSession) -> None:
-        """Якщо наступний run_turn відкриватиме новий thread — inject DB history."""
-        if session.client.current_thread_id is not None:
-            return
-        async with SessionLocal() as db:
-            recent = await message_service.list_recent(
-                db,
-                session.db_chat_id,
-                limit=_HISTORY_REPLAY_LIMIT,
-            )
-        if recent and recent[-1].role is MessageRole.USER:
-            recent = recent[:-1]
-        items = messages_to_history_items(recent)
-        if not items:
-            return
-        await session.client.ensure_thread()
-        await session.client.inject_history(items)
+        await ChatSessionStore.seed_history_if_fresh_thread(session)
 
     async def _try_steer(
         self,
@@ -213,23 +196,21 @@ class TurnRunner:
         events_count = 0
         last_event_type = "none"
 
-        while True:
-            try:
-                async with asyncio.timeout(settings.TG_TURN_TIMEOUT_SECONDS):
-                    ev = await anext(stream)
-            except StopAsyncIteration:
-                break
-            except TimeoutError:
-                log.error(
-                    "tg_codex_idle_timeout",
-                    chat_id=message.chat.id,
-                    db_chat_id=session.db_chat_id,
-                    idle_timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
-                    events_count=events_count,
-                    last_event_type=last_event_type,
-                )
-                raise
+        async def _on_idle() -> None:
+            log.error(
+                "tg_codex_idle_timeout",
+                chat_id=message.chat.id,
+                db_chat_id=session.db_chat_id,
+                idle_timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
+                events_count=events_count,
+                last_event_type=last_event_type,
+            )
 
+        async for ev in iterate_with_idle_timeout(
+            stream,
+            settings.TG_TURN_TIMEOUT_SECONDS,
+            on_idle=_on_idle,
+        ):
             events_count += 1
             last_event_type = type(ev).__name__
             await event_bus.publish(session.db_chat_id, ev)
@@ -247,7 +228,9 @@ class TurnRunner:
                 case ErrorEvent(code=code, detail=detail):
                     progress.mark_outcome("failed")
                     await message.answer(
-                        tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
+                        tg_markdown.escape(
+                            f"Codex error [{code}]: {detail or 'unknown error'}"
+                        ),
                     )
                     await self._emit_failure(session, code=code, detail=detail)
                     return
@@ -422,7 +405,7 @@ class TurnRunner:
     async def _auto_reset_thread(session: ChatSession) -> None:
         broken_id = session.client.current_thread_id
         if broken_id:
-            await cache.set(f"{_QUARANTINE_KEY_PREFIX}{broken_id}", "broken", ex=86400)
+            await cache.set(quarantine_key(broken_id), "broken", ex=86400)
         await session.client.start_new_thread()
         async with SessionLocal() as db:
             await event_service.emit(
@@ -464,17 +447,8 @@ class TurnRunner:
 
 
 async def cancel_turn(session: ChatSession) -> bool:
-    """Best-effort cancel current turn. Returns True if anything was cancelled."""
-    task = session.current_turn_task
-    if task is None:
+    if not await cancel_session_turn(session):
         return False
-    with contextlib.suppress(Exception):
-        await session.client.interrupt()
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError, Exception):
-        await task
-    if session.current_turn_task is task:
-        session.current_turn_task = None
     async with SessionLocal() as db:
         await event_service.emit(
             db,

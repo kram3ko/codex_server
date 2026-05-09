@@ -28,8 +28,6 @@ from app.config import settings
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
 from app.services.bus.default import event_bus
-from app.services.chats.default import chat_service
-from app.services.codex.client import CodexClient
 from app.services.codex.events import (
     Attachment,
     DoneEvent,
@@ -39,11 +37,14 @@ from app.services.codex.events import (
     ToolCallRecord,
     ToolResultEvent,
     event_to_frame,
+    iterate_with_idle_timeout,
 )
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
+from app.services.sessions.store import ChatSession
 from app.services.uploads.default import upload_service
 from app.services.users.default import user_service
+from app.ws.sessions import web_sessions
 
 log = structlog.get_logger(__name__)
 
@@ -53,7 +54,7 @@ _WEB_USER_EMAIL = "web@codex.local"
 
 
 class ChatWebSocketHandler:
-    """Один екземпляр на додаток. Кожен WS-конект отримує власний CodexClient."""
+    """Один екземпляр на додаток. WS-конекти одного web user reuse Codex session."""
 
     def __init__(self) -> None:
         self._cached_web_user_pk: int | None = None
@@ -62,16 +63,8 @@ class ChatWebSocketHandler:
     async def handle(self, websocket: WebSocket, jwt_subject: str) -> None:
         await websocket.accept()
         user_pk = await self._resolve_web_user_pk()
-        codex = CodexClient(
-            url=settings.CODEX_CLI_URL,
-            cwd=settings.CODEX_CWD,
-            approval_policy=settings.CODEX_APPROVAL_POLICY,
-            sandbox=settings.CODEX_SANDBOX,
-            request_timeout=settings.CODEX_REQUEST_TIMEOUT_SECONDS,
-            reasoning_effort=settings.CODEX_REASONING_EFFORT,
-        )
         try:
-            await codex.connect()
+            session = await web_sessions.get_or_open(user_pk)
         except Exception as exc:  # noqa: BLE001 — будь-яка помилка → frame + close
             log.error("codex_connect_failed", subject=jwt_subject, error=str(exc))
             await self._safe_send(
@@ -84,17 +77,14 @@ class ChatWebSocketHandler:
         try:
             await self._safe_send(websocket, {"type": "ready"})
             async for raw in websocket.iter_text():
-                await self._dispatch(websocket, codex, user_pk, raw)
+                await self._dispatch(websocket, session, raw)
         except WebSocketDisconnect:
             log.info("ws_disconnected", subject=jwt_subject)
-        finally:
-            await codex.close()
 
     async def _dispatch(
         self,
         ws: WebSocket,
-        codex: CodexClient,
-        user_pk: int,
+        session: ChatSession,
         raw: str,
     ) -> None:
         try:
@@ -105,9 +95,9 @@ class ChatWebSocketHandler:
 
         kind = frame.get("type")
         if kind == "user_message":
-            await self._handle_user_message(ws, codex, user_pk, frame)
+            await self._handle_user_message(ws, session, frame)
         elif kind == "interrupt":
-            await codex.interrupt()
+            await session.client.interrupt()
         else:
             await self._safe_send(
                 ws,
@@ -117,8 +107,7 @@ class ChatWebSocketHandler:
     async def _handle_user_message(
         self,
         ws: WebSocket,
-        codex: CodexClient,
-        user_pk: int,
+        session: ChatSession,
         frame: dict,
     ) -> None:
         text: str = (frame.get("text") or "").strip()
@@ -126,33 +115,68 @@ class ChatWebSocketHandler:
             await self._safe_send(ws, {"type": "error", "code": "empty_text"})
             return
 
-        chat_id_raw = frame.get("chat_id")
-        chat_id = chat_id_raw if isinstance(chat_id_raw, int) else None
+        persisted_chat_id = session.db_chat_id
+        user_pk = session.db_user_id
 
-        async with SessionLocal() as session:
-            chat = await chat_service.get(session, chat_id) if chat_id is not None else None
-            if chat is None:
-                chat = await chat_service.create_web_chat(session, user_pk)
-            await message_service.append(session, chat.id, MessageRole.USER, text)
+        async with SessionLocal() as db:
+            await message_service.append(db, persisted_chat_id, MessageRole.USER, text)
             await event_service.emit(
-                session,
+                db,
                 EventKind.TURN_STARTED,
-                chat_id=chat.id,
+                chat_id=persisted_chat_id,
                 user_id=user_pk,
                 payload={"text_len": len(text)},
             )
-            await session.commit()
-            persisted_chat_id = chat.id
+            await db.commit()
 
         await self._safe_send(ws, {"type": "chat", "chat_id": persisted_chat_id})
 
+        async with session.turn_lock:
+            await web_sessions.seed_history_if_fresh_thread(session)
+            current = asyncio.current_task()
+            session.current_turn_task = current
+            try:
+                await self._stream_turn(ws, session, text, persisted_chat_id, user_pk)
+            finally:
+                if session.current_turn_task is current:
+                    session.current_turn_task = None
+
+    async def _stream_turn(
+        self,
+        ws: WebSocket,
+        session: ChatSession,
+        text: str,
+        persisted_chat_id: int,
+        user_pk: int,
+    ) -> None:
         final_text = ""
         streamed_text = ""
         tool_calls: list[ToolCallRecord] = []
         attachments: list[Attachment] = []
         done_seen = False
+        stream = session.client.run_turn(text)
+        events_count = 0
+        last_event_type = "none"
+
+        async def _on_idle() -> None:
+            log.error(
+                "ws_codex_idle_timeout",
+                db_chat_id=persisted_chat_id,
+                idle_timeout_s=settings.WS_TURN_TIMEOUT_SECONDS,
+                events_count=events_count,
+                last_event_type=last_event_type,
+            )
+            with contextlib.suppress(Exception):
+                await session.client.interrupt()
+
         try:
-            async for ev in codex.run_turn(text):
+            async for ev in iterate_with_idle_timeout(
+                stream,
+                settings.WS_TURN_TIMEOUT_SECONDS,
+                on_idle=_on_idle,
+            ):
+                events_count += 1
+                last_event_type = type(ev).__name__
                 await event_bus.publish(persisted_chat_id, ev)
                 match ev:
                     case TokenEvent(delta=delta):
@@ -177,6 +201,22 @@ class ChatWebSocketHandler:
                 await self._safe_send(ws, event_to_frame(ev))
         except WebSocketDisconnect:
             raise
+        except TimeoutError:
+            await self._safe_send(
+                ws,
+                {
+                    "type": "error",
+                    "code": "turn_timeout",
+                    "detail": f"idle>{settings.WS_TURN_TIMEOUT_SECONDS}s",
+                },
+            )
+            await self._emit_event(
+                persisted_chat_id,
+                user_pk,
+                EventKind.TURN_FAILED,
+                {"code": "turn_timeout", "detail": f"idle>{settings.WS_TURN_TIMEOUT_SECONDS}s"},
+            )
+            return
         except Exception as exc:  # noqa: BLE001
             log.error("codex_run_turn_failed", exc_type=type(exc).__name__, error=str(exc))
             await self._safe_send(
@@ -202,9 +242,9 @@ class ChatWebSocketHandler:
             )
             return
 
-        async with SessionLocal() as session:
+        async with SessionLocal() as db:
             upload_ids = await upload_service.persist_attachments(
-                session,
+                db,
                 persisted_chat_id,
                 attachments,
             )
@@ -214,14 +254,14 @@ class ChatWebSocketHandler:
             if upload_ids:
                 meta["upload_ids"] = upload_ids
             await message_service.append(
-                session,
+                db,
                 persisted_chat_id,
                 MessageRole.ASSISTANT,
                 final_text,
                 meta=meta or None,
             )
             await event_service.emit(
-                session,
+                db,
                 EventKind.TURN_COMPLETED,
                 chat_id=persisted_chat_id,
                 user_id=user_pk,
@@ -231,7 +271,7 @@ class ChatWebSocketHandler:
                     "uploads": len(upload_ids),
                 },
             )
-            await session.commit()
+            await db.commit()
 
         await self._safe_send(
             ws,

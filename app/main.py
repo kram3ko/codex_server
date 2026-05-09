@@ -37,6 +37,7 @@ from app.services.auth.default import auth_service
 from app.services.cache.default import cache
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
+from app.ws.sessions import web_sessions
 
 log = structlog.get_logger(__name__)
 
@@ -55,9 +56,11 @@ async def lifespan(_app: FastAPI):
         yield
         log.info("app_shutdown")
         cancelled = await tg_bot_service.interrupt_active_turns()
+        cancelled += await web_sessions.interrupt_all_turns()
         if cancelled:
             log.info("app_shutdown_turns_interrupted", count=cancelled)
         await tg_bot_service.stop()
+        await web_sessions.close_all()
         await cache.aclose()
         await engine.dispose()
 

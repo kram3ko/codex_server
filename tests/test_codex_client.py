@@ -1,6 +1,7 @@
-from app.services.codex.client import _translate
-from app.services.codex.events import TokenEvent
+from app.services.codex.events import TokenEvent, translate_notification
 from app.services.codex.transport import Notification
+
+_translate = translate_notification
 
 
 def test_translate_skips_completed_agent_message_already_seen_in_deltas() -> None:

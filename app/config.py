@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     # Idle cap на турн: якщо Codex sidecar мовчить довше цього часу між
     # events/chunks → interrupt() і звільняємо turn_lock.
     TG_TURN_TIMEOUT_SECONDS: float = 300.0
+    WS_TURN_TIMEOUT_SECONDS: float = 300.0
     TG_POLLING_LOCK_TTL_SECONDS: int = 60
 
     # --- Auth (single-user JWT) ---

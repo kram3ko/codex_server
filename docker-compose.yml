@@ -43,6 +43,8 @@ services:
         condition: service_completed_successfully
       codex-cli:
         condition: service_healthy
+      codex-cli-guest:
+        condition: service_healthy
 
   # Codex CLI у режимі WebSocket app-server. Окремий контейнер з бінарником
   # codex від OpenAI. Не публікуємо порт назовні — тільки docker-network.
