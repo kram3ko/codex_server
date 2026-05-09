@@ -10,6 +10,10 @@ export RUST_LOG="${RUST_LOG:-warn,codex_app_server=info}"
 export NO_COLOR="${NO_COLOR:-1}"
 
 cat > "$HOME/.codex/config.toml" <<'EOF'
+# Container — наш sandbox boundary. Codex'у власний unshare-sandbox не
+# потрібен (і блокувався б Docker seccomp/apparmor без зайвих cap'ів).
+sandbox_mode = "danger-full-access"
+
 # Усі native tools увімкнені — модель може вільно шукати в інтернеті,
 # виконувати shell-команди в /home/codex/workspace, працювати з файлами.
 [tools]
