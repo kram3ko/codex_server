@@ -335,7 +335,7 @@ class TurnRunner:
         if not tail and not attachments:
             await message.answer(
                 tg_markdown.escape(
-                    "Codex stream dropped before any reply. Use /reset and try again.",
+                    "⚠ Codex обірвав turn до відповіді. Контекст збережено — продовжуй розмову.",
                 )
             )
             await self._emit_failure(session, code="stream_dropped", detail="no buffer")
@@ -349,7 +349,10 @@ class TurnRunner:
         )
         await self._persist_assistant_turn(session, tail, attachments, tool_calls, partial=True)
         await message.answer(
-            tg_markdown.escape("⚠ Stream dropped before completion. Use /reset to reopen session."),
+            tg_markdown.escape(
+                "⚠ Codex обірвав turn посеред відповіді — те що встигло, лишається. "
+                "Можеш писати далі.",
+            ),
         )
 
     @staticmethod

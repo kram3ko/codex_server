@@ -58,6 +58,9 @@ services:
       # Bearer для виклику нашого MCP endpoint'у на codex-server. Той самий
       # токен має бути в codex-server (через .env → settings.MCP_CALLBACK_TOKEN).
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+      # Codex запускає `docker compose ...` з cwd /home/codex/workspace —
+      # без цього Compose адресував би "workspace" project замість нашого.
+      COMPOSE_PROJECT_NAME: codex_server
     volumes:
       # auth.json (для ChatGPT/Codex subscription mode, опційно)
       - ./.codex:/home/codex/.codex:rw
@@ -81,6 +84,7 @@ services:
     user: "0:0"
     environment:
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+      COMPOSE_PROJECT_NAME: codex_server
     volumes:
       - ./.codex-guest:/home/codex/.codex:rw
       - ./.codex/generated_images:/home/codex/.codex/generated_images:rw
