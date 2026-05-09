@@ -12,6 +12,7 @@ from typing import Literal
 
 import structlog
 from aiogram.enums import ChatAction
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.config import settings
@@ -53,13 +54,15 @@ class _ToolEntry:
 
 
 def _turn_controls() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="⏸ Зупинити", callback_data=CB_TURN_STOP),
-            InlineKeyboardButton(text="💬 Дописати", callback_data=CB_TURN_STEER),
-        ],
-        [InlineKeyboardButton(text="🆕 Новий thread", callback_data=CB_TURN_NEW)],
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⏸ Зупинити", callback_data=CB_TURN_STOP),
+                InlineKeyboardButton(text="💬 Дописати", callback_data=CB_TURN_STEER),
+            ],
+            [InlineKeyboardButton(text="🆕 Новий thread", callback_data=CB_TURN_NEW)],
+        ]
+    )
 
 
 class TurnProgressReporter:
@@ -68,7 +71,7 @@ class TurnProgressReporter:
         originator_message: Message,
         *,
         delay_s: float | None = None,
-        tick_s: float = 1.0,
+        tick_s: float = 5.0,
         chat_action_period_s: float = 4.0,
         draft_throttle_s: float = 0.25,
         draft_enabled: bool | None = None,
@@ -89,6 +92,7 @@ class TurnProgressReporter:
         self._outcome: _TurnOutcome = "success"
         self._committed_text: str = ""
         self._stream_throttle_at: float = 0.0
+        self._status_paused_until: float = 0.0
         self._draft_lock = asyncio.Lock()
         self._status_lock = asyncio.Lock()
         self._stream_lock = asyncio.Lock()
@@ -152,7 +156,7 @@ class TurnProgressReporter:
             now = time.monotonic()
             if now - self._stream_throttle_at < _STREAM_THROTTLE_S:
                 return
-            tail = full_text[len(self._committed_text):]
+            tail = full_text[len(self._committed_text) :]
             if len(tail) < _STREAM_MIN_CHARS:
                 return
             cut = _find_stream_split(tail)
@@ -184,7 +188,8 @@ class TurnProgressReporter:
                 if now - last_chat_action_at >= self._chat_action_period_s:
                     with contextlib.suppress(Exception):
                         await bot.send_chat_action(
-                            chat_id=self._message.chat.id, action=ChatAction.TYPING,
+                            chat_id=self._message.chat.id,
+                            action=ChatAction.TYPING,
                         )
                     last_chat_action_at = now
                 await asyncio.sleep(self._tick_s)
@@ -195,17 +200,26 @@ class TurnProgressReporter:
         text = self._compose_status_text()
         if text == self._last_status_text:
             return
+        now = time.monotonic()
+        if now < self._status_paused_until:
+            return
         rendered = tg_markdown.escape(text)
         async with self._status_lock:
             try:
                 if self._status_message is None:
                     self._status_message = await self._message.answer(
-                        rendered, reply_markup=_turn_controls(),
+                        rendered,
+                        reply_markup=_turn_controls(),
                     )
                 else:
                     await self._status_message.edit_text(
-                        rendered, reply_markup=_turn_controls(),
+                        rendered,
+                        reply_markup=_turn_controls(),
                     )
+            except TelegramRetryAfter as exc:
+                self._status_paused_until = time.monotonic() + exc.retry_after
+                log.warning("tg_status_flood", retry_after=exc.retry_after)
+                return
             except Exception as exc:  # noqa: BLE001
                 log.warning("tg_status_failed", error=str(exc))
                 return
@@ -252,9 +266,7 @@ class TurnProgressReporter:
 
     def _compose_draft_text(self) -> str:
         if self._tools:
-            return "\n".join(
-                f"{_STATUS_ICONS[entry.status]} {entry.name}" for entry in self._tools
-            )
+            return "\n".join(f"{_STATUS_ICONS[entry.status]} {entry.name}" for entry in self._tools)
         return ""
 
 

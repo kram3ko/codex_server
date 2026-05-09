@@ -22,8 +22,6 @@ services:
       - ./:/home/codex/workspace
       # Codex sidecar's image_generation outputs (read by FSInputFile).
       - ./.codex/generated_images:/home/codex/.codex/generated_images:ro
-      # Docker daemon API for /restart (httpx + UDS).
-      - /var/run/docker.sock:/var/run/docker.sock
     # Конфіг — gunicorn.conf.py (env-driven: GUNICORN_WORKERS, GUNICORN_PRELOAD).
     command: gunicorn app.main:app -c gunicorn.conf.py
     healthcheck:

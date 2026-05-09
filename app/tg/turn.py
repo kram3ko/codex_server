@@ -19,6 +19,7 @@ from app.config import settings
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
 from app.services.bus.default import event_bus
+from app.services.cache.default import cache
 from app.services.codex.events import (
     Attachment,
     DoneEvent,
@@ -41,8 +42,8 @@ from app.tg.sessions import ChatSession, ChatSessionStore
 
 log = structlog.get_logger(__name__)
 
-# 5 пар (USER+ASSISTANT) = 10 messages у seed-history.
 _HISTORY_REPLAY_LIMIT = 10
+_QUARANTINE_KEY_PREFIX = "codex:thread:quarantine:"
 
 
 class TurnRunner:
@@ -93,7 +94,9 @@ class TurnRunner:
             return
         async with SessionLocal() as db:
             recent = await message_service.list_recent(
-                db, session.db_chat_id, limit=_HISTORY_REPLAY_LIMIT,
+                db,
+                session.db_chat_id,
+                limit=_HISTORY_REPLAY_LIMIT,
             )
         if recent and recent[-1].role is MessageRole.USER:
             recent = recent[:-1]
@@ -154,24 +157,28 @@ class TurnRunner:
             current = asyncio.current_task()
             session.current_turn_task = current
             try:
-                async with asyncio.timeout(settings.TG_TURN_TIMEOUT_SECONDS):
-                    await self._stream_turn(session, message, prepared, progress)
+                await self._stream_turn(session, message, prepared, progress)
             except TimeoutError:
                 progress.mark_outcome("failed")
                 log.error(
                     "tg_codex_timeout",
                     chat_id=message.chat.id,
-                    timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
+                    idle_timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
                 )
                 with contextlib.suppress(Exception):
                     await session.client.interrupt()
-                await message.answer(tg_markdown.escape(
-                    "Codex не відповів вчасно — turn зупинено.",
-                ))
                 await self._emit_failure(
                     session,
                     code="turn_timeout",
-                    detail=f">{settings.TG_TURN_TIMEOUT_SECONDS}s",
+                    detail=f"idle>{settings.TG_TURN_TIMEOUT_SECONDS}s",
+                )
+                await self._auto_reset_thread(session)
+                await message.answer(
+                    tg_markdown.escape(
+                        "Codex завис — thread скинуто, історію (10 останніх "
+                        "повідомлень) буде відновлено на наступному turn'і. "
+                        "Повтори запит.",
+                    )
                 )
             except asyncio.CancelledError:
                 progress.mark_outcome("interrupted")
@@ -202,7 +209,29 @@ class TurnRunner:
         attachments: list[Attachment] = []
         done_seen = False
 
-        async for ev in session.client.run_turn(prepared.text, attachments=prepared.attachments):
+        stream = session.client.run_turn(prepared.text, attachments=prepared.attachments)
+        events_count = 0
+        last_event_type = "none"
+
+        while True:
+            try:
+                async with asyncio.timeout(settings.TG_TURN_TIMEOUT_SECONDS):
+                    ev = await anext(stream)
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                log.error(
+                    "tg_codex_idle_timeout",
+                    chat_id=message.chat.id,
+                    db_chat_id=session.db_chat_id,
+                    idle_timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
+                    events_count=events_count,
+                    last_event_type=last_event_type,
+                )
+                raise
+
+            events_count += 1
+            last_event_type = type(ev).__name__
             await event_bus.publish(session.db_chat_id, ev)
             match ev:
                 case TokenEvent(delta=delta):
@@ -238,7 +267,12 @@ class TurnRunner:
         if not done_seen:
             progress.mark_outcome("failed")
             await self._handle_dropped_stream(
-                session, message, prepared, buffer, attachments, tool_calls,
+                session,
+                message,
+                prepared,
+                buffer,
+                attachments,
+                tool_calls,
                 progress.committed_text,
             )
 
@@ -256,7 +290,10 @@ class TurnRunner:
             await self._handle_empty_response(session, message, prepared)
             return
         await self._send_response(
-            message, final_text, attachments, committed_prefix,
+            message,
+            final_text,
+            attachments,
+            committed_prefix,
             as_voice=prepared.had_voice_input,
         )
         await self._persist_assistant_turn(session, final_text, attachments, tool_calls)
@@ -274,8 +311,7 @@ class TurnRunner:
         )
         await message.answer(
             tg_markdown.escape(
-                "Codex returned empty response. "
-                "Try adding a caption or send the image again.",
+                "Codex returned empty response. Try adding a caption or send the image again.",
             ),
         )
         await self._emit_failure(session, code="empty_response", detail="no final text")
@@ -297,13 +333,18 @@ class TurnRunner:
         )
         tail = buffer.strip()
         if not tail and not attachments:
-            await message.answer(tg_markdown.escape(
-                "Codex stream dropped before any reply. Use /reset and try again.",
-            ))
+            await message.answer(
+                tg_markdown.escape(
+                    "Codex stream dropped before any reply. Use /reset and try again.",
+                )
+            )
             await self._emit_failure(session, code="stream_dropped", detail="no buffer")
             return
         await self._send_response(
-            message, tail, attachments, committed_prefix,
+            message,
+            tail,
+            attachments,
+            committed_prefix,
             as_voice=prepared.had_voice_input,
         )
         await self._persist_assistant_turn(session, tail, attachments, tool_calls, partial=True)
@@ -348,11 +389,17 @@ class TurnRunner:
     ) -> None:
         async with SessionLocal() as db:
             upload_ids = await upload_service.persist_attachments(
-                db, session.db_chat_id, attachments,
+                db,
+                session.db_chat_id,
+                attachments,
             )
             meta = _build_assistant_meta(tool_calls, upload_ids, partial=partial)
             await message_service.append(
-                db, session.db_chat_id, MessageRole.ASSISTANT, final_text, meta=meta,
+                db,
+                session.db_chat_id,
+                MessageRole.ASSISTANT,
+                final_text,
+                meta=meta,
             )
             await event_service.emit(
                 db,
@@ -360,10 +407,30 @@ class TurnRunner:
                 chat_id=session.db_chat_id,
                 user_id=session.db_user_id,
                 payload=_build_turn_payload(
-                    final_text, tool_calls, upload_ids, partial=partial,
+                    final_text,
+                    tool_calls,
+                    upload_ids,
+                    partial=partial,
                 ),
             )
             await db.commit()
+
+    @staticmethod
+    async def _auto_reset_thread(session: ChatSession) -> None:
+        broken_id = session.client.current_thread_id
+        if broken_id:
+            await cache.set(f"{_QUARANTINE_KEY_PREFIX}{broken_id}", "broken", ex=86400)
+        await session.client.start_new_thread()
+        async with SessionLocal() as db:
+            await event_service.emit(
+                db,
+                EventKind.THREAD_RESET,
+                chat_id=session.db_chat_id,
+                user_id=session.db_user_id,
+                payload={"reason": "auto_recovery_idle_timeout", "thread_id": broken_id},
+            )
+            await db.commit()
+        log.warning("tg_thread_auto_reset", chat_id=session.db_chat_id, thread_id=broken_id)
 
     @staticmethod
     async def _emit_failure(
@@ -373,9 +440,15 @@ class TurnRunner:
         detail: str | None = None,
         exc_type: str | None = None,
     ) -> None:
-        payload = {k: v for k, v in (
-            ("code", code), ("detail", detail), ("exc_type", exc_type),
-        ) if v}
+        payload = {
+            k: v
+            for k, v in (
+                ("code", code),
+                ("detail", detail),
+                ("exc_type", exc_type),
+            )
+            if v
+        }
         async with SessionLocal() as db:
             await event_service.emit(
                 db,
@@ -455,4 +528,4 @@ def _strip_committed_prefix(text: str, committed: str) -> str:
         return text
     if not text.startswith(committed):
         return text
-    return text[len(committed):].lstrip()
+    return text[len(committed) :].lstrip()

@@ -10,7 +10,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, BotCommandScopeChat
 
 from app.config import settings
 from app.services.cache.default import cache
@@ -72,12 +72,21 @@ class TGBotService:
         self._bot = bot
         log.info("tg_bot_connected", username=me.username, id=me.id)
         with contextlib.suppress(Exception):
-            await bot.set_my_commands([
+            base_commands = [
                 BotCommand(command="new", description="Новий thread (скинути контекст)"),
                 BotCommand(command="stop", description="Зупинити поточну відповідь"),
                 BotCommand(command="reset", description="Закрити сесію"),
-                BotCommand(command="restart", description="Перезапустити сервер"),
-            ])
+            ]
+            await bot.set_my_commands(base_commands)
+            admin_commands = [
+                *base_commands,
+                BotCommand(command="codex_usage", description="Codex ліміти"),
+            ]
+            for admin_id in settings.TG_ADMIN_USER_IDS:
+                await bot.set_my_commands(
+                    admin_commands,
+                    scope=BotCommandScopeChat(chat_id=admin_id),
+                )
 
         dispatcher = self._build_dispatcher()
         self._dispatcher = dispatcher
@@ -99,6 +108,9 @@ class TGBotService:
             admin_user_ids=settings.TG_ADMIN_USER_IDS,
             stt_enabled=self._stt.enabled,
         )
+
+    async def interrupt_active_turns(self) -> int:
+        return await self._sessions.interrupt_all_turns()
 
     async def stop(self) -> None:
         if self._lock_renew_task is not None:
@@ -124,21 +136,12 @@ class TGBotService:
 
     def _build_dispatcher(self) -> Dispatcher:
         dispatcher = Dispatcher()
-        admins = settings.TG_ADMIN_USER_IDS
-        # `/restart` лізе у docker socket — admin-only. Решта команд і
-        # повідомлення — будь-який TG user (Codex sidecar guard блокує
-        # shell/file_change для не-ADMIN ролі на app-сервері).
-        admin_filter = F.from_user.id.in_(admins) if admins else F
-        incoming_filter = (
-            F.photo | F.document | F.text | F.voice | F.audio | F.video_note
-        )
+        incoming_filter = F.photo | F.document | F.text | F.voice | F.audio | F.video_note
         dispatcher.message.register(self._handlers.on_start, CommandStart())
         dispatcher.message.register(self._handlers.on_new, Command("new"))
         dispatcher.message.register(self._handlers.on_reset, Command("reset"))
         dispatcher.message.register(self._handlers.on_stop, Command("stop"))
-        dispatcher.message.register(
-            self._handlers.on_restart, Command("restart"), admin_filter,
-        )
+        dispatcher.message.register(self._handlers.on_codex_usage, Command("codex_usage"))
         dispatcher.message.register(self._handlers.on_incoming, incoming_filter)
         dispatcher.callback_query.register(self._handlers.on_callback, F.data)
         return dispatcher
@@ -177,7 +180,11 @@ class TGBotService:
             try:
                 # redis-py overloads eval as sync|async — narrow for async client.
                 renewed = await cache.eval(  # type: ignore[misc]
-                    _RENEW_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token, ttl,
+                    _RENEW_LOCK_SCRIPT,
+                    1,
+                    _TG_POLLING_LOCK_KEY,
+                    token,
+                    ttl,
                 )
                 if not renewed:
                     log.error("tg_polling_lock_lost")
@@ -199,7 +206,10 @@ class TGBotService:
             return
         with contextlib.suppress(Exception):
             await cache.eval(  # type: ignore[misc]
-                _RELEASE_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token,
+                _RELEASE_LOCK_SCRIPT,
+                1,
+                _TG_POLLING_LOCK_KEY,
+                token,
             )
         log.info("tg_polling_lock_released")
 

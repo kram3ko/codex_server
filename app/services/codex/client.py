@@ -53,6 +53,7 @@ class _Method(StrEnum):
     TURN_START = "turn/start"
     TURN_STEER = "turn/steer"
     TURN_INTERRUPT = "turn/interrupt"
+    ACCOUNT_RATE_LIMITS_READ = "account/rateLimits/read"
 
 
 class _Notif(StrEnum):
@@ -410,6 +411,16 @@ class CodexClient:
             log.warning("codex_inject_history_failed", code=exc.code, msg=str(exc))
             return
         log.info("codex_history_injected", thread_id=thread_id, items=len(items))
+
+    async def read_rate_limits(self) -> dict[str, Any] | None:
+        """Returns Codex plan rate-limit snapshot (account-level, no thread).
+        None коли sidecar не expose'ить метод (-32601)."""
+        try:
+            return await self._transport.request(_Method.ACCOUNT_RATE_LIMITS_READ)
+        except AppServerError as exc:
+            if exc.code == -32601:
+                return None
+            raise
 
     async def start_new_thread(self) -> None:
         prev = self._thread_id

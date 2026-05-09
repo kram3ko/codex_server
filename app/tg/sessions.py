@@ -22,11 +22,14 @@ import structlog
 from app.config import settings
 from app.db.base import SessionLocal
 from app.models import UserRole
+from app.services.cache.default import cache
 from app.services.chats.default import chat_service
 from app.services.codex.client import CodexClient
 from app.services.users.default import user_service
 
 log = structlog.get_logger(__name__)
+
+_QUARANTINE_KEY_PREFIX = "codex:thread:quarantine:"
 
 
 @dataclass(slots=True)
@@ -101,6 +104,27 @@ class ChatSessionStore:
             for future in futures:
                 tg.create_task(self._close_future(future))
 
+    async def interrupt_all_turns(self) -> int:
+        """Cleanly cancel any in-flight turns. Returns count of cancelled turns.
+
+        Called from lifespan __aexit__ on SIGTERM so the Codex CLI sidecar
+        gets `interrupt()` RPC and can flush pending tool-call state into its
+        JSONL — without this, mid-flight MCP calls become orphan call_ids
+        that hang the next thread/resume (openai/codex#14824).
+        """
+        from app.tg.turn import cancel_turn
+
+        async with self._lock:
+            futures = list(self._sessions.values())
+        cancelled = 0
+        for future in futures:
+            session = await self._safe_resolve(future)
+            if session is None or session.current_turn_task is None:
+                continue
+            if await cancel_turn(session):
+                cancelled += 1
+        return cancelled
+
     async def _claim_slot(
         self,
         tg_chat_id: int,
@@ -109,9 +133,7 @@ class ChatSessionStore:
             existing = self._sessions.get(tg_chat_id)
             if existing is not None and not _failed_attempt(existing):
                 return existing, False
-            future: asyncio.Future[ChatSession] = (
-                asyncio.get_running_loop().create_future()
-            )
+            future: asyncio.Future[ChatSession] = asyncio.get_running_loop().create_future()
             self._sessions[tg_chat_id] = future
             return future, True
 
@@ -139,9 +161,14 @@ class ChatSessionStore:
         display_name: str | None,
     ) -> ChatSession:
         db_user_id, db_chat_id, stored_thread_id, is_admin = await self._bootstrap_db(
-            tg_user_id, tg_chat_id, display_name,
+            tg_user_id,
+            tg_chat_id,
+            display_name,
         )
         initial = stored_thread_id if settings.CODEX_THREAD_REUSE_ENABLED else None
+        if initial is not None and await cache.get(f"{_QUARANTINE_KEY_PREFIX}{initial}"):
+            log.warning("tg_thread_quarantined_skipping_resume", thread_id=initial)
+            initial = None
         client = await self._open_codex_client(db_chat_id, initial, is_admin=is_admin)
         log.info(
             "tg_session_opened",

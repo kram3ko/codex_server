@@ -54,6 +54,9 @@ async def lifespan(_app: FastAPI):
         await tg_bot_service.start()
         yield
         log.info("app_shutdown")
+        cancelled = await tg_bot_service.interrupt_active_turns()
+        if cancelled:
+            log.info("app_shutdown_turns_interrupted", count=cancelled)
         await tg_bot_service.stop()
         await cache.aclose()
         await engine.dispose()

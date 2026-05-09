@@ -22,9 +22,10 @@ worker_class = "uvicorn.workers.UvicornWorker"
 workers = int(os.environ.get("GUNICORN_WORKERS", "2"))
 preload_app = _bool(os.environ.get("GUNICORN_PRELOAD", "true"))
 timeout = 60
-
+graceful_timeout = int(os.environ.get("GUNICORN_GRACEFUL_TIMEOUT", "8"))
 
 def on_starting(server):
     server.log.info(
-        f"gunicorn cfg: workers={workers} preload={preload_app} timeout={timeout}s"
+        f"gunicorn cfg: workers={workers} preload={preload_app} "
+        f"timeout={timeout}s graceful={graceful_timeout}s"
     )

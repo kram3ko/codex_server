@@ -8,8 +8,8 @@ import enum
 
 
 class UserRole(enum.StrEnum):
-    """Дві ролі: ADMIN — повний доступ (включаючи /restart, shell, file_change),
-    USER — все інше (image_gen, web_search, mcp, view). Default — USER."""
+    """Дві ролі: ADMIN — повний доступ (shell, file_change), USER — все інше
+    (image_gen, web_search, mcp, view). Default — USER."""
 
     USER = "USER"
     ADMIN = "ADMIN"
