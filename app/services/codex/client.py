@@ -500,18 +500,20 @@ class CodexClient:
         )
 
     async def _ensure_alive(self) -> None:
-        """Reconnect + re-handshake if transport died mid-stream.
-
-        Не інвалідейтимо thread_id тут — sidecar може бути той самий, в такому
-        разі stored thread валідний. Якщо sidecar теж рестартувався — побачимо
-        thread-not-found на наступному turn/start і обробимо retry'ем.
-        """
+        """Reconnect + re-handshake if transport died mid-stream."""
         async with self._alive_lock:
             if self._transport.is_connected and self._initialized:
                 return
-            log.warning("codex_transport_lost", thread_id=self._thread_id)
+            log.warning(
+                "codex_transport_lost",
+                thread_id=self._thread_id,
+                in_flight_turn=self._current_turn_id,
+            )
+            # Disconnect мід-turn → sidecar JSONL міг лишити orphan tool_call
+            # (codex#14824). Resume такого thread'а вішає наступний turn.
+            if self._current_turn_id is not None:
+                await self._invalidate_thread()
             self._initialized = False
-            self._thread_resumed_or_started = False
             await self._transport.connect()
             await self._handshake()
 
