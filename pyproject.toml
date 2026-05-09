@@ -36,6 +36,7 @@ proto = [
 lint = [
     "ruff>=0.15.12",
     "pyright>=1.1.409",
+    "types-aiobotocore-s3>=3.6.0",
 ]
 test = [
     "pytest>=9.0.3",

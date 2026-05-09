@@ -80,7 +80,7 @@ connect_router = ConnectRouter(
         UploadsServiceASGIApplication(UploadsRPC()),
     ]
 )
-app.mount("/api", connect_router)  # type: ignore[arg-type]
+app.mount("/api", connect_router)
 
 # FastMCP streamable-HTTP — URL: /mcp/streamable.
 app.mount("/mcp", mcp_http_app)

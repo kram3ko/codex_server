@@ -360,6 +360,7 @@ dependencies = [
 lint = [
     { name = "pyright" },
     { name = "ruff" },
+    { name = "types-aiobotocore-s3" },
 ]
 proto = [
     { name = "grpcio-tools" },
@@ -399,6 +400,7 @@ requires-dist = [
 lint = [
     { name = "pyright", specifier = ">=1.1.409" },
     { name = "ruff", specifier = ">=0.15.12" },
+    { name = "types-aiobotocore-s3", specifier = ">=3.6.0" },
 ]
 proto = [
     { name = "grpcio-tools", specifier = ">=1.80.0" },
@@ -1786,6 +1788,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ef/52/9ba0f43b686e7f3ddfeaa78ac3af750292662284b3661e91ad5494f21dbc/structlog-25.5.0.tar.gz", hash = "sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98", size = 1460830, upload-time = "2025-10-27T08:28:23.028Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/45/a132b9074aa18e799b891b91ad72133c98d8042c70f6240e4c5f9dabee2f/structlog-25.5.0-py3-none-any.whl", hash = "sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f", size = 72510, upload-time = "2025-10-27T08:28:21.535Z" },
+]
+
+[[package]]
+name = "types-aiobotocore-s3"
+version = "3.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/90/eec276a418a417441a785dd394424fee87682cf34af29fe026f46883149e/types_aiobotocore_s3-3.6.0.tar.gz", hash = "sha256:5eb816af93791b7f42f58b2dd3b5ecfe24da9de414a7390c05c392cf1d9ef5b4", size = 77715, upload-time = "2026-05-02T03:03:31.274Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/df/4f2dce96e6b71f3d8287351558824021a9857eb88506c6eb72c61b23bcb4/types_aiobotocore_s3-3.6.0-py3-none-any.whl", hash = "sha256:5af9f9710c9fe6ba9645852a0b13f6fca4eb44d87a35b0959063341a32f11b37", size = 85450, upload-time = "2026-05-02T03:03:29.054Z" },
 ]
 
 [[package]]

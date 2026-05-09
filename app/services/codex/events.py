@@ -8,7 +8,7 @@ Pydantic v2 моделі — кожне поле з `Field(description=...)`, т
 """
 
 from enum import StrEnum
-from typing import Any, ClassVar, TypedDict
+from typing import Any, ClassVar, TypedDict, cast
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field
@@ -103,7 +103,7 @@ def event_to_bytes(event: ChatEvent) -> bytes:
 def frame_to_event(frame: dict[str, Any]) -> ChatEvent:
     cls = _TAG_TO_CLS[frame["type"]]
     payload = {k: v for k, v in frame.items() if k != "type"}
-    return cls.model_validate(payload)  # type: ignore[return-value]
+    return cast(ChatEvent, cls.model_validate(payload))
 
 
 def bytes_to_event(raw: bytes | str) -> ChatEvent:

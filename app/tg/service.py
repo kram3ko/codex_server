@@ -3,6 +3,8 @@
 import asyncio
 import contextlib
 import os
+from collections.abc import Awaitable
+from typing import Any, cast
 from uuid import uuid4
 
 import structlog
@@ -178,13 +180,9 @@ class TGBotService:
             if token is None:
                 return
             try:
-                # redis-py overloads eval as sync|async — narrow for async client.
-                renewed = await cache.eval(  # type: ignore[misc]
-                    _RENEW_LOCK_SCRIPT,
-                    1,
-                    _TG_POLLING_LOCK_KEY,
-                    token,
-                    ttl,
+                renewed = await cast(
+                    "Awaitable[Any]",
+                    cache.eval(_RENEW_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token, ttl),
                 )
                 if not renewed:
                     log.error("tg_polling_lock_lost")
@@ -205,11 +203,9 @@ class TGBotService:
         if token is None:
             return
         with contextlib.suppress(Exception):
-            await cache.eval(  # type: ignore[misc]
-                _RELEASE_LOCK_SCRIPT,
-                1,
-                _TG_POLLING_LOCK_KEY,
-                token,
+            await cast(
+                "Awaitable[Any]",
+                cache.eval(_RELEASE_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token),
             )
         log.info("tg_polling_lock_released")
 
