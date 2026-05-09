@@ -25,9 +25,7 @@ from app.models.enums import ChatSource
 
 class Chat(Base):
     __tablename__ = "chats"
-    __table_args__ = (
-        UniqueConstraint("source", "tg_chat_id", name="uq_chats_source_tg_chat_id"),
-    )
+    __table_args__ = (UniqueConstraint("source", "tg_chat_id", name="uq_chats_source_tg_chat_id"),)
 
     user_id: Mapped[int] = mapped_column(
         BigInteger,

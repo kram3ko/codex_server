@@ -20,12 +20,17 @@ class _TelegramHtmlRenderer(RendererHTML):
     """RendererHTML restricted to TG-whitelisted tags. Unknown tokens → ''."""
 
     _STATIC_TAGS: ClassVar[dict[str, str]] = {
-        "strong_open": "<b>", "strong_close": "</b>",
-        "em_open":     "<i>", "em_close":     "</i>",
-        "s_open":      "<s>", "s_close":      "</s>",
-        "heading_open": "<b>", "heading_close": "</b>\n\n",
-        "softbreak":   "\n", "hardbreak": "\n",
-        "hr":          "─" * 12 + "\n\n",
+        "strong_open": "<b>",
+        "strong_close": "</b>",
+        "em_open": "<i>",
+        "em_close": "</i>",
+        "s_open": "<s>",
+        "s_close": "</s>",
+        "heading_open": "<b>",
+        "heading_close": "</b>\n\n",
+        "softbreak": "\n",
+        "hardbreak": "\n",
+        "hr": "─" * 12 + "\n\n",
     }
 
     def __init__(self) -> None:
@@ -39,6 +44,7 @@ class _TelegramHtmlRenderer(RendererHTML):
     def _const(value: str):
         def render(tokens, idx, options, env):  # noqa: ARG001
             return value
+
         return render
 
     def renderToken(self, tokens, idx, options, env=None):  # noqa: ARG002
@@ -150,10 +156,7 @@ class TelegramMarkdown:
     """Render markdown → TG-HTML chunks (TG-safe tags) або flat plaintext."""
 
     def __init__(self) -> None:
-        self._md = (
-            MarkdownIt("commonmark", {"breaks": True, "html": False})
-            .enable("strikethrough")
-        )
+        self._md = MarkdownIt("commonmark", {"breaks": True, "html": False}).enable("strikethrough")
         self._html = _TelegramHtmlRenderer()
 
     def render_html(self, text: str) -> list[str]:

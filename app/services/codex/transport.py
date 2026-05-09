@@ -83,9 +83,7 @@ class AppServerClient:
         async with self._connect_lock:
             if self._ws is not None:
                 return
-            headers = (
-                {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
-            )
+            headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
             log.info(
                 "app_server_connecting",
                 url=self._url,

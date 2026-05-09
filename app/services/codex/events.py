@@ -86,8 +86,7 @@ ChatEvent = TokenEvent | ToolCallEvent | ToolResultEvent | DoneEvent | ErrorEven
 
 
 _TAG_TO_CLS: dict[str, type[_Frame]] = {
-    cls.type_tag: cls
-    for cls in (TokenEvent, ToolCallEvent, ToolResultEvent, DoneEvent, ErrorEvent)
+    cls.type_tag: cls for cls in (TokenEvent, ToolCallEvent, ToolResultEvent, DoneEvent, ErrorEvent)
 }
 
 

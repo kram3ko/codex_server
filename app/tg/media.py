@@ -61,7 +61,10 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
 
         if message.video_note:
             note_text = await _transcribe_media(
-                message, message.video_note, transcriber, ".mp4",
+                message,
+                message.video_note,
+                transcriber,
+                ".mp4",
             )
             text = _merge_text(text, note_text, label="Voice transcript")
 

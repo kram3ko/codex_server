@@ -86,16 +86,18 @@ class _Item(StrEnum):
 # Items that don't surface as progress events. agentMessage is hidden in the
 # `started` branch but extracted as a TokenEvent in `completed` (the long
 # fallback path when sidecar emits whole text instead of streaming deltas).
-_HIDDEN_ITEMS: frozenset[str] = frozenset({
-    _Item.USER_MESSAGE,
-    _Item.HOOK_PROMPT,
-    _Item.PLAN,
-    _Item.REASONING,
-    _Item.COLLAB_AGENT_TOOL_CALL,
-    _Item.ENTERED_REVIEW_MODE,
-    _Item.EXITED_REVIEW_MODE,
-    _Item.CONTEXT_COMPACTION,
-})
+_HIDDEN_ITEMS: frozenset[str] = frozenset(
+    {
+        _Item.USER_MESSAGE,
+        _Item.HOOK_PROMPT,
+        _Item.PLAN,
+        _Item.REASONING,
+        _Item.COLLAB_AGENT_TOOL_CALL,
+        _Item.ENTERED_REVIEW_MODE,
+        _Item.EXITED_REVIEW_MODE,
+        _Item.CONTEXT_COMPACTION,
+    }
+)
 
 
 def _command_args(item: dict[str, Any]) -> dict[str, Any]:
@@ -232,8 +234,7 @@ _BUILTINS: dict[str, _BuiltinSpec] = {
         args=lambda item: {"prompt": item.get("revisedPrompt", "")},
         text=lambda item: item.get("revisedPrompt", ""),
         attachments=lambda item: (
-            _image_attachment(item["savedPath"], "")
-            if item.get("savedPath") else ()
+            _image_attachment(item["savedPath"], "") if item.get("savedPath") else ()
         ),
     ),
     _Item.IMAGE_VIEW: _BuiltinSpec(
@@ -531,11 +532,13 @@ def _dynamic_tool_call_to_event(item: dict[str, Any]) -> ToolResultEvent:
             case "inputText":
                 text_parts.append(content["text"])
             case "inputImage":
-                attachments.append(Attachment(
-                    kind=AttachmentKind.IMAGE,
-                    source=content["imageUrl"],
-                    caption=tool_name,
-                ))
+                attachments.append(
+                    Attachment(
+                        kind=AttachmentKind.IMAGE,
+                        source=content["imageUrl"],
+                        caption=tool_name,
+                    )
+                )
     return ToolResultEvent(
         name=tool_name,
         text="\n\n".join(p for p in text_parts if p.strip()),
@@ -621,5 +624,5 @@ def _agent_message_to_token(item: dict[str, Any], accumulated: str) -> ChatEvent
     if not text or accumulated.endswith(text):
         return None
     if text.startswith(accumulated):
-        return TokenEvent(delta=text[len(accumulated):])
+        return TokenEvent(delta=text[len(accumulated) :])
     return TokenEvent(delta=text)

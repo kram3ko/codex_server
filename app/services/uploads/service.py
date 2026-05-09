@@ -76,7 +76,11 @@ class UploadService:
                     await asyncio.to_thread(tmp.write, chunk)
         try:
             return await self._persist_local_file(
-                session, chat_id, tmp_path, filename=filename, mime=mime,
+                session,
+                chat_id,
+                tmp_path,
+                filename=filename,
+                mime=mime,
             )
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -147,9 +151,7 @@ class UploadService:
         size = source.stat().st_size
         resolved_filename = filename or source.name
         resolved_mime = (
-            mime
-            or mimetypes.guess_type(resolved_filename)[0]
-            or "application/octet-stream"
+            mime or mimetypes.guess_type(resolved_filename)[0] or "application/octet-stream"
         )
         chat_segment = str(chat_id) if chat_id is not None else "shared"
         key = f"chats/{chat_segment}/uploads/{uuid.uuid4().hex}{Path(resolved_filename).suffix}"
@@ -190,6 +192,6 @@ def _key_from_s3_path(path: str) -> str | None:
     """`s3://bucket/some/key` → `some/key`. Non-S3 paths повертають None."""
     if not path.startswith(_S3_PREFIX):
         return None
-    rest = path[len(_S3_PREFIX):]
+    rest = path[len(_S3_PREFIX) :]
     parts = rest.split("/", 1)
     return parts[1] if len(parts) == 2 else None

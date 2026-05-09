@@ -130,11 +130,7 @@ class ChatWebSocketHandler:
         chat_id = chat_id_raw if isinstance(chat_id_raw, int) else None
 
         async with SessionLocal() as session:
-            chat = (
-                await chat_service.get(session, chat_id)
-                if chat_id is not None
-                else None
-            )
+            chat = await chat_service.get(session, chat_id) if chat_id is not None else None
             if chat is None:
                 chat = await chat_service.create_web_chat(session, user_pk)
             await message_service.append(session, chat.id, MessageRole.USER, text)
@@ -168,7 +164,9 @@ class ChatWebSocketHandler:
                     case ErrorEvent(code=code, detail=detail):
                         await self._safe_send(ws, event_to_frame(ev))
                         await self._emit_event(
-                            persisted_chat_id, user_pk, EventKind.TURN_FAILED,
+                            persisted_chat_id,
+                            user_pk,
+                            EventKind.TURN_FAILED,
                             {"code": code, "detail": detail},
                         )
                         return
@@ -182,25 +180,33 @@ class ChatWebSocketHandler:
         except Exception as exc:  # noqa: BLE001
             log.error("codex_run_turn_failed", exc_type=type(exc).__name__, error=str(exc))
             await self._safe_send(
-                ws, {"type": "error", "code": "codex_error", "detail": str(exc)},
+                ws,
+                {"type": "error", "code": "codex_error", "detail": str(exc)},
             )
-            await self._emit_event(persisted_chat_id, user_pk, EventKind.TURN_FAILED,
-                                   {"exc_type": type(exc).__name__})
+            await self._emit_event(
+                persisted_chat_id, user_pk, EventKind.TURN_FAILED, {"exc_type": type(exc).__name__}
+            )
             return
 
         if not done_seen:
             await self._safe_send(
                 ws,
-                {"type": "error", "code": "stream_dropped",
-                 "detail": "Codex stream ended without completion"},
+                {
+                    "type": "error",
+                    "code": "stream_dropped",
+                    "detail": "Codex stream ended without completion",
+                },
             )
-            await self._emit_event(persisted_chat_id, user_pk, EventKind.TURN_FAILED,
-                                   {"reason": "stream_dropped"})
+            await self._emit_event(
+                persisted_chat_id, user_pk, EventKind.TURN_FAILED, {"reason": "stream_dropped"}
+            )
             return
 
         async with SessionLocal() as session:
             upload_ids = await upload_service.persist_attachments(
-                session, persisted_chat_id, attachments,
+                session,
+                persisted_chat_id,
+                attachments,
             )
             meta: dict = {}
             if tool_calls:
@@ -257,7 +263,11 @@ class ChatWebSocketHandler:
     ) -> None:
         async with SessionLocal() as session:
             await event_service.emit(
-                session, kind, chat_id=chat_id, user_id=user_pk, payload=payload,
+                session,
+                kind,
+                chat_id=chat_id,
+                user_id=user_pk,
+                payload=payload,
             )
             await session.commit()
 
