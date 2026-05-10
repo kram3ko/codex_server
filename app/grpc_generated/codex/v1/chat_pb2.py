@@ -23,30 +23,51 @@ _sym_db = _symbol_database.Default()
 
 
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
+from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
 from codex.v1 import common_pb2 as codex_dot_v1_dot_common__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x63odex/v1/chat.proto\x12\x08\x63odex.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x15\x63odex/v1/common.proto\"\xa2\x02\n\x04\x43hat\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x0f\n\x07user_id\x18\x02 \x01(\x03\x12$\n\x06source\x18\x03 \x01(\x0e\x32\x14.codex.v1.ChatSource\x12\x17\n\ntg_chat_id\x18\x04 \x01(\x03H\x00\x88\x01\x01\x12\x1c\n\x0f\x63odex_thread_id\x18\x05 \x01(\tH\x01\x88\x01\x01\x12\x12\n\x05title\x18\x06 \x01(\tH\x02\x88\x01\x01\x12.\n\ncreated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12/\n\x0blast_msg_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\r\n\x0b_tg_chat_idB\x12\n\x10_codex_thread_idB\x08\n\x06_title\"<\n\x10ListChatsRequest\x12(\n\npagination\x18\x01 \x01(\x0b\x32\x14.codex.v1.Pagination\"2\n\x11ListChatsResponse\x12\x1d\n\x05\x63hats\x18\x01 \x03(\x0b\x32\x0e.codex.v1.Chat\"!\n\x0eGetChatRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\"3\n\x11RenameChatRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\x12\r\n\x05title\x18\x02 \x01(\t\"$\n\x11\x44\x65leteChatRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03*X\n\nChatSource\x12\x1b\n\x17\x43HAT_SOURCE_UNSPECIFIED\x10\x00\x12\x13\n\x0f\x43HAT_SOURCE_WEB\x10\x01\x12\x18\n\x14\x43HAT_SOURCE_TELEGRAM\x10\x02\x32\xff\x01\n\x0b\x43hatService\x12\x44\n\tListChats\x12\x1a.codex.v1.ListChatsRequest\x1a\x1b.codex.v1.ListChatsResponse\x12\x33\n\x07GetChat\x12\x18.codex.v1.GetChatRequest\x1a\x0e.codex.v1.Chat\x12\x39\n\nRenameChat\x12\x1b.codex.v1.RenameChatRequest\x1a\x0e.codex.v1.Chat\x12:\n\nDeleteChat\x12\x1b.codex.v1.DeleteChatRequest\x1a\x0f.codex.v1.Emptyb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x63odex/v1/chat.proto\x12\x08\x63odex.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x15\x63odex/v1/common.proto\"\xa2\x02\n\x04\x43hat\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x0f\n\x07user_id\x18\x02 \x01(\x03\x12$\n\x06source\x18\x03 \x01(\x0e\x32\x14.codex.v1.ChatSource\x12\x17\n\ntg_chat_id\x18\x04 \x01(\x03H\x00\x88\x01\x01\x12\x1c\n\x0f\x63odex_thread_id\x18\x05 \x01(\tH\x01\x88\x01\x01\x12\x12\n\x05title\x18\x06 \x01(\tH\x02\x88\x01\x01\x12.\n\ncreated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12/\n\x0blast_msg_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\r\n\x0b_tg_chat_idB\x12\n\x10_codex_thread_idB\x08\n\x06_title\"<\n\x10ListChatsRequest\x12(\n\npagination\x18\x01 \x01(\x0b\x32\x14.codex.v1.Pagination\"2\n\x11ListChatsResponse\x12\x1d\n\x05\x63hats\x18\x01 \x03(\x0b\x32\x0e.codex.v1.Chat\"!\n\x0eGetChatRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\"3\n\x11RenameChatRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\x12\r\n\x05title\x18\x02 \x01(\t\"$\n\x11\x44\x65leteChatRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\"@\n\x0eRunTurnRequest\x12\x14\n\x07\x63hat_id\x18\x01 \x01(\x03H\x00\x88\x01\x01\x12\x0c\n\x04text\x18\x02 \x01(\tB\n\n\x08_chat_id\"\xe6\x01\n\tChatEvent\x12%\n\x05token\x18\x01 \x01(\x0b\x32\x14.codex.v1.TokenEventH\x00\x12,\n\ttool_call\x18\x02 \x01(\x0b\x32\x17.codex.v1.ToolCallEventH\x00\x12\x30\n\x0btool_result\x18\x03 \x01(\x0b\x32\x19.codex.v1.ToolResultEventH\x00\x12#\n\x04\x64one\x18\x04 \x01(\x0b\x32\x13.codex.v1.DoneEventH\x00\x12%\n\x05\x65rror\x18\x05 \x01(\x0b\x32\x14.codex.v1.ErrorEventH\x00\x42\x06\n\x04kind\"\x1b\n\nTokenEvent\x12\r\n\x05\x64\x65lta\x18\x01 \x01(\t\"D\n\rToolCallEvent\x12\x0c\n\x04name\x18\x01 \x01(\t\x12%\n\x04\x61rgs\x18\x02 \x01(\x0b\x32\x17.google.protobuf.Struct\";\n\nAttachment\x12\x0c\n\x04kind\x18\x01 \x01(\t\x12\x0e\n\x06source\x18\x02 \x01(\t\x12\x0f\n\x07\x63\x61ption\x18\x03 \x01(\t\"v\n\x0fToolResultEvent\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04text\x18\x02 \x01(\t\x12)\n\x0b\x61ttachments\x18\x03 \x03(\x0b\x32\x14.codex.v1.Attachment\x12\x12\n\x05\x65rror\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_error\"0\n\tDoneEvent\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\x12\x12\n\nfinal_text\x18\x02 \x01(\t\":\n\nErrorEvent\x12\x0c\n\x04\x63ode\x18\x01 \x01(\t\x12\x13\n\x06\x64\x65tail\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\t\n\x07_detail\"\'\n\x14InterruptTurnRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\"\x17\n\x15InterruptTurnResponse*X\n\nChatSource\x12\x1b\n\x17\x43HAT_SOURCE_UNSPECIFIED\x10\x00\x12\x13\n\x0f\x43HAT_SOURCE_WEB\x10\x01\x12\x18\n\x14\x43HAT_SOURCE_TELEGRAM\x10\x02\x32\x8d\x03\n\x0b\x43hatService\x12\x44\n\tListChats\x12\x1a.codex.v1.ListChatsRequest\x1a\x1b.codex.v1.ListChatsResponse\x12\x33\n\x07GetChat\x12\x18.codex.v1.GetChatRequest\x1a\x0e.codex.v1.Chat\x12\x39\n\nRenameChat\x12\x1b.codex.v1.RenameChatRequest\x1a\x0e.codex.v1.Chat\x12:\n\nDeleteChat\x12\x1b.codex.v1.DeleteChatRequest\x1a\x0f.codex.v1.Empty\x12:\n\x07RunTurn\x12\x18.codex.v1.RunTurnRequest\x1a\x13.codex.v1.ChatEvent0\x01\x12P\n\rInterruptTurn\x12\x1e.codex.v1.InterruptTurnRequest\x1a\x1f.codex.v1.InterruptTurnResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'codex.v1.chat_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_CHATSOURCE']._serialized_start=622
-  _globals['_CHATSOURCE']._serialized_end=710
-  _globals['_CHAT']._serialized_start=90
-  _globals['_CHAT']._serialized_end=380
-  _globals['_LISTCHATSREQUEST']._serialized_start=382
-  _globals['_LISTCHATSREQUEST']._serialized_end=442
-  _globals['_LISTCHATSRESPONSE']._serialized_start=444
-  _globals['_LISTCHATSRESPONSE']._serialized_end=494
-  _globals['_GETCHATREQUEST']._serialized_start=496
-  _globals['_GETCHATREQUEST']._serialized_end=529
-  _globals['_RENAMECHATREQUEST']._serialized_start=531
-  _globals['_RENAMECHATREQUEST']._serialized_end=582
-  _globals['_DELETECHATREQUEST']._serialized_start=584
-  _globals['_DELETECHATREQUEST']._serialized_end=620
-  _globals['_CHATSERVICE']._serialized_start=713
-  _globals['_CHATSERVICE']._serialized_end=968
+  _globals['_CHATSOURCE']._serialized_start=1407
+  _globals['_CHATSOURCE']._serialized_end=1495
+  _globals['_CHAT']._serialized_start=120
+  _globals['_CHAT']._serialized_end=410
+  _globals['_LISTCHATSREQUEST']._serialized_start=412
+  _globals['_LISTCHATSREQUEST']._serialized_end=472
+  _globals['_LISTCHATSRESPONSE']._serialized_start=474
+  _globals['_LISTCHATSRESPONSE']._serialized_end=524
+  _globals['_GETCHATREQUEST']._serialized_start=526
+  _globals['_GETCHATREQUEST']._serialized_end=559
+  _globals['_RENAMECHATREQUEST']._serialized_start=561
+  _globals['_RENAMECHATREQUEST']._serialized_end=612
+  _globals['_DELETECHATREQUEST']._serialized_start=614
+  _globals['_DELETECHATREQUEST']._serialized_end=650
+  _globals['_RUNTURNREQUEST']._serialized_start=652
+  _globals['_RUNTURNREQUEST']._serialized_end=716
+  _globals['_CHATEVENT']._serialized_start=719
+  _globals['_CHATEVENT']._serialized_end=949
+  _globals['_TOKENEVENT']._serialized_start=951
+  _globals['_TOKENEVENT']._serialized_end=978
+  _globals['_TOOLCALLEVENT']._serialized_start=980
+  _globals['_TOOLCALLEVENT']._serialized_end=1048
+  _globals['_ATTACHMENT']._serialized_start=1050
+  _globals['_ATTACHMENT']._serialized_end=1109
+  _globals['_TOOLRESULTEVENT']._serialized_start=1111
+  _globals['_TOOLRESULTEVENT']._serialized_end=1229
+  _globals['_DONEEVENT']._serialized_start=1231
+  _globals['_DONEEVENT']._serialized_end=1279
+  _globals['_ERROREVENT']._serialized_start=1281
+  _globals['_ERROREVENT']._serialized_end=1339
+  _globals['_INTERRUPTTURNREQUEST']._serialized_start=1341
+  _globals['_INTERRUPTTURNREQUEST']._serialized_end=1380
+  _globals['_INTERRUPTTURNRESPONSE']._serialized_start=1382
+  _globals['_INTERRUPTTURNRESPONSE']._serialized_end=1405
+  _globals['_CHATSERVICE']._serialized_start=1498
+  _globals['_CHATSERVICE']._serialized_end=1895
 # @@protoc_insertion_point(module_scope)

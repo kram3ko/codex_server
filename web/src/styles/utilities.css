@@ -1,0 +1,51 @@
+/* Reusable surface effects — glass blur + gradient ring focus. */
+
+.glass {
+  background: oklch(22% 0.014 250 / 0.62);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid oklch(38% 0.018 250 / 0.5);
+}
+
+.glass-soft {
+  background: oklch(20% 0.014 250 / 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid oklch(32% 0.018 250 / 0.4);
+}
+
+/* Тільки message bubbles — щільніше, текст добре читається на фоні картинки. */
+.glass-bubble {
+  background: oklch(22% 0.014 250 / 0.85);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid oklch(38% 0.018 250 / 0.55);
+}
+
+:root[data-theme="light"] .glass-bubble {
+  background: oklch(100% 0 0 / 0.85);
+  border-color: oklch(86% 0.012 100 / 0.7);
+}
+
+.glow-ring {
+  position: relative;
+}
+.glow-ring::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, oklch(72% 0.18 175 / 0.7), oklch(70% 0.16 230 / 0.5), oklch(64% 0.16 320 / 0.4));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms;
+}
+.glow-ring:focus-within::before {
+  opacity: 1;
+}

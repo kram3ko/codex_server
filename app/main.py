@@ -1,6 +1,5 @@
 """FastAPI entrypoint:
 - Connect-RPC ASGI mount на /api  (AuthService, HealthService)
-- WebSocket /chat/ws  — bidi-стрім чату
 - HTTP /health        — службовий (docker healthcheck, без proto/RPC)
 
 HTTP/WS routers живуть в `app/api/`; Connect-RPC services тримаються тут
@@ -11,8 +10,8 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
-from app.api.chat_ws import router as chat_ws_router
 from app.api.health import router as health_router
 from app.db.base import SessionLocal, engine
 from app.grpc_generated.codex.v1.auth_connect import AuthServiceASGIApplication
@@ -35,9 +34,9 @@ from app.rpc.uploads import UploadsRPC
 from app.rpc.user import UserRPC
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
+from app.services.sessions.web import web_sessions
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
-from app.ws.sessions import web_sessions
 
 log = structlog.get_logger(__name__)
 
@@ -85,8 +84,15 @@ connect_router = ConnectRouter(
 )
 app.mount("/api", connect_router)
 
+# Codex image_generation outputs — read-only mount від sidecar'а; web
+# рендерить картинки одразу під час streaming'у, без чекання S3 persist.
+app.mount(
+    "/generated",
+    StaticFiles(directory="/home/codex/.codex/generated_images"),
+    name="generated",
+)
+
 # FastMCP streamable-HTTP — URL: /mcp/streamable.
 app.mount("/mcp", mcp_http_app)
 
 app.include_router(health_router)
-app.include_router(chat_ws_router)

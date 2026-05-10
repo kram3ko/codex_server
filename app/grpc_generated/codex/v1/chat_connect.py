@@ -31,6 +31,12 @@ class ChatService(Protocol):
     async def delete_chat(self, request: codex_dot_v1_dot_chat__pb2.DeleteChatRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    def run_turn(self, request: codex_dot_v1_dot_chat__pb2.RunTurnRequest, ctx: RequestContext) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    async def interrupt_turn(self, request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
 
 class ChatServiceASGIApplication(ConnectASGIApplication[ChatService]):
     def __init__(self, service: ChatService | AsyncGenerator[ChatService], *, interceptors: Iterable[Interceptor]=(), read_max_bytes: int | None = None, compressions: Iterable[Compression] | None = None, codecs: Iterable[Codec] | None = None) -> None:
@@ -76,6 +82,26 @@ class ChatServiceASGIApplication(ConnectASGIApplication[ChatService]):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=svc.delete_chat,
+                ),
+                "/codex.v1.ChatService/RunTurn": Endpoint.server_stream(
+                    method=MethodInfo(
+                        name="RunTurn",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.RunTurnRequest,
+                        output=codex_dot_v1_dot_chat__pb2.ChatEvent,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.run_turn,
+                ),
+                "/codex.v1.ChatService/InterruptTurn": Endpoint.unary(
+                    method=MethodInfo(
+                        name="InterruptTurn",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.InterruptTurnRequest,
+                        output=codex_dot_v1_dot_chat__pb2.InterruptTurnResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.interrupt_turn,
                 ),
             },
             interceptors=interceptors,
@@ -171,6 +197,46 @@ class ChatServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    def run_turn(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.RunTurnRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="RunTurn",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.RunTurnRequest,
+                output=codex_dot_v1_dot_chat__pb2.ChatEvent,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    async def interrupt_turn(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="InterruptTurn",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.InterruptTurnRequest,
+                output=codex_dot_v1_dot_chat__pb2.InterruptTurnResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
 
 
 
@@ -183,6 +249,10 @@ class ChatServiceSync(Protocol):
     def rename_chat(self, request: codex_dot_v1_dot_chat__pb2.RenameChatRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.Chat:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def delete_chat(self, request: codex_dot_v1_dot_chat__pb2.DeleteChatRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def run_turn(self, request: codex_dot_v1_dot_chat__pb2.RunTurnRequest, ctx: RequestContext) -> Iterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def interrupt_turn(self, request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
@@ -229,6 +299,26 @@ class ChatServiceWSGIApplication(ConnectWSGIApplication):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=service.delete_chat,
+                ),
+                "/codex.v1.ChatService/RunTurn": EndpointSync.server_stream(
+                    method=MethodInfo(
+                        name="RunTurn",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.RunTurnRequest,
+                        output=codex_dot_v1_dot_chat__pb2.ChatEvent,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.run_turn,
+                ),
+                "/codex.v1.ChatService/InterruptTurn": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="InterruptTurn",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.InterruptTurnRequest,
+                        output=codex_dot_v1_dot_chat__pb2.InterruptTurnResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.interrupt_turn,
                 ),
             },
             interceptors=interceptors,
@@ -318,6 +408,46 @@ class ChatServiceClientSync(ConnectClientSync):
                 service_name="codex.v1.ChatService",
                 input=codex_dot_v1_dot_chat__pb2.DeleteChatRequest,
                 output=codex_dot_v1_dot_common__pb2.Empty,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def run_turn(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.RunTurnRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> Iterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="RunTurn",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.RunTurnRequest,
+                output=codex_dot_v1_dot_chat__pb2.ChatEvent,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def interrupt_turn(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="InterruptTurn",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.InterruptTurnRequest,
+                output=codex_dot_v1_dot_chat__pb2.InterruptTurnResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,

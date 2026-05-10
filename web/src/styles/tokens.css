@@ -1,0 +1,33 @@
+/* OKLCH design tokens — accent/user/danger у Tailwind theme, surface palette
+   у :root з dark/light варіантами через [data-theme]. */
+@theme {
+  --color-accent: oklch(68% 0.18 175);
+  --color-accent-soft: oklch(68% 0.18 175 / 0.18);
+  --color-user: oklch(64% 0.16 230);
+  --color-user-soft: oklch(64% 0.16 230 / 0.16);
+  --color-danger: oklch(64% 0.2 25);
+}
+
+:root {
+  --color-bg: oklch(16% 0.012 250);
+  --color-surface: oklch(20% 0.014 250);
+  --color-surface-2: oklch(24% 0.018 250);
+  --color-border: oklch(32% 0.018 250);
+  --color-text: oklch(96% 0.01 100);
+  --color-text-muted: oklch(72% 0.012 100);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --color-bg: oklch(98% 0.005 100);
+  --color-surface: oklch(100% 0 0);
+  --color-surface-2: oklch(95% 0.008 100);
+  --color-border: oklch(86% 0.012 100);
+  --color-text: oklch(20% 0.014 250);
+  --color-text-muted: oklch(48% 0.014 250);
+  color-scheme: light;
+}
+
+:root {
+  --bg-image: url("/bg.jpg");
+}

@@ -9,6 +9,13 @@ set -eu
 export RUST_LOG="${RUST_LOG:-warn,codex_app_server=info}"
 export NO_COLOR="${NO_COLOR:-1}"
 
+# Codex CLI's internal feedback SQLite blocks main thread на heavy turn'ах
+# коли росте без bound'у. Symlink у tmpfs (size-capped) — sidecar's вбудована
+# retention тримає її маленькою, INSERT'и instant.
+mkdir -p /codex-feedback
+rm -f "$HOME/.codex/logs_2.sqlite" "$HOME/.codex/logs_2.sqlite-wal" "$HOME/.codex/logs_2.sqlite-shm"
+ln -sf /codex-feedback/logs_2.sqlite "$HOME/.codex/logs_2.sqlite"
+
 cat > "$HOME/.codex/config.toml" <<'EOF'
 # Container — наш sandbox boundary. Codex'у власний unshare-sandbox не
 # потрібен (і блокувався б Docker seccomp/apparmor без зайвих cap'ів).

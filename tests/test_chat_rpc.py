@@ -1,4 +1,4 @@
-from app.ws.chat import _final_text_for_done_frame
+from app.rpc.chat import _final_text_for_done_frame
 
 
 def test_done_frame_omits_final_text_when_it_matches_streamed_text() -> None:

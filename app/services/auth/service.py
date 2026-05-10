@@ -1,6 +1,7 @@
 """JWT issue / validate. Без HTTP/RPC обвʼязки — лише бізнес-логіка."""
 
 from datetime import UTC, datetime, timedelta
+from secrets import compare_digest
 
 import jwt
 
@@ -25,7 +26,8 @@ class AuthService:
 
     def issue_token(self, provided_password: str) -> tuple[str, int]:
         """Повертає (jwt, expires_in_seconds). Кидає InvalidCredentials."""
-        if not self._cfg.WEB_API_TOKEN or provided_password != self._cfg.WEB_API_TOKEN:
+        expected = self._cfg.WEB_API_TOKEN
+        if not expected or not compare_digest(provided_password, expected):
             raise InvalidCredentials("invalid token")
 
         ttl = timedelta(hours=self._cfg.JWT_TTL_HOURS)
