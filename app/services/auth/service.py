@@ -1,15 +1,19 @@
-"""JWT issue / validate. Без HTTP/RPC обвʼязки — лише бізнес-логіка."""
+"""JWT issue / validate + Argon2id password hashing.
+
+Pure business logic — без HTTP/RPC/DB. DB-лукапи робить caller (AuthRPC).
+"""
 
 from datetime import UTC, datetime, timedelta
-from secrets import compare_digest
 
 import jwt
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from app.config import Settings
 
 
 class InvalidCredentials(Exception):
-    """WEB_API_TOKEN не співпадає з очікуваним."""
+    """Email невідомий або пароль неправильний."""
 
 
 class InvalidToken(Exception):
@@ -17,23 +21,38 @@ class InvalidToken(Exception):
 
 
 class AuthService:
-    """Single-user JWT: WEB_API_TOKEN → access_token (HS256)."""
-
-    SUBJECT = "codex-user"
-
     def __init__(self, cfg: Settings) -> None:
         self._cfg = cfg
+        self._hasher = PasswordHasher()
 
-    def issue_token(self, provided_password: str) -> tuple[str, int]:
-        """Повертає (jwt, expires_in_seconds). Кидає InvalidCredentials."""
-        expected = self._cfg.WEB_API_TOKEN
-        if not expected or not compare_digest(provided_password, expected):
-            raise InvalidCredentials("invalid token")
+    # --- passwords ---------------------------------------------------------
 
+    def hash_password(self, plain: str) -> str:
+        return self._hasher.hash(plain)
+
+    def verify_password(self, plain: str, stored_hash: str | None) -> bool:
+        if not stored_hash:
+            return False
+        try:
+            self._hasher.verify(stored_hash, plain)
+            return True
+        except (VerifyMismatchError, InvalidHashError):
+            return False
+
+    def needs_rehash(self, stored_hash: str | None) -> bool:
+        if not stored_hash:
+            return False
+        return self._hasher.check_needs_rehash(stored_hash)
+
+    # --- tokens ------------------------------------------------------------
+
+    def issue_token(self, subject: str) -> tuple[str, int]:
+        """Видає JWT для вже-аутентифікованого subject (email). Повертає
+        (jwt, expires_in_seconds)."""
         ttl = timedelta(hours=self._cfg.JWT_TTL_HOURS)
         now = datetime.now(UTC)
         payload = {
-            "sub": self.SUBJECT,
+            "sub": subject,
             "iat": int(now.timestamp()),
             "exp": int((now + ttl).timestamp()),
         }
@@ -41,7 +60,7 @@ class AuthService:
         return encoded, int(ttl.total_seconds())
 
     def validate_token(self, raw: str) -> str:
-        """Перевіряє JWT, повертає subject. Кидає InvalidToken."""
+        """Перевіряє JWT, повертає subject (email). Кидає InvalidToken."""
         try:
             payload = jwt.decode(
                 raw,
@@ -50,8 +69,7 @@ class AuthService:
             )
         except jwt.PyJWTError as exc:
             raise InvalidToken(str(exc)) from exc
-
         sub = payload.get("sub")
-        if sub != self.SUBJECT:
-            raise InvalidToken("subject mismatch")
+        if not sub:
+            raise InvalidToken("missing subject")
         return sub

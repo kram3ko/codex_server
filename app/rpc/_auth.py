@@ -1,7 +1,7 @@
 """JWT authentication helper for Connect-RPC handlers.
 
 Pulls `Authorization: Bearer <jwt>` from `RequestContext.request_headers`,
-validates through `auth_service`, and resolves to a DB User row. Use:
+validates через `auth_service`, resolves subject (email) до DB User. Use:
 
     user = await require_user(ctx)
 """
@@ -16,8 +16,6 @@ from app.services.auth.default import auth_service
 from app.services.auth.service import InvalidToken
 from app.services.users.default import user_service
 
-_WEB_USER_EMAIL = "web@codex.local"
-
 
 def jwt_subject(ctx: RequestContext) -> str:
     headers = ctx.request_headers()
@@ -31,9 +29,10 @@ def jwt_subject(ctx: RequestContext) -> str:
 
 
 async def require_user(ctx: RequestContext) -> User:
-    """Validate JWT + return the (lazily created) web User row."""
-    jwt_subject(ctx)
+    """Validate JWT + return DB User by email-from-subject."""
+    email = jwt_subject(ctx)
     async with SessionLocal() as db:
-        user = await user_service.get_or_create_by_email(db, _WEB_USER_EMAIL)
-        await db.commit()
+        user = await user_service.get_by_email(db, email)
+        if user is None:
+            raise ConnectError(Code.UNAUTHENTICATED, "user not found")
         return user

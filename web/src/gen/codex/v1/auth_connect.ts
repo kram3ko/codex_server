@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { LoginRequest, LoginResponse } from "./auth_pb.js";
+import { LoginRequest, LoginResponse, RefreshRequest } from "./auth_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -18,6 +18,15 @@ export const AuthService = {
     login: {
       name: "Login",
       I: LoginRequest,
+      O: LoginResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc codex.v1.AuthService.Refresh
+     */
+    refresh: {
+      name: "Refresh",
+      I: RefreshRequest,
       O: LoginResponse,
       kind: MethodKind.Unary,
     },

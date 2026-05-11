@@ -32,6 +32,8 @@ from app.rpc.notes import NotesRPC
 from app.rpc.router import ConnectRouter
 from app.rpc.uploads import UploadsRPC
 from app.rpc.user import UserRPC
+from app.config import settings
+from app.models import UserRole
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
 from app.services.sessions.web import web_sessions
@@ -48,6 +50,17 @@ async def lifespan(_app: FastAPI):
         log.info("app_startup")
         async with SessionLocal() as db:
             promoted = await user_service.ensure_admin_roles(db)
+            admin_email = settings.ADMIN_EMAIL.strip().lower()
+            admin_pw = settings.ADMIN_PASSWORD
+            if admin_email and admin_pw:
+                admin = await user_service.get_or_create_by_email(db, admin_email)
+                if not auth_service.verify_password(admin_pw, admin.password_hash):
+                    await user_service.set_password_hash(
+                        db, admin, auth_service.hash_password(admin_pw)
+                    )
+                    log.info("admin_password_synced", email=admin.email)
+                if admin.role != UserRole.ADMIN:
+                    admin.role = UserRole.ADMIN
             await db.commit()
             if promoted:
                 log.info("user_roles_admin_promoted", count=promoted)
@@ -72,7 +85,7 @@ app = FastAPI(
 
 connect_router = ConnectRouter(
     services=[
-        AuthServiceASGIApplication(AuthRPC(auth_service)),
+        AuthServiceASGIApplication(AuthRPC()),
         HealthServiceASGIApplication(HealthRPC()),
         UserServiceASGIApplication(UserRPC()),
         ChatServiceASGIApplication(ChatRPC()),

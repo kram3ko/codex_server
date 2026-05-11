@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, UserRound } from "lucide-svelte";
+  import { Check, Copy, Sparkles, UserRound } from "lucide-svelte";
 
   import HistoricalImage from "./HistoricalImage.svelte";
   import { renderMarkdown } from "./markdown";
@@ -9,8 +9,14 @@
   let {
     message,
     streaming = false,
-    startedAt
-  }: { message: ChatMessage; streaming?: boolean; startedAt?: number } = $props();
+    startedAt,
+    currentToolName
+  }: {
+    message: ChatMessage;
+    streaming?: boolean;
+    startedAt?: number;
+    currentToolName?: string;
+  } = $props();
 
   const isUser = $derived(message.role === 1);
   const empty = $derived(streaming && !message.text);
@@ -41,6 +47,16 @@
     const r = s % 60;
     return m > 0 ? `${m}:${r.toString().padStart(2, "0")}` : `${s}s`;
   }
+
+  let copied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  async function copyText() {
+    if (!message.text) return;
+    await navigator.clipboard.writeText(message.text);
+    copied = true;
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => (copied = false), 1500);
+  }
 </script>
 
 <article class="msg-in flex gap-3 {isUser ? 'justify-end' : 'justify-start'}">
@@ -63,15 +79,31 @@
         <span>·</span>
         <span>{formatTime(message.createdAt)}</span>
       {/if}
-      {#if streaming}
-        <span class="ml-auto flex items-center gap-1.5 rounded-full bg-[var(--color-accent)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-bg)] shadow-md shadow-[oklch(72%_0.18_175/0.3)]">
-          <span class="size-1.5 rounded-full bg-[var(--color-bg)] animate-pulse"></span>
-          streaming
-          {#if startedAt}
-            <span class="rounded bg-[var(--color-bg)]/30 px-1 font-mono tabular-nums">{fmtElapsed(elapsed)}</span>
-          {/if}
-        </span>
-      {/if}
+      <div class="ml-auto flex items-center gap-2">
+        {#if streaming}
+          <span class="flex items-center gap-1.5 rounded-full bg-[var(--color-accent)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-bg)] shadow-md shadow-[oklch(72%_0.18_175/0.3)]">
+            <span class="size-1.5 rounded-full bg-[var(--color-bg)] animate-pulse"></span>
+            {currentToolName ?? "streaming"}
+            {#if startedAt}
+              <span class="rounded bg-[var(--color-bg)]/30 px-1 font-mono tabular-nums">{fmtElapsed(elapsed)}</span>
+            {/if}
+          </span>
+        {/if}
+        {#if message.text}
+          <button
+            type="button"
+            class="grid size-6 place-items-center rounded-md text-[var(--color-text-muted)] transition hover:bg-[oklch(96%_0.01_100/0.06)] hover:text-[var(--color-text)]"
+            title={copied ? "Copied" : "Copy"}
+            onclick={copyText}
+          >
+            {#if copied}
+              <Check size={13} />
+            {:else}
+              <Copy size={13} />
+            {/if}
+          </button>
+        {/if}
+      </div>
     </div>
 
     {#if empty}

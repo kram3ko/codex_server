@@ -167,10 +167,11 @@
             await loadChats();
             if (done.chatId) {
               const current = chats.find((chat) => chat.id === done.chatId);
-              // Auto-refresh after server persists turn — keep tools/attachments
-              // until history reloads; then historical upload_ids own rendering.
+              // Auto-refresh after server persists turn — drop transient
+              // tool/attachment state; historical upload_ids own rendering.
               if (current) {
                 await loadChatMessages(current);
+                tools = [];
                 attachments = [];
               }
             }

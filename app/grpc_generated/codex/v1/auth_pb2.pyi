@@ -5,10 +5,12 @@ from typing import ClassVar as _ClassVar, Optional as _Optional
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class LoginRequest(_message.Message):
-    __slots__ = ("token",)
-    TOKEN_FIELD_NUMBER: _ClassVar[int]
-    token: str
-    def __init__(self, token: _Optional[str] = ...) -> None: ...
+    __slots__ = ("email", "password")
+    EMAIL_FIELD_NUMBER: _ClassVar[int]
+    PASSWORD_FIELD_NUMBER: _ClassVar[int]
+    email: str
+    password: str
+    def __init__(self, email: _Optional[str] = ..., password: _Optional[str] = ...) -> None: ...
 
 class LoginResponse(_message.Message):
     __slots__ = ("access_token", "token_type", "expires_in")
@@ -19,3 +21,7 @@ class LoginResponse(_message.Message):
     token_type: str
     expires_in: int
     def __init__(self, access_token: _Optional[str] = ..., token_type: _Optional[str] = ..., expires_in: _Optional[int] = ...) -> None: ...
+
+class RefreshRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...

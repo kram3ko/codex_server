@@ -12,6 +12,12 @@
   let signedIn = $state(auth.signedIn);
   let route = $state<Route>("chat");
 
+  $effect(() => {
+    const handler = () => { signedIn = false; };
+    window.addEventListener("auth:logout", handler);
+    return () => window.removeEventListener("auth:logout", handler);
+  });
+
   function onLogin() {
     signedIn = true;
     route = "chat";

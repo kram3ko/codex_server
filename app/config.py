@@ -68,10 +68,13 @@ class Settings(BaseSettings):
     WEB_TURN_TIMEOUT_SECONDS: float = 300.0
     TG_POLLING_LOCK_TTL_SECONDS: int = 60
 
-    # --- Auth (single-user JWT) ---
-    # WEB_API_TOKEN — "пароль", який клієнт обмінює на короткоживучий JWT
-    # через POST /auth/token. JWT_SECRET — окремий ключ для підпису токена.
-    WEB_API_TOKEN: str = ""
+    # --- Auth (email + password → JWT) ---
+    # ADMIN_EMAIL/ADMIN_PASSWORD — bootstrap акаунт: на startup створюється
+    # юзер з таким email і `password_hash = argon2id(ADMIN_PASSWORD)`. Якщо
+    # ADMIN_PASSWORD змінюється у .env — хеш у БД переписується. JWT_SECRET —
+    # ключ для підпису access-токена.
+    ADMIN_EMAIL: str = ""
+    ADMIN_PASSWORD: str = ""
     JWT_SECRET: str = "change-me-please"
     JWT_ALGORITHM: str = "HS256"
     JWT_TTL_HOURS: int = 24

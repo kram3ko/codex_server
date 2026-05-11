@@ -27,6 +27,7 @@
 
   const runningTools = $derived(tools.filter((t) => t.status === "running"));
   const completedTools = $derived(tools.filter((t) => t.status !== "running"));
+  const currentToolName = $derived(runningTools[0]?.name);
 
   function onscroll() {
     if (!container) return;
@@ -86,7 +87,7 @@
     {/if}
 
     {#if draft}
-      <Message message={draft} streaming startedAt={draftStartedAt} />
+      <Message message={draft} streaming startedAt={draftStartedAt} {currentToolName} />
     {/if}
   </div>
 </div>

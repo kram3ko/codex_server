@@ -11,11 +11,14 @@ import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
  */
 export class LoginRequest extends Message<LoginRequest> {
   /**
-   * Той самий WEB_API_TOKEN що у .env. Виконує роль "паролю".
-   *
-   * @generated from field: string token = 1;
+   * @generated from field: string email = 1;
    */
-  token = "";
+  email = "";
+
+  /**
+   * @generated from field: string password = 2;
+   */
+  password = "";
 
   constructor(data?: PartialMessage<LoginRequest>) {
     super();
@@ -25,7 +28,8 @@ export class LoginRequest extends Message<LoginRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "codex.v1.LoginRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "email", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "password", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LoginRequest {
@@ -97,6 +101,37 @@ export class LoginResponse extends Message<LoginResponse> {
 
   static equals(a: LoginResponse | PlainMessage<LoginResponse> | undefined, b: LoginResponse | PlainMessage<LoginResponse> | undefined): boolean {
     return proto3.util.equals(LoginResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message codex.v1.RefreshRequest
+ */
+export class RefreshRequest extends Message<RefreshRequest> {
+  constructor(data?: PartialMessage<RefreshRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "codex.v1.RefreshRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RefreshRequest {
+    return new RefreshRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RefreshRequest {
+    return new RefreshRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RefreshRequest {
+    return new RefreshRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RefreshRequest | PlainMessage<RefreshRequest> | undefined, b: RefreshRequest | PlainMessage<RefreshRequest> | undefined): boolean {
+    return proto3.util.equals(RefreshRequest, a, b);
   }
 }
 

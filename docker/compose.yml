@@ -53,6 +53,7 @@ services:
       - "8088:5173"
     volumes:
       - ../web:/web
+      - ../protos:/protos:ro
       - web_node_modules:/web/node_modules
     depends_on:
       codex-server:
