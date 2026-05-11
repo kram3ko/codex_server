@@ -113,7 +113,7 @@
         <span class="size-2 rounded-full bg-[var(--color-accent)] animate-thinking" style="animation-delay:320ms"></span>
       </div>
     {:else}
-      <div class="markdown text-sm">
+      <div class="markdown text-[1rem] leading-[1.7]">
         {@html renderMarkdown(message.text || "")}{#if streaming}<span
             class="ml-[2px] inline-block h-[1em] w-[7px] -translate-y-px rounded-sm bg-[var(--color-accent)] align-middle animate-blink"
           ></span>{/if}

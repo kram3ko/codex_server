@@ -1,6 +1,6 @@
 """Speechmatics batch v2 STT backend."""
 
-from pathlib import Path
+from typing import BinaryIO
 
 import structlog
 from speechmatics.batch import (
@@ -37,7 +37,7 @@ class SpeechmaticsSTT:
     def enabled(self) -> bool:
         return bool(self._api_key)
 
-    async def transcribe(self, audio_path: Path) -> str:
+    async def transcribe(self, audio: BinaryIO, filename: str) -> str:
         """Returns transcript text; empty on silence/no-speech (not an error)."""
         if not self.enabled:
             return ""
@@ -46,10 +46,11 @@ class SpeechmaticsSTT:
             language=self._language,
             operating_point=OperatingPoint(self._operating_point),
         )
+        audio.seek(0)
         async with AsyncClient(api_key=self._api_key) as client:
             try:
                 result = await client.transcribe(
-                    audio_file=str(audio_path),
+                    audio_file=(filename, audio),
                     transcription_config=config,
                     polling_interval=_POLL_S,
                     timeout=_TIMEOUT_S,

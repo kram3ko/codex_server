@@ -1,7 +1,6 @@
 """STT backend contract — all speech-to-text providers implement this Protocol."""
 
-from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 
 class AudioTranscriptionError(RuntimeError):
@@ -12,7 +11,7 @@ class STTBackend(Protocol):
     @property
     def enabled(self) -> bool: ...
 
-    async def transcribe(self, audio_path: Path) -> str: ...
+    async def transcribe(self, audio: BinaryIO, filename: str) -> str: ...
 
 
 class NullSTT:
@@ -20,5 +19,5 @@ class NullSTT:
 
     enabled: bool = False
 
-    async def transcribe(self, audio_path: Path) -> str:
+    async def transcribe(self, audio: BinaryIO, filename: str) -> str:
         return ""

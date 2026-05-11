@@ -159,6 +159,20 @@ class InterruptTurnResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
+class SteerTurnRequest(_message.Message):
+    __slots__ = ("chat_id", "text")
+    CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    chat_id: int
+    text: str
+    def __init__(self, chat_id: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
+
+class SteerTurnResponse(_message.Message):
+    __slots__ = ("accepted",)
+    ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    accepted: bool
+    def __init__(self, accepted: bool = ...) -> None: ...
+
 class GetCodexUsageRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...

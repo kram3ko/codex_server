@@ -37,6 +37,9 @@ class ChatService(Protocol):
     async def interrupt_turn(self, request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    async def steer_turn(self, request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
     async def get_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.CodexUsage:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
@@ -105,6 +108,16 @@ class ChatServiceASGIApplication(ConnectASGIApplication[ChatService]):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=svc.interrupt_turn,
+                ),
+                "/codex.v1.ChatService/SteerTurn": Endpoint.unary(
+                    method=MethodInfo(
+                        name="SteerTurn",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.SteerTurnRequest,
+                        output=codex_dot_v1_dot_chat__pb2.SteerTurnResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.steer_turn,
                 ),
                 "/codex.v1.ChatService/GetCodexUsage": Endpoint.unary(
                     method=MethodInfo(
@@ -250,6 +263,26 @@ class ChatServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    async def steer_turn(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="SteerTurn",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.SteerTurnRequest,
+                output=codex_dot_v1_dot_chat__pb2.SteerTurnResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
     async def get_codex_usage(
         self,
         request: codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest,
@@ -286,6 +319,8 @@ class ChatServiceSync(Protocol):
     def run_turn(self, request: codex_dot_v1_dot_chat__pb2.RunTurnRequest, ctx: RequestContext) -> Iterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def interrupt_turn(self, request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def steer_turn(self, request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def get_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.CodexUsage:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
@@ -354,6 +389,16 @@ class ChatServiceWSGIApplication(ConnectWSGIApplication):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=service.interrupt_turn,
+                ),
+                "/codex.v1.ChatService/SteerTurn": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="SteerTurn",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.SteerTurnRequest,
+                        output=codex_dot_v1_dot_chat__pb2.SteerTurnResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.steer_turn,
                 ),
                 "/codex.v1.ChatService/GetCodexUsage": EndpointSync.unary(
                     method=MethodInfo(
@@ -493,6 +538,26 @@ class ChatServiceClientSync(ConnectClientSync):
                 service_name="codex.v1.ChatService",
                 input=codex_dot_v1_dot_chat__pb2.InterruptTurnRequest,
                 output=codex_dot_v1_dot_chat__pb2.InterruptTurnResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def steer_turn(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="SteerTurn",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.SteerTurnRequest,
+                output=codex_dot_v1_dot_chat__pb2.SteerTurnResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,

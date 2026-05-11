@@ -106,6 +106,18 @@ message InterruptTurnRequest {
 
 message InterruptTurnResponse {}
 
+// Append text to the currently running turn (codex's `turn/steer` RPC).
+// If no turn is running, server returns accepted=false and the client should
+// fall back to RunTurn.
+message SteerTurnRequest {
+  int64 chat_id = 1;
+  string text = 2;
+}
+
+message SteerTurnResponse {
+  bool accepted = 1;
+}
+
 message GetCodexUsageRequest {}
 
 message UsageWindow {
@@ -129,5 +141,6 @@ service ChatService {
   rpc DeleteChat(DeleteChatRequest) returns (Empty);
   rpc RunTurn(RunTurnRequest) returns (stream ChatEvent);
   rpc InterruptTurn(InterruptTurnRequest) returns (InterruptTurnResponse);
+  rpc SteerTurn(SteerTurnRequest) returns (SteerTurnResponse);
   rpc GetCodexUsage(GetCodexUsageRequest) returns (CodexUsage);
 }

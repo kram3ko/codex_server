@@ -164,6 +164,28 @@ class ChatRPC(ChatProtocol):
         return chat_pb2.InterruptTurnResponse()
 
     @override
+    async def steer_turn(
+        self,
+        request: chat_pb2.SteerTurnRequest,
+        ctx: RequestContext,
+    ) -> chat_pb2.SteerTurnResponse:
+        user = await require_user(ctx)
+        text = request.text.strip()
+        if not text:
+            return chat_pb2.SteerTurnResponse(accepted=False)
+        session = await web_sessions.get(user.id)
+        if session is None or session.db_chat_id != request.chat_id:
+            return chat_pb2.SteerTurnResponse(accepted=False)
+        accepted = await session.client.steer(text)
+        if accepted:
+            async with SessionLocal() as db:
+                await message_service.append(
+                    db, session.db_chat_id, MessageRole.USER, text
+                )
+                await db.commit()
+        return chat_pb2.SteerTurnResponse(accepted=accepted)
+
+    @override
     async def get_codex_usage(
         self,
         request: chat_pb2.GetCodexUsageRequest,

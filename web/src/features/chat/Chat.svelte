@@ -73,8 +73,24 @@
   }
 
   async function send(text: string, uploadIds: bigint[] = []) {
-    // If a turn is in flight, ask the server to drop it first so the new run_turn
-    // can grab the session lock без черги.
+    // Steer the running turn instead of interrupting+restarting. Codex
+    // appends `text` to the in-flight prompt; uploads still require a fresh
+    // turn (sidecar's steer API only accepts text), so fall through if any.
+    if (busy && selected && uploadIds.length === 0) {
+      const resp = await chatClient
+        .steerTurn({ chatId: selected.id, text })
+        .catch(() => null);
+      if (resp?.accepted) {
+        const userMessage = new ChatMessage({
+          id: BigInt(Date.now()),
+          chatId: selected.id,
+          role: 1,
+          text
+        });
+        messages = [...messages, userMessage];
+        return;
+      }
+    }
     if (busy && selected) {
       await chatClient.interruptTurn({ chatId: selected.id }).catch(() => undefined);
     }
@@ -215,6 +231,13 @@
       return;
     }
     activeTurnId += 1;
+    // Snapshot whatever the model already streamed so the user sees the
+    // partial reply instead of an empty hole. Server-side persistence is
+    // a separate concern (TURN_INTERRUPTED is logged, partial text isn't
+    // saved yet).
+    if (draft && typer.displayed) {
+      messages = [...messages, new ChatMessage({ ...draft, text: typer.displayed })];
+    }
     typer.reset();
     draft = null;
     draftStartedAt = undefined;

@@ -36,7 +36,7 @@ from app.services.sessions.store import cancel_session_turn, quarantine_key
 from app.services.stt.base import STTBackend
 from app.services.uploads.default import upload_service
 from app.tg.markdown import tg_markdown
-from app.tg.media import PreparedTurn, cleanup_attachments, prepare_turn
+from app.tg.media import PreparedTurn, prepare_turn
 from app.tg.output import send_attachment, send_text, send_voice_reply
 from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSession, ChatSessionStore
@@ -83,7 +83,6 @@ class TurnRunner:
             await self._run_locked(session, message, prepared, progress)
         finally:
             await progress.stop()
-            await cleanup_attachments(prepared.cleanup_paths)
 
     @staticmethod
     async def _seed_history_if_fresh_thread(session: ChatSession) -> None:
@@ -107,7 +106,7 @@ class TurnRunner:
         return True
 
     async def _persist_user_turn(self, session: ChatSession, prepared: PreparedTurn) -> None:
-        meta = {"attachments": list(prepared.attachments)} if prepared.attachments else None
+        meta = {"upload_ids": list(prepared.upload_ids)} if prepared.upload_ids else None
         async with SessionLocal() as db:
             await message_service.append(
                 db,

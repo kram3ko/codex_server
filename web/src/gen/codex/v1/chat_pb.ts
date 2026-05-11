@@ -769,6 +769,90 @@ export class InterruptTurnResponse extends Message<InterruptTurnResponse> {
 }
 
 /**
+ * Append text to the currently running turn (codex's `turn/steer` RPC).
+ * If no turn is running, server returns accepted=false and the client should
+ * fall back to RunTurn.
+ *
+ * @generated from message codex.v1.SteerTurnRequest
+ */
+export class SteerTurnRequest extends Message<SteerTurnRequest> {
+  /**
+   * @generated from field: int64 chat_id = 1;
+   */
+  chatId = protoInt64.zero;
+
+  /**
+   * @generated from field: string text = 2;
+   */
+  text = "";
+
+  constructor(data?: PartialMessage<SteerTurnRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "codex.v1.SteerTurnRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chat_id", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "text", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SteerTurnRequest {
+    return new SteerTurnRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SteerTurnRequest {
+    return new SteerTurnRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SteerTurnRequest {
+    return new SteerTurnRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SteerTurnRequest | PlainMessage<SteerTurnRequest> | undefined, b: SteerTurnRequest | PlainMessage<SteerTurnRequest> | undefined): boolean {
+    return proto3.util.equals(SteerTurnRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message codex.v1.SteerTurnResponse
+ */
+export class SteerTurnResponse extends Message<SteerTurnResponse> {
+  /**
+   * @generated from field: bool accepted = 1;
+   */
+  accepted = false;
+
+  constructor(data?: PartialMessage<SteerTurnResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "codex.v1.SteerTurnResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "accepted", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SteerTurnResponse {
+    return new SteerTurnResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SteerTurnResponse {
+    return new SteerTurnResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SteerTurnResponse {
+    return new SteerTurnResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SteerTurnResponse | PlainMessage<SteerTurnResponse> | undefined, b: SteerTurnResponse | PlainMessage<SteerTurnResponse> | undefined): boolean {
+    return proto3.util.equals(SteerTurnResponse, a, b);
+  }
+}
+
+/**
  * @generated from message codex.v1.GetCodexUsageRequest
  */
 export class GetCodexUsageRequest extends Message<GetCodexUsageRequest> {

@@ -68,12 +68,12 @@
   <div class="mb-2.5 flex items-center justify-between">
     <div class="flex items-center gap-1.5">
       <Sparkles size={12} class="text-[var(--color-accent)]" />
-      <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text)]">
+      <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[oklch(82%_0.012_100)]">
         {usage?.planType || "Codex"}
       </span>
     </div>
     <button
-      class="grid size-7 place-items-center rounded-md text-[var(--color-text-muted)] transition hover:bg-[oklch(96%_0.01_100/0.08)] hover:text-[var(--color-accent)] active:scale-90"
+      class="grid size-7 place-items-center rounded-md text-[oklch(72%_0.012_100)] transition hover:bg-[oklch(96%_0.01_100/0.08)] hover:text-[var(--color-accent)] active:scale-90"
       title="Refresh usage"
       type="button"
       onclick={load}
@@ -88,10 +88,10 @@
         {#each windows as w (w.windowMinutes)}
           <div class="space-y-1">
             <div class="flex items-baseline justify-between text-[11.5px]">
-              <span class="font-medium text-[var(--color-text)]">{labelFor(w.windowMinutes)}</span>
+              <span class="font-medium text-[oklch(82%_0.012_100)]">{labelFor(w.windowMinutes)}</span>
               <span class="flex items-baseline gap-1.5 tabular-nums">
-                <span class="font-semibold text-[var(--color-text)]">{w.usedPercent.toFixed(0)}%</span>
-                <span class="text-[10.5px] text-[var(--color-text-muted)]">· reset {formatReset(w)}</span>
+                <span class="font-semibold text-[oklch(82%_0.012_100)]">{w.usedPercent.toFixed(0)}%</span>
+                <span class="text-[10.5px] text-[oklch(72%_0.012_100)]">· reset {formatReset(w)}</span>
               </span>
             </div>
             <div class="relative h-1.5 overflow-hidden rounded-full bg-[oklch(96%_0.01_100/0.08)]">
@@ -110,11 +110,11 @@
       <div class="h-1.5 animate-pulse rounded-full bg-[oklch(96%_0.01_100/0.08)]"></div>
     </div>
   {:else}
-    <div class="text-[11px] text-[var(--color-text-muted)]">No data</div>
+    <div class="text-[11px] text-[oklch(72%_0.012_100)]">No data</div>
   {/if}
 
   {#if loadedAt}
-    <div class="mt-2.5 text-[10px] text-[var(--color-text-muted)]">
+    <div class="mt-2.5 text-[10px] text-[oklch(72%_0.012_100)]">
       updated {formatUtc(loadedAt)}
     </div>
   {/if}

@@ -130,7 +130,7 @@
     <div class="flex items-end gap-2">
       <div class="glow-ring flex-1 rounded-xl">
         <textarea
-          class="max-h-48 min-h-[3.25rem] w-full resize-y rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-transparent"
+          class="max-h-48 min-h-[3.25rem] w-full resize-y rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3 text-base leading-7 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-transparent"
           bind:value={text}
           onkeydown={keydown}
           {onpaste}
@@ -145,6 +145,15 @@
           onclick={oninterrupt}
         >
           <Square size={18} />
+        </button>
+      {:else if busy}
+        <button
+          class="grid size-[3.25rem] place-items-center rounded-xl bg-gradient-to-br from-[oklch(64%_0.16_230)] to-[oklch(58%_0.18_260)] text-[var(--color-bg)] shadow-lg shadow-[oklch(64%_0.16_230/0.3)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
+          disabled={!canSend}
+          title={uploadingNow ? "Uploading…" : "Continue turn (Enter)"}
+          type="submit"
+        >
+          <Send size={18} />
         </button>
       {:else}
         <button

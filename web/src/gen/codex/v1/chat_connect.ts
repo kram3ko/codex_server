@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { Chat, ChatEvent, CodexUsage, DeleteChatRequest, GetChatRequest, GetCodexUsageRequest, InterruptTurnRequest, InterruptTurnResponse, ListChatsRequest, ListChatsResponse, RenameChatRequest, RunTurnRequest } from "./chat_pb.js";
+import { Chat, ChatEvent, CodexUsage, DeleteChatRequest, GetChatRequest, GetCodexUsageRequest, InterruptTurnRequest, InterruptTurnResponse, ListChatsRequest, ListChatsResponse, RenameChatRequest, RunTurnRequest, SteerTurnRequest, SteerTurnResponse } from "./chat_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 import { Empty } from "./common_pb.js";
 
@@ -65,6 +65,15 @@ export const ChatService = {
       name: "InterruptTurn",
       I: InterruptTurnRequest,
       O: InterruptTurnResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc codex.v1.ChatService.SteerTurn
+     */
+    steerTurn: {
+      name: "SteerTurn",
+      I: SteerTurnRequest,
+      O: SteerTurnResponse,
       kind: MethodKind.Unary,
     },
     /**
