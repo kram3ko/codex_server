@@ -4,9 +4,5 @@ plugins:
     out: src/gen
     opt:
       - target=ts
-  - local: protoc-gen-connect-es
-    out: src/gen
-    opt:
-      - target=ts
 inputs:
   - directory: ../protos

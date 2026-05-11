@@ -23,10 +23,8 @@
   const isUser = $derived(message.role === 1);
   const empty = $derived(streaming && !message.text);
 
-  // Витягти upload_ids з message.meta (Struct → JSON) — для рендеру історії з MinIO/S3.
-  const metaJson = $derived(
-    message.meta?.toJson() as Record<string, unknown> | undefined
-  );
+  // protobuf-es v2 — google.protobuf.Struct рендериться як plain JsonObject, не клас.
+  const metaJson = $derived(message.meta as Record<string, unknown> | undefined);
   const uploadIds = $derived.by((): number[] => idsFromMeta(metaJson?.upload_ids));
   const audioUploadIds = $derived.by((): number[] =>
     idsFromMeta(metaJson?.audio_upload_ids)
@@ -159,7 +157,7 @@
       {#if audioUploadIds.length}
         <div class="mt-3 space-y-2">
           {#each audioUploadIds as uploadId (uploadId)}
-            <HistoricalAudio {uploadId} autoplay={!isUser} />
+            <HistoricalAudio {uploadId} />
           {/each}
         </div>
       {/if}

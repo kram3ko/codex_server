@@ -4,9 +4,9 @@
 //   login()  → server returns JWT, store it, schedule a refresh just before exp.
 //   refresh() → server reissues JWT using current Bearer. On failure → logout.
 //   logout()  → drop token, cancel timer, emit "auth:logout" so the UI re-renders.
-import { createPromiseClient } from "@connectrpc/connect";
+import { createClient } from "@connectrpc/connect";
 
-import { AuthService } from "../../gen/codex/v1/auth_connect";
+import { AuthService } from "../../gen/codex/v1/auth_pb";
 import { clearToken, getToken, setToken } from "../../shared/lib/token";
 import { transport } from "../../shared/lib/transport";
 
@@ -32,7 +32,7 @@ function isLive(token: string | null): token is string {
 
 let token: string | null = getToken();
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-const client = createPromiseClient(AuthService, transport);
+const client = createClient(AuthService, transport);
 
 function cancelTimer(): void {
   if (refreshTimer) {

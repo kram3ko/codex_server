@@ -7,10 +7,11 @@
   import MessageList from "./MessageList.svelte";
   import { createTypewriter } from "./typewriter.svelte";
   import type { ToolEvent } from "./ToolCall.svelte";
-  import { Struct } from "@bufbuild/protobuf";
+  import { create } from "@bufbuild/protobuf";
 
   import type { Attachment as ChatAttachment, Chat } from "../../gen/codex/v1/chat_pb";
-  import { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
+  import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
+  import { MessageSchema } from "../../gen/codex/v1/message_pb";
   import Spinner from "../../shared/components/Spinner.svelte";
   import { chatClient, messageClient } from "../../shared/lib/clients";
 
@@ -27,7 +28,7 @@
   let activeTurnId = $state(0);
 
   const typer = createTypewriter();
-  const liveDraft = $derived(draft ? new ChatMessage({ ...draft, text: typer.displayed }) : null);
+  const liveDraft = $derived(draft ? create(MessageSchema, { ...draft, text: typer.displayed }) : null);
 
   async function loadChats() {
     loading = true;
@@ -82,7 +83,7 @@
         .steerTurn({ chatId: selected.id, text })
         .catch(() => null);
       if (resp?.accepted) {
-        const userMessage = new ChatMessage({
+        const userMessage = create(MessageSchema, {
           id: BigInt(Date.now()),
           chatId: selected.id,
           role: 1,
@@ -106,15 +107,15 @@
     const metaJson: { upload_ids?: number[]; audio_upload_ids?: number[] } = {};
     if (imageIds.length) metaJson.upload_ids = imageIds.map((id) => Number(id));
     if (audioIds.length) metaJson.audio_upload_ids = audioIds.map((id) => Number(id));
-    const userMessage = new ChatMessage({
+    const userMessage = create(MessageSchema, {
       id: BigInt(Date.now()),
       chatId: selected?.id ?? 0n,
       role: 1,
       text,
-      meta: Object.keys(metaJson).length ? Struct.fromJson(metaJson) : undefined
+      meta: Object.keys(metaJson).length ? metaJson : undefined
     });
     messages = [...messages, userMessage];
-    draft = new ChatMessage({
+    draft = create(MessageSchema, {
       id: BigInt(Date.now() + 1),
       chatId: selected?.id ?? 0n,
       role: 2,
@@ -141,7 +142,7 @@
               {
                 id: `${Date.now()}:${tools.length}`,
                 name: event.kind.value.name,
-                args: event.kind.value.args?.toJson(),
+                args: event.kind.value.args,
                 status: "running"
               }
             ];
@@ -188,7 +189,7 @@
             }
             await typer.drained();
             if (draft) {
-              messages = [...messages, new ChatMessage({ ...draft, text: typer.displayed })];
+              messages = [...messages, create(MessageSchema, { ...draft, text: typer.displayed })];
             }
             draft = null;
             draftStartedAt = undefined;
@@ -238,7 +239,7 @@
     // a separate concern (TURN_INTERRUPTED is logged, partial text isn't
     // saved yet).
     if (draft && typer.displayed) {
-      messages = [...messages, new ChatMessage({ ...draft, text: typer.displayed })];
+      messages = [...messages, create(MessageSchema, { ...draft, text: typer.displayed })];
     }
     typer.reset();
     draft = null;
