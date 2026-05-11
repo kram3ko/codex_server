@@ -54,16 +54,6 @@ services:
       retries: 5
       start_period: 10s
 
-  # Watchdog for label `codex.watchdog=true`; see watchdog/watch.sh.
-  codex-watchdog:
-    image: docker:cli
-    container_name: codex-watchdog
-    restart: unless-stopped
-    entrypoint: ["/bin/sh", "/watch.sh"]
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./watchdog/watch.sh:/watch.sh:ro
-
 networks:
   default:
     external: true

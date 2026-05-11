@@ -294,7 +294,10 @@ class CodexClient:
         payload: list[dict[str, Any]] = [{"type": "text", "text": text}]
         for attachment in attachments:
             parsed = urlparse(attachment)
-            if parsed.scheme in {"http", "https"}:
+            # `data:` URIs carry bytes inline — OpenAI Vision accepts them
+            # directly. Regular http(s) are forwarded as-is (caller must
+            # ensure the URL is reachable from OpenAI, not just locally).
+            if parsed.scheme in {"http", "https", "data"}:
                 payload.append({"type": "image", "url": attachment})
             else:
                 payload.append({"type": "localImage", "path": attachment})

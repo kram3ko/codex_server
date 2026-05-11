@@ -30,25 +30,17 @@ class Upload(_message.Message):
     created_at: _timestamp_pb2.Timestamp
     def __init__(self, id: _Optional[int] = ..., chat_id: _Optional[int] = ..., filename: _Optional[str] = ..., mime: _Optional[str] = ..., size: _Optional[int] = ..., s3_path: _Optional[str] = ..., extracted_text: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
-class UploadChunk(_message.Message):
-    __slots__ = ("init", "data")
-    INIT_FIELD_NUMBER: _ClassVar[int]
-    DATA_FIELD_NUMBER: _ClassVar[int]
-    init: UploadInit
-    data: bytes
-    def __init__(self, init: _Optional[_Union[UploadInit, _Mapping]] = ..., data: _Optional[bytes] = ...) -> None: ...
-
-class UploadInit(_message.Message):
-    __slots__ = ("chat_id", "filename", "mime", "expected_size")
+class UploadOnceRequest(_message.Message):
+    __slots__ = ("chat_id", "filename", "mime", "data")
     CHAT_ID_FIELD_NUMBER: _ClassVar[int]
     FILENAME_FIELD_NUMBER: _ClassVar[int]
     MIME_FIELD_NUMBER: _ClassVar[int]
-    EXPECTED_SIZE_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
     chat_id: int
     filename: str
     mime: str
-    expected_size: int
-    def __init__(self, chat_id: _Optional[int] = ..., filename: _Optional[str] = ..., mime: _Optional[str] = ..., expected_size: _Optional[int] = ...) -> None: ...
+    data: bytes
+    def __init__(self, chat_id: _Optional[int] = ..., filename: _Optional[str] = ..., mime: _Optional[str] = ..., data: _Optional[bytes] = ...) -> None: ...
 
 class UploadResponse(_message.Message):
     __slots__ = ("upload", "presigned_url", "presigned_ttl_seconds")

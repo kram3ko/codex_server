@@ -20,21 +20,14 @@ message Upload {
   google.protobuf.Timestamp created_at = 8;
 }
 
-// Client-streaming chunk frame. Перший frame має `init`, наступні — `data`,
-// останній — `data` з порожнім bytes (signal end). Server тримає state per
-// stream (Connect-RPC stream context).
-message UploadChunk {
-  oneof payload {
-    UploadInit init = 1;
-    bytes data = 2;
-  }
-}
-
-message UploadInit {
+// Single-request upload — Connect-Web не підтримує client-streaming, тож
+// шлемо весь blob у одному unary запиті. Для типових pasted screenshots
+// (~kB-MB) це нормально; великі файли резерв'ємо через S3 direct upload.
+message UploadOnceRequest {
   optional int64 chat_id = 1;
   string filename = 2;
   string mime = 3;
-  int32 expected_size = 4;  // hint для valid'ації; 0 → unknown
+  bytes data = 4;
 }
 
 message UploadResponse {
@@ -72,7 +65,7 @@ message DeleteUploadRequest {
 }
 
 service UploadsService {
-  rpc Upload(stream UploadChunk) returns (UploadResponse);
+  rpc UploadOnce(UploadOnceRequest) returns (UploadResponse);
   rpc GetPresigned(GetPresignedRequest) returns (GetPresignedResponse);
   rpc ListUploads(ListUploadsRequest) returns (ListUploadsResponse);
   rpc DeleteUpload(DeleteUploadRequest) returns (Empty);

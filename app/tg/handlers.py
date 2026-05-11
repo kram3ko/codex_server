@@ -77,12 +77,11 @@ class TGHandlers:
             return
         if message.chat is None:
             return
-        session = await self._sessions.get(message.chat.id)
-        if session is None:
-            await message.answer(
-                tg_markdown.escape("Спочатку напиши боту хоч одне повідомлення."),
-            )
-            return
+        session = await self._sessions.get_or_open(
+            tg_user_id=message.from_user.id,
+            tg_chat_id=message.chat.id,
+            display_name=message.from_user.full_name,
+        )
         usage = await codex_usage_service.latest(session.client)
         if usage is None:
             await message.answer(tg_markdown.escape("Sidecar не expose'ить rate-limits RPC."))

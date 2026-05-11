@@ -1,8 +1,10 @@
 """ChatService — chat CRUD plus web turn streaming."""
 
 import asyncio
+import base64
 import contextlib
 from collections.abc import AsyncIterator
+from io import BytesIO
 from typing import Any, override
 
 import structlog
@@ -16,7 +18,7 @@ from app.grpc_generated.codex.v1 import chat_pb2, common_pb2
 from app.grpc_generated.codex.v1.chat_connect import ChatService as ChatProtocol
 from app.models import Chat, EventKind, MessageRole
 from app.rpc._auth import require_user
-from app.rpc._mappers import chat_to_pb, to_struct
+from app.rpc._mappers import chat_to_pb, to_struct, to_ts
 from app.services.bus.default import event_bus
 from app.services.chats.default import chat_service
 from app.services.codex.events import (
@@ -29,6 +31,8 @@ from app.services.codex.events import (
     ToolResultEvent,
     iterate_with_idle_timeout,
 )
+from app.services.codex_usage.default import codex_usage_service
+from app.services.codex_usage.service import CodexUsage, UsageWindow
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.sessions.store import ChatSession
@@ -37,6 +41,11 @@ from app.services.uploads.default import upload_service
 
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 200
+
+# Presigned S3/MinIO URLs leak access key + signature + path in error strings.
+# Token-replace them before yielding to the client; raw text goes to structlog.
+_PRESIGNED_MARKER = "X-Amz-Signature="
+_REDACTED_URL = "[link expired or unavailable]"
 
 log = structlog.get_logger(__name__)
 
@@ -111,14 +120,19 @@ class ChatRPC(ChatProtocol):
 
         persisted_chat_id = session.db_chat_id
         user_pk = session.db_user_id
+        upload_ids = list(request.upload_ids)
+        data_urls = await _upload_data_urls(upload_ids)
+        user_meta: dict[str, Any] | None = {"upload_ids": upload_ids} if upload_ids else None
         async with SessionLocal() as db:
-            await message_service.append(db, persisted_chat_id, MessageRole.USER, text)
+            await message_service.append(
+                db, persisted_chat_id, MessageRole.USER, text, meta=user_meta
+            )
             await event_service.emit(
                 db,
                 EventKind.TURN_STARTED,
                 chat_id=persisted_chat_id,
                 user_id=user_pk,
-                payload={"text_len": len(text)},
+                payload={"text_len": len(text), "attachments": len(data_urls)},
             )
             await db.commit()
 
@@ -127,7 +141,9 @@ class ChatRPC(ChatProtocol):
             current = asyncio.current_task()
             session.current_turn_task = current
             try:
-                async for event in _stream_turn(session, text, persisted_chat_id, user_pk):
+                async for event in _stream_turn(
+                    session, text, persisted_chat_id, user_pk, data_urls
+                ):
                     yield event
             finally:
                 if session.current_turn_task is current:
@@ -147,6 +163,19 @@ class ChatRPC(ChatProtocol):
             await web_sessions.cancel_session_turn(session)
         return chat_pb2.InterruptTurnResponse()
 
+    @override
+    async def get_codex_usage(
+        self,
+        request: chat_pb2.GetCodexUsageRequest,
+        ctx: RequestContext,
+    ) -> chat_pb2.CodexUsage:
+        user = await require_user(ctx)
+        session = await web_sessions.get_or_open(user.id)
+        usage = await codex_usage_service.latest(session.client)
+        if usage is None:
+            return chat_pb2.CodexUsage()
+        return _codex_usage_to_pb(usage)
+
 
 def _resolve_limit(p: common_pb2.Pagination) -> int:
     limit = p.limit if p.limit > 0 else _DEFAULT_LIMIT
@@ -160,18 +189,37 @@ async def _load_chat_owned(db, chat_id: int, user_id: int) -> Chat:
     return chat
 
 
+async def _upload_data_urls(upload_ids: list[int]) -> tuple[str, ...]:
+    # Codex forwards `url` straight to OpenAI; a Docker-internal MinIO URL is
+    # unreachable from there, so we inline the bytes as data: URIs.
+    if not upload_ids:
+        return ()
+    urls: list[str] = []
+    async with SessionLocal() as db:
+        for uid in upload_ids:
+            upload = await upload_service.get(db, uid)
+            if upload is None:
+                raise ConnectError(Code.NOT_FOUND, f"upload {uid} not found")
+            buf = BytesIO()
+            await upload_service.download_to_stream(upload, buf)
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            urls.append(f"data:{upload.mime};base64,{b64}")
+    return tuple(urls)
+
+
 async def _stream_turn(
     session: ChatSession,
     text: str,
     persisted_chat_id: int,
     user_pk: int,
+    attachments: tuple[str, ...] = (),
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     final_text = ""
     streamed_text = ""
     tool_calls: list[ToolCallRecord] = []
     attachments: list[Attachment] = []
     done_seen = False
-    stream = session.client.run_turn(text)
+    stream = session.client.run_turn(text, attachments=attachments)
     events_count = 0
     last_event_type = "none"
 
@@ -332,14 +380,24 @@ def _chat_event_to_pb(event) -> chat_pb2.ChatEvent:
                 attachments=[_attachment_to_pb(a) for a in attachments],
             )
             if error is not None:
-                pb.error = error
+                pb.error = _redact_for_user(error, source="tool_result_error")
             return chat_pb2.ChatEvent(tool_result=pb)
         case ErrorEvent(code=code, detail=detail):
-            return _error_event(code, detail)
+            redacted = _redact_for_user(detail, source="error_event") if detail else detail
+            return _error_event(code, redacted)
         case DoneEvent(final_text=final_text):
             return chat_pb2.ChatEvent(done=chat_pb2.DoneEvent(final_text=final_text))
         case _:
             return _error_event("unknown_event", type(event).__name__)
+
+
+def _redact_for_user(text: str, *, source: str) -> str:
+    """Strip presigned-URL noise. Log raw to keep debugging signal."""
+    if _PRESIGNED_MARKER not in text:
+        return text
+    redacted = " ".join(_REDACTED_URL if _PRESIGNED_MARKER in tok else tok for tok in text.split())
+    log.warning("user_facing_error_redacted", source=source, raw=text)
+    return redacted
 
 
 _GENERATED_PREFIX = "/home/codex/.codex/generated_images/"
@@ -369,3 +427,21 @@ def _final_text_for_done_frame(final_text: str, streamed_text: str) -> str:
     if streamed_text and final_text == streamed_text:
         return ""
     return final_text
+
+
+def _codex_usage_to_pb(u: CodexUsage) -> chat_pb2.CodexUsage:
+    msg = chat_pb2.CodexUsage()
+    if u.plan_type:
+        msg.plan_type = u.plan_type
+    if u.primary is not None:
+        msg.primary.CopyFrom(_usage_window_to_pb(u.primary))
+    if u.secondary is not None:
+        msg.secondary.CopyFrom(_usage_window_to_pb(u.secondary))
+    return msg
+
+
+def _usage_window_to_pb(w: UsageWindow) -> chat_pb2.UsageWindow:
+    msg = chat_pb2.UsageWindow(used_percent=w.used_percent, window_minutes=w.window_minutes)
+    if w.resets_at is not None:
+        msg.resets_at.CopyFrom(to_ts(w.resets_at))
+    return msg

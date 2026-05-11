@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.api.health import router as health_router
+from app.config import settings
 from app.db.base import SessionLocal, engine
 from app.grpc_generated.codex.v1.auth_connect import AuthServiceASGIApplication
 from app.grpc_generated.codex.v1.chat_connect import ChatServiceASGIApplication
@@ -23,6 +24,7 @@ from app.grpc_generated.codex.v1.notes_connect import NotesServiceASGIApplicatio
 from app.grpc_generated.codex.v1.uploads_connect import UploadsServiceASGIApplication
 from app.grpc_generated.codex.v1.user_connect import UserServiceASGIApplication
 from app.mcp import mcp_http_app
+from app.models import UserRole
 from app.rpc.auth import AuthRPC
 from app.rpc.chat import ChatRPC
 from app.rpc.event import EventRPC
@@ -32,8 +34,6 @@ from app.rpc.notes import NotesRPC
 from app.rpc.router import ConnectRouter
 from app.rpc.uploads import UploadsRPC
 from app.rpc.user import UserRPC
-from app.config import settings
-from app.models import UserRole
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
 from app.services.sessions.web import web_sessions

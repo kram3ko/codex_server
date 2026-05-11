@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteUploadRequest, GetPresignedRequest, GetPresignedResponse, ListUploadsRequest, ListUploadsResponse, UploadChunk, UploadResponse } from "./uploads_pb.js";
+import { DeleteUploadRequest, GetPresignedRequest, GetPresignedResponse, ListUploadsRequest, ListUploadsResponse, UploadOnceRequest, UploadResponse } from "./uploads_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 import { Empty } from "./common_pb.js";
 
@@ -14,13 +14,13 @@ export const UploadsService = {
   typeName: "codex.v1.UploadsService",
   methods: {
     /**
-     * @generated from rpc codex.v1.UploadsService.Upload
+     * @generated from rpc codex.v1.UploadsService.UploadOnce
      */
-    upload: {
-      name: "Upload",
-      I: UploadChunk,
+    uploadOnce: {
+      name: "UploadOnce",
+      I: UploadOnceRequest,
       O: UploadResponse,
-      kind: MethodKind.ClientStreaming,
+      kind: MethodKind.Unary,
     },
     /**
      * @generated from rpc codex.v1.UploadsService.GetPresigned

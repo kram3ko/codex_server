@@ -74,12 +74,14 @@ class DeleteChatRequest(_message.Message):
     def __init__(self, chat_id: _Optional[int] = ...) -> None: ...
 
 class RunTurnRequest(_message.Message):
-    __slots__ = ("chat_id", "text")
+    __slots__ = ("chat_id", "text", "upload_ids")
     CHAT_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
+    UPLOAD_IDS_FIELD_NUMBER: _ClassVar[int]
     chat_id: int
     text: str
-    def __init__(self, chat_id: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
+    upload_ids: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, chat_id: _Optional[int] = ..., text: _Optional[str] = ..., upload_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class ChatEvent(_message.Message):
     __slots__ = ("token", "tool_call", "tool_result", "done", "error")
@@ -156,3 +158,27 @@ class InterruptTurnRequest(_message.Message):
 class InterruptTurnResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class GetCodexUsageRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class UsageWindow(_message.Message):
+    __slots__ = ("used_percent", "window_minutes", "resets_at")
+    USED_PERCENT_FIELD_NUMBER: _ClassVar[int]
+    WINDOW_MINUTES_FIELD_NUMBER: _ClassVar[int]
+    RESETS_AT_FIELD_NUMBER: _ClassVar[int]
+    used_percent: float
+    window_minutes: int
+    resets_at: _timestamp_pb2.Timestamp
+    def __init__(self, used_percent: _Optional[float] = ..., window_minutes: _Optional[int] = ..., resets_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class CodexUsage(_message.Message):
+    __slots__ = ("plan_type", "primary", "secondary")
+    PLAN_TYPE_FIELD_NUMBER: _ClassVar[int]
+    PRIMARY_FIELD_NUMBER: _ClassVar[int]
+    SECONDARY_FIELD_NUMBER: _ClassVar[int]
+    plan_type: str
+    primary: UsageWindow
+    secondary: UsageWindow
+    def __init__(self, plan_type: _Optional[str] = ..., primary: _Optional[_Union[UsageWindow, _Mapping]] = ..., secondary: _Optional[_Union[UsageWindow, _Mapping]] = ...) -> None: ...

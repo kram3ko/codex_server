@@ -320,6 +320,15 @@ export class RunTurnRequest extends Message<RunTurnRequest> {
    */
   text = "";
 
+  /**
+   * Attachments uploaded via UploadsService.Upload prior to this turn.
+   * Server resolves each to a presigned URL and passes to the sidecar as
+   * multimodal input alongside `text`.
+   *
+   * @generated from field: repeated int64 upload_ids = 3;
+   */
+  uploadIds: bigint[] = [];
+
   constructor(data?: PartialMessage<RunTurnRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -330,6 +339,7 @@ export class RunTurnRequest extends Message<RunTurnRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chat_id", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
     { no: 2, name: "text", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "upload_ids", kind: "scalar", T: 3 /* ScalarType.INT64 */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RunTurnRequest {
@@ -755,6 +765,138 @@ export class InterruptTurnResponse extends Message<InterruptTurnResponse> {
 
   static equals(a: InterruptTurnResponse | PlainMessage<InterruptTurnResponse> | undefined, b: InterruptTurnResponse | PlainMessage<InterruptTurnResponse> | undefined): boolean {
     return proto3.util.equals(InterruptTurnResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message codex.v1.GetCodexUsageRequest
+ */
+export class GetCodexUsageRequest extends Message<GetCodexUsageRequest> {
+  constructor(data?: PartialMessage<GetCodexUsageRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "codex.v1.GetCodexUsageRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetCodexUsageRequest {
+    return new GetCodexUsageRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetCodexUsageRequest {
+    return new GetCodexUsageRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetCodexUsageRequest {
+    return new GetCodexUsageRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetCodexUsageRequest | PlainMessage<GetCodexUsageRequest> | undefined, b: GetCodexUsageRequest | PlainMessage<GetCodexUsageRequest> | undefined): boolean {
+    return proto3.util.equals(GetCodexUsageRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message codex.v1.UsageWindow
+ */
+export class UsageWindow extends Message<UsageWindow> {
+  /**
+   * @generated from field: double used_percent = 1;
+   */
+  usedPercent = 0;
+
+  /**
+   * @generated from field: int32 window_minutes = 2;
+   */
+  windowMinutes = 0;
+
+  /**
+   * @generated from field: optional google.protobuf.Timestamp resets_at = 3;
+   */
+  resetsAt?: Timestamp;
+
+  constructor(data?: PartialMessage<UsageWindow>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "codex.v1.UsageWindow";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "used_percent", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 2, name: "window_minutes", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 3, name: "resets_at", kind: "message", T: Timestamp, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UsageWindow {
+    return new UsageWindow().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UsageWindow {
+    return new UsageWindow().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UsageWindow {
+    return new UsageWindow().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: UsageWindow | PlainMessage<UsageWindow> | undefined, b: UsageWindow | PlainMessage<UsageWindow> | undefined): boolean {
+    return proto3.util.equals(UsageWindow, a, b);
+  }
+}
+
+/**
+ * Sidecar may not expose `account/rateLimits/read` — in that case all fields
+ * stay unset and client treats it as "no data".
+ *
+ * @generated from message codex.v1.CodexUsage
+ */
+export class CodexUsage extends Message<CodexUsage> {
+  /**
+   * @generated from field: optional string plan_type = 1;
+   */
+  planType?: string;
+
+  /**
+   * @generated from field: optional codex.v1.UsageWindow primary = 2;
+   */
+  primary?: UsageWindow;
+
+  /**
+   * @generated from field: optional codex.v1.UsageWindow secondary = 3;
+   */
+  secondary?: UsageWindow;
+
+  constructor(data?: PartialMessage<CodexUsage>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "codex.v1.CodexUsage";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "plan_type", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 2, name: "primary", kind: "message", T: UsageWindow, opt: true },
+    { no: 3, name: "secondary", kind: "message", T: UsageWindow, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CodexUsage {
+    return new CodexUsage().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CodexUsage {
+    return new CodexUsage().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CodexUsage {
+    return new CodexUsage().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CodexUsage | PlainMessage<CodexUsage> | undefined, b: CodexUsage | PlainMessage<CodexUsage> | undefined): boolean {
+    return proto3.util.equals(CodexUsage, a, b);
   }
 }
 

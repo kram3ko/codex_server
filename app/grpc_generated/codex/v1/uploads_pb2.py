@@ -26,7 +26,7 @@ from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__
 from codex.v1 import common_pb2 as codex_dot_v1_dot_common__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x63odex/v1/uploads.proto\x12\x08\x63odex.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x15\x63odex/v1/common.proto\"\xd5\x01\n\x06Upload\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x14\n\x07\x63hat_id\x18\x02 \x01(\x03H\x00\x88\x01\x01\x12\x10\n\x08\x66ilename\x18\x03 \x01(\t\x12\x0c\n\x04mime\x18\x04 \x01(\t\x12\x0c\n\x04size\x18\x05 \x01(\x05\x12\x0f\n\x07s3_path\x18\x06 \x01(\t\x12\x1b\n\x0e\x65xtracted_text\x18\x07 \x01(\tH\x01\x88\x01\x01\x12.\n\ncreated_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\n\n\x08_chat_idB\x11\n\x0f_extracted_text\"N\n\x0bUploadChunk\x12$\n\x04init\x18\x01 \x01(\x0b\x32\x14.codex.v1.UploadInitH\x00\x12\x0e\n\x04\x64\x61ta\x18\x02 \x01(\x0cH\x00\x42\t\n\x07payload\"e\n\nUploadInit\x12\x14\n\x07\x63hat_id\x18\x01 \x01(\x03H\x00\x88\x01\x01\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x0c\n\x04mime\x18\x03 \x01(\t\x12\x15\n\rexpected_size\x18\x04 \x01(\x05\x42\n\n\x08_chat_id\"h\n\x0eUploadResponse\x12 \n\x06upload\x18\x01 \x01(\x0b\x32\x10.codex.v1.Upload\x12\x15\n\rpresigned_url\x18\x02 \x01(\t\x12\x1d\n\x15presigned_ttl_seconds\x18\x03 \x01(\x05\"[\n\x13GetPresignedRequest\x12\x13\n\tupload_id\x18\x01 \x01(\x03H\x00\x12\x10\n\x06source\x18\x02 \x01(\tH\x00\x12\x13\n\x0bttl_seconds\x18\x03 \x01(\x05\x42\x08\n\x06target\"S\n\x14GetPresignedResponse\x12\x0b\n\x03url\x18\x01 \x01(\t\x12.\n\nexpires_at\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"`\n\x12ListUploadsRequest\x12\x14\n\x07\x63hat_id\x18\x01 \x01(\x03H\x00\x88\x01\x01\x12(\n\npagination\x18\x02 \x01(\x0b\x32\x14.codex.v1.PaginationB\n\n\x08_chat_id\"8\n\x13ListUploadsResponse\x12!\n\x07uploads\x18\x01 \x03(\x0b\x32\x10.codex.v1.Upload\"(\n\x13\x44\x65leteUploadRequest\x12\x11\n\tupload_id\x18\x01 \x01(\x03\x32\xa8\x02\n\x0eUploadsService\x12;\n\x06Upload\x12\x15.codex.v1.UploadChunk\x1a\x18.codex.v1.UploadResponse(\x01\x12M\n\x0cGetPresigned\x12\x1d.codex.v1.GetPresignedRequest\x1a\x1e.codex.v1.GetPresignedResponse\x12J\n\x0bListUploads\x12\x1c.codex.v1.ListUploadsRequest\x1a\x1d.codex.v1.ListUploadsResponse\x12>\n\x0c\x44\x65leteUpload\x12\x1d.codex.v1.DeleteUploadRequest\x1a\x0f.codex.v1.Emptyb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x63odex/v1/uploads.proto\x12\x08\x63odex.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x15\x63odex/v1/common.proto\"\xd5\x01\n\x06Upload\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x14\n\x07\x63hat_id\x18\x02 \x01(\x03H\x00\x88\x01\x01\x12\x10\n\x08\x66ilename\x18\x03 \x01(\t\x12\x0c\n\x04mime\x18\x04 \x01(\t\x12\x0c\n\x04size\x18\x05 \x01(\x05\x12\x0f\n\x07s3_path\x18\x06 \x01(\t\x12\x1b\n\x0e\x65xtracted_text\x18\x07 \x01(\tH\x01\x88\x01\x01\x12.\n\ncreated_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\n\n\x08_chat_idB\x11\n\x0f_extracted_text\"c\n\x11UploadOnceRequest\x12\x14\n\x07\x63hat_id\x18\x01 \x01(\x03H\x00\x88\x01\x01\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x0c\n\x04mime\x18\x03 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x04 \x01(\x0c\x42\n\n\x08_chat_id\"h\n\x0eUploadResponse\x12 \n\x06upload\x18\x01 \x01(\x0b\x32\x10.codex.v1.Upload\x12\x15\n\rpresigned_url\x18\x02 \x01(\t\x12\x1d\n\x15presigned_ttl_seconds\x18\x03 \x01(\x05\"[\n\x13GetPresignedRequest\x12\x13\n\tupload_id\x18\x01 \x01(\x03H\x00\x12\x10\n\x06source\x18\x02 \x01(\tH\x00\x12\x13\n\x0bttl_seconds\x18\x03 \x01(\x05\x42\x08\n\x06target\"S\n\x14GetPresignedResponse\x12\x0b\n\x03url\x18\x01 \x01(\t\x12.\n\nexpires_at\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"`\n\x12ListUploadsRequest\x12\x14\n\x07\x63hat_id\x18\x01 \x01(\x03H\x00\x88\x01\x01\x12(\n\npagination\x18\x02 \x01(\x0b\x32\x14.codex.v1.PaginationB\n\n\x08_chat_id\"8\n\x13ListUploadsResponse\x12!\n\x07uploads\x18\x01 \x03(\x0b\x32\x10.codex.v1.Upload\"(\n\x13\x44\x65leteUploadRequest\x12\x11\n\tupload_id\x18\x01 \x01(\x03\x32\xb0\x02\n\x0eUploadsService\x12\x43\n\nUploadOnce\x12\x1b.codex.v1.UploadOnceRequest\x1a\x18.codex.v1.UploadResponse\x12M\n\x0cGetPresigned\x12\x1d.codex.v1.GetPresignedRequest\x1a\x1e.codex.v1.GetPresignedResponse\x12J\n\x0bListUploads\x12\x1c.codex.v1.ListUploadsRequest\x1a\x1d.codex.v1.ListUploadsResponse\x12>\n\x0c\x44\x65leteUpload\x12\x1d.codex.v1.DeleteUploadRequest\x1a\x0f.codex.v1.Emptyb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,22 +35,20 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_UPLOAD']._serialized_start=93
   _globals['_UPLOAD']._serialized_end=306
-  _globals['_UPLOADCHUNK']._serialized_start=308
-  _globals['_UPLOADCHUNK']._serialized_end=386
-  _globals['_UPLOADINIT']._serialized_start=388
-  _globals['_UPLOADINIT']._serialized_end=489
-  _globals['_UPLOADRESPONSE']._serialized_start=491
-  _globals['_UPLOADRESPONSE']._serialized_end=595
-  _globals['_GETPRESIGNEDREQUEST']._serialized_start=597
-  _globals['_GETPRESIGNEDREQUEST']._serialized_end=688
-  _globals['_GETPRESIGNEDRESPONSE']._serialized_start=690
-  _globals['_GETPRESIGNEDRESPONSE']._serialized_end=773
-  _globals['_LISTUPLOADSREQUEST']._serialized_start=775
-  _globals['_LISTUPLOADSREQUEST']._serialized_end=871
-  _globals['_LISTUPLOADSRESPONSE']._serialized_start=873
-  _globals['_LISTUPLOADSRESPONSE']._serialized_end=929
-  _globals['_DELETEUPLOADREQUEST']._serialized_start=931
-  _globals['_DELETEUPLOADREQUEST']._serialized_end=971
-  _globals['_UPLOADSSERVICE']._serialized_start=974
-  _globals['_UPLOADSSERVICE']._serialized_end=1270
+  _globals['_UPLOADONCEREQUEST']._serialized_start=308
+  _globals['_UPLOADONCEREQUEST']._serialized_end=407
+  _globals['_UPLOADRESPONSE']._serialized_start=409
+  _globals['_UPLOADRESPONSE']._serialized_end=513
+  _globals['_GETPRESIGNEDREQUEST']._serialized_start=515
+  _globals['_GETPRESIGNEDREQUEST']._serialized_end=606
+  _globals['_GETPRESIGNEDRESPONSE']._serialized_start=608
+  _globals['_GETPRESIGNEDRESPONSE']._serialized_end=691
+  _globals['_LISTUPLOADSREQUEST']._serialized_start=693
+  _globals['_LISTUPLOADSREQUEST']._serialized_end=789
+  _globals['_LISTUPLOADSRESPONSE']._serialized_start=791
+  _globals['_LISTUPLOADSRESPONSE']._serialized_end=847
+  _globals['_DELETEUPLOADREQUEST']._serialized_start=849
+  _globals['_DELETEUPLOADREQUEST']._serialized_end=889
+  _globals['_UPLOADSSERVICE']._serialized_start=892
+  _globals['_UPLOADSSERVICE']._serialized_end=1196
 # @@protoc_insertion_point(module_scope)

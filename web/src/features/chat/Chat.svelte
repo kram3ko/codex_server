@@ -7,6 +7,8 @@
   import MessageList from "./MessageList.svelte";
   import { createTypewriter } from "./typewriter.svelte";
   import type { ToolEvent } from "./ToolCall.svelte";
+  import { Struct } from "@bufbuild/protobuf";
+
   import type { Attachment as ChatAttachment, Chat } from "../../gen/codex/v1/chat_pb";
   import { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import Spinner from "../../shared/components/Spinner.svelte";
@@ -70,7 +72,7 @@
     await loadChatMessages(chat);
   }
 
-  async function send(text: string) {
+  async function send(text: string, uploadIds: bigint[] = []) {
     // If a turn is in flight, ask the server to drop it first so the new run_turn
     // can grab the session lock без черги.
     if (busy && selected) {
@@ -88,7 +90,10 @@
       id: BigInt(Date.now()),
       chatId: selected?.id ?? 0n,
       role: 1,
-      text
+      text,
+      meta: uploadIds.length
+        ? Struct.fromJson({ upload_ids: uploadIds.map((id) => Number(id)) })
+        : undefined
     });
     messages = [...messages, userMessage];
     draft = new ChatMessage({
@@ -101,7 +106,8 @@
     try {
       const stream = chatClient.runTurn({
         chatId: selected?.id,
-        text
+        text,
+        uploadIds
       });
       for await (const event of stream) {
         if (turnId !== activeTurnId) {

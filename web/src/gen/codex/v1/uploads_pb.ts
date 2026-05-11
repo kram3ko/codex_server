@@ -89,63 +89,13 @@ export class Upload extends Message<Upload> {
 }
 
 /**
- * Client-streaming chunk frame. Перший frame має `init`, наступні — `data`,
- * останній — `data` з порожнім bytes (signal end). Server тримає state per
- * stream (Connect-RPC stream context).
+ * Single-request upload — Connect-Web не підтримує client-streaming, тож
+ * шлемо весь blob у одному unary запиті. Для типових pasted screenshots
+ * (~kB-MB) це нормально; великі файли резерв'ємо через S3 direct upload.
  *
- * @generated from message codex.v1.UploadChunk
+ * @generated from message codex.v1.UploadOnceRequest
  */
-export class UploadChunk extends Message<UploadChunk> {
-  /**
-   * @generated from oneof codex.v1.UploadChunk.payload
-   */
-  payload: {
-    /**
-     * @generated from field: codex.v1.UploadInit init = 1;
-     */
-    value: UploadInit;
-    case: "init";
-  } | {
-    /**
-     * @generated from field: bytes data = 2;
-     */
-    value: Uint8Array;
-    case: "data";
-  } | { case: undefined; value?: undefined } = { case: undefined };
-
-  constructor(data?: PartialMessage<UploadChunk>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "codex.v1.UploadChunk";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "init", kind: "message", T: UploadInit, oneof: "payload" },
-    { no: 2, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */, oneof: "payload" },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UploadChunk {
-    return new UploadChunk().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UploadChunk {
-    return new UploadChunk().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UploadChunk {
-    return new UploadChunk().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: UploadChunk | PlainMessage<UploadChunk> | undefined, b: UploadChunk | PlainMessage<UploadChunk> | undefined): boolean {
-    return proto3.util.equals(UploadChunk, a, b);
-  }
-}
-
-/**
- * @generated from message codex.v1.UploadInit
- */
-export class UploadInit extends Message<UploadInit> {
+export class UploadOnceRequest extends Message<UploadOnceRequest> {
   /**
    * @generated from field: optional int64 chat_id = 1;
    */
@@ -162,40 +112,38 @@ export class UploadInit extends Message<UploadInit> {
   mime = "";
 
   /**
-   * hint для valid'ації; 0 → unknown
-   *
-   * @generated from field: int32 expected_size = 4;
+   * @generated from field: bytes data = 4;
    */
-  expectedSize = 0;
+  data = new Uint8Array(0);
 
-  constructor(data?: PartialMessage<UploadInit>) {
+  constructor(data?: PartialMessage<UploadOnceRequest>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "codex.v1.UploadInit";
+  static readonly typeName = "codex.v1.UploadOnceRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chat_id", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
     { no: 2, name: "filename", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "mime", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "expected_size", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UploadInit {
-    return new UploadInit().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UploadOnceRequest {
+    return new UploadOnceRequest().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UploadInit {
-    return new UploadInit().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UploadOnceRequest {
+    return new UploadOnceRequest().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UploadInit {
-    return new UploadInit().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UploadOnceRequest {
+    return new UploadOnceRequest().fromJsonString(jsonString, options);
   }
 
-  static equals(a: UploadInit | PlainMessage<UploadInit> | undefined, b: UploadInit | PlainMessage<UploadInit> | undefined): boolean {
-    return proto3.util.equals(UploadInit, a, b);
+  static equals(a: UploadOnceRequest | PlainMessage<UploadOnceRequest> | undefined, b: UploadOnceRequest | PlainMessage<UploadOnceRequest> | undefined): boolean {
+    return proto3.util.equals(UploadOnceRequest, a, b);
   }
 }
 

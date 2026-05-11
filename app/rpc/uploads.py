@@ -1,4 +1,4 @@
-"""UploadsService — chunked upload, presigned URL, list, delete."""
+"""UploadsService — unary upload, presigned URL, list, delete."""
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -23,31 +23,24 @@ _MAX_PRESIGNED_TTL_S = 24 * 3600
 
 class UploadsRPC(UploadsProtocol):
     @override
-    async def upload(  # client-streaming
+    async def upload_once(
         self,
-        request: AsyncIterator[uploads_pb2.UploadChunk],
+        request: uploads_pb2.UploadOnceRequest,
         ctx: RequestContext,
     ) -> uploads_pb2.UploadResponse:
         await require_user(ctx)
-        init = await _consume_init(request)
+        if not request.filename or not request.mime:
+            raise ConnectError(Code.INVALID_ARGUMENT, "filename and mime required")
 
         async def _data_iter() -> AsyncIterator[bytes]:
-            async for chunk in request:
-                payload = chunk.WhichOneof("payload")
-                if payload == "data":
-                    yield chunk.data
-                elif payload == "init":
-                    raise ConnectError(
-                        Code.INVALID_ARGUMENT,
-                        "duplicate `init` frame in upload stream",
-                    )
+            yield request.data
 
         async with SessionLocal() as db:
             upload = await upload_service.persist_chunks(
                 db,
-                chat_id=init.chat_id if init.HasField("chat_id") else None,
-                filename=init.filename,
-                mime=init.mime,
+                chat_id=request.chat_id if request.HasField("chat_id") else None,
+                filename=request.filename,
+                mime=request.mime,
                 chunks=_data_iter(),
             )
             await db.commit()
@@ -117,21 +110,6 @@ class UploadsRPC(UploadsProtocol):
                 raise ConnectError(Code.NOT_FOUND, f"upload {request.upload_id} not found")
             await db.commit()
         return common_pb2.Empty()
-
-
-async def _consume_init(stream: AsyncIterator[uploads_pb2.UploadChunk]) -> uploads_pb2.UploadInit:
-    """Перший фрейм має нести `init` з метадатою. Далі — лише `data`."""
-    async for chunk in stream:
-        payload = chunk.WhichOneof("payload")
-        if payload != "init":
-            raise ConnectError(
-                Code.INVALID_ARGUMENT,
-                "first frame must be `init` with filename/mime",
-            )
-        if not chunk.init.filename or not chunk.init.mime:
-            raise ConnectError(Code.INVALID_ARGUMENT, "init.filename and init.mime required")
-        return chunk.init
-    raise ConnectError(Code.INVALID_ARGUMENT, "empty upload stream")
 
 
 def _resolve_ttl(seconds: int) -> int:

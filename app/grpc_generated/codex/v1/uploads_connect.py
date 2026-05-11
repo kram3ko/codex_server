@@ -19,7 +19,7 @@ import codex.v1.uploads_pb2 as codex_dot_v1_dot_uploads__pb2
 
 
 class UploadsService(Protocol):
-    async def upload(self, request: AsyncIterator[codex_dot_v1_dot_uploads__pb2.UploadChunk], ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
+    async def upload_once(self, request: codex_dot_v1_dot_uploads__pb2.UploadOnceRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
     async def get_presigned(self, request: codex_dot_v1_dot_uploads__pb2.GetPresignedRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.GetPresignedResponse:
@@ -37,15 +37,15 @@ class UploadsServiceASGIApplication(ConnectASGIApplication[UploadsService]):
         super().__init__(
             service=service,
             endpoints=lambda svc: {
-                "/codex.v1.UploadsService/Upload": Endpoint.client_stream(
+                "/codex.v1.UploadsService/UploadOnce": Endpoint.unary(
                     method=MethodInfo(
-                        name="Upload",
+                        name="UploadOnce",
                         service_name="codex.v1.UploadsService",
-                        input=codex_dot_v1_dot_uploads__pb2.UploadChunk,
+                        input=codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
                         output=codex_dot_v1_dot_uploads__pb2.UploadResponse,
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
-                    function=svc.upload,
+                    function=svc.upload_once,
                 ),
                 "/codex.v1.UploadsService/GetPresigned": Endpoint.unary(
                     method=MethodInfo(
@@ -91,19 +91,19 @@ class UploadsServiceASGIApplication(ConnectASGIApplication[UploadsService]):
 
 
 class UploadsServiceClient(ConnectClient):
-    async def upload(
+    async def upload_once(
         self,
-        request: AsyncIterator[codex_dot_v1_dot_uploads__pb2.UploadChunk],
+        request: codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
         *,
         headers: Headers | Mapping[str, str] | None = None,
         timeout_ms: int | None = None,
     ) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
-        return await self.execute_client_stream(
+        return await self.execute_unary(
             request=request,
             method=MethodInfo(
-                name="Upload",
+                name="UploadOnce",
                 service_name="codex.v1.UploadsService",
-                input=codex_dot_v1_dot_uploads__pb2.UploadChunk,
+                input=codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
                 output=codex_dot_v1_dot_uploads__pb2.UploadResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
@@ -176,7 +176,7 @@ class UploadsServiceClient(ConnectClient):
 
 
 class UploadsServiceSync(Protocol):
-    def upload(self, request: Iterator[codex_dot_v1_dot_uploads__pb2.UploadChunk], ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
+    def upload_once(self, request: codex_dot_v1_dot_uploads__pb2.UploadOnceRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def get_presigned(self, request: codex_dot_v1_dot_uploads__pb2.GetPresignedRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.GetPresignedResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
@@ -190,15 +190,15 @@ class UploadsServiceWSGIApplication(ConnectWSGIApplication):
     def __init__(self, service: UploadsServiceSync, interceptors: Iterable[InterceptorSync]=(), read_max_bytes: int | None = None, compressions: Iterable[Compression] | None = None, codecs: Iterable[Codec] | None = None) -> None:
         super().__init__(
             endpoints={
-                "/codex.v1.UploadsService/Upload": EndpointSync.client_stream(
+                "/codex.v1.UploadsService/UploadOnce": EndpointSync.unary(
                     method=MethodInfo(
-                        name="Upload",
+                        name="UploadOnce",
                         service_name="codex.v1.UploadsService",
-                        input=codex_dot_v1_dot_uploads__pb2.UploadChunk,
+                        input=codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
                         output=codex_dot_v1_dot_uploads__pb2.UploadResponse,
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
-                    function=service.upload,
+                    function=service.upload_once,
                 ),
                 "/codex.v1.UploadsService/GetPresigned": EndpointSync.unary(
                     method=MethodInfo(
@@ -244,19 +244,19 @@ class UploadsServiceWSGIApplication(ConnectWSGIApplication):
 
 
 class UploadsServiceClientSync(ConnectClientSync):
-    def upload(
+    def upload_once(
         self,
-        request: Iterator[codex_dot_v1_dot_uploads__pb2.UploadChunk],
+        request: codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
         *,
         headers: Headers | Mapping[str, str] | None = None,
         timeout_ms: int | None = None,
     ) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
-        return self.execute_client_stream(
+        return self.execute_unary(
             request=request,
             method=MethodInfo(
-                name="Upload",
+                name="UploadOnce",
                 service_name="codex.v1.UploadsService",
-                input=codex_dot_v1_dot_uploads__pb2.UploadChunk,
+                input=codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
                 output=codex_dot_v1_dot_uploads__pb2.UploadResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),

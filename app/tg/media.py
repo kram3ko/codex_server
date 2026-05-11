@@ -4,9 +4,11 @@ Supports text, photos, image documents, voice/audio transcription, and
 video notes (кружечки) — їх аудіодоріжка транскрибується як voice.
 """
 
+import base64
 import contextlib
 import mimetypes
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -43,17 +45,14 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
 
     try:
         if message.photo:
-            image_path = await _download_media(message, message.photo[-1], ".jpg")
-            attachments.append(str(image_path))
-            cleanup_paths.append(str(image_path))
+            attachments.append(await _image_to_data_url(message, message.photo[-1], "image/jpeg"))
 
         document = message.document
         if document is not None:
             doc_text, doc_attachment = await _prepare_document(message, document, transcriber)
             text = _merge_text(text, doc_text)
             if doc_attachment is not None:
-                attachments.append(str(doc_attachment))
-                cleanup_paths.append(str(doc_attachment))
+                attachments.append(doc_attachment)
 
         if message.voice:
             voice_text = await _transcribe_media(message, message.voice, transcriber, ".ogg")
@@ -104,12 +103,12 @@ async def _prepare_document(
     message: Message,
     document: Any,
     transcriber: STTBackend,
-) -> tuple[str, Path | None]:
+) -> tuple[str, str | None]:
     mime_type = getattr(document, "mime_type", None)
     file_name = getattr(document, "file_name", None)
     if is_image_document(mime_type, file_name):
-        path = await _download_media(message, document, _guess_ext(mime_type, file_name, ".jpg"))
-        return "", path
+        mime = mime_type or (mimetypes.guess_type(file_name or "")[0] or "image/jpeg")
+        return "", await _image_to_data_url(message, document, mime)
     if is_audio_document(mime_type, file_name):
         text = await _transcribe_media(
             message,
@@ -142,6 +141,15 @@ async def _download_media(message: Message, media: Any, ext: str) -> Path:
     path = TG_UPLOADS_DIR / f"tg_{message.chat.id}_{message.message_id}_{uuid4().hex}{ext}"
     await bot.download(media, destination=path)
     return path
+
+
+async def _image_to_data_url(message: Message, media: Any, mime: str) -> str:
+    bot = message.bot
+    if bot is None:
+        raise RuntimeError("aiogram Message without bot context")
+    buf = BytesIO()
+    await bot.download(media, destination=buf)
+    return f"data:{mime};base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
 
 
 def _merge_text(existing: str, incoming: str, *, label: str | None = None) -> str:

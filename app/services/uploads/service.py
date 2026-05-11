@@ -16,6 +16,7 @@ import tempfile
 import uuid
 from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
+from typing import BinaryIO
 
 import structlog
 from sqlalchemy import select
@@ -120,11 +121,18 @@ class UploadService:
         upload: Upload,
         *,
         ttl_s: int = _DEFAULT_PRESIGNED_TTL_S,
+        public: bool = True,
     ) -> str:
         key = _key_from_s3_path(upload.s3_path)
         if key is None:
             raise ValueError(f"upload {upload.id} has non-S3 path: {upload.s3_path!r}")
-        return await storage_service.presigned_url(key, expires_s=ttl_s)
+        return await storage_service.presigned_url(key, expires_s=ttl_s, public=public)
+
+    async def download_to_stream(self, upload: Upload, dest: BinaryIO) -> None:
+        key = _key_from_s3_path(upload.s3_path)
+        if key is None:
+            raise ValueError(f"upload {upload.id} has non-S3 path: {upload.s3_path!r}")
+        dest.write(await storage_service.download_bytes(key))
 
     async def presigned_for_source(
         self,

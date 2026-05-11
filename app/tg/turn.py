@@ -228,9 +228,7 @@ class TurnRunner:
                 case ErrorEvent(code=code, detail=detail):
                     progress.mark_outcome("failed")
                     await message.answer(
-                        tg_markdown.escape(
-                            f"Codex error [{code}]: {detail or 'unknown error'}"
-                        ),
+                        tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
                     )
                     await self._emit_failure(session, code=code, detail=detail)
                     return

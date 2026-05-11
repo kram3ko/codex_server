@@ -35,9 +35,7 @@ class UserService:
         return user
 
     async def get_by_email(self, session: AsyncSession, email: str) -> User | None:
-        return (
-            await session.execute(select(User).where(User.email == email))
-        ).scalar_one_or_none()
+        return (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
 
     async def get_or_create_by_email(
         self,
@@ -57,9 +55,7 @@ class UserService:
         inserted = (await session.execute(stmt)).scalar_one_or_none()
         if inserted is not None:
             return inserted
-        return (
-            await session.execute(select(User).where(User.email == email))
-        ).scalar_one()
+        return (await session.execute(select(User).where(User.email == email))).scalar_one()
 
     async def set_password_hash(
         self,
