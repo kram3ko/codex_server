@@ -19,7 +19,7 @@
     oninterrupt
   }: {
     busy: boolean;
-    onsend: (text: string, uploadIds: bigint[]) => Promise<void>;
+    onsend: (text: string, imageIds: bigint[], audioIds: bigint[]) => Promise<void>;
     oninterrupt: () => Promise<void>;
   } = $props();
 
@@ -39,15 +39,15 @@
   async function send() {
     if (!canSend) return;
     const value = text.trim();
-    const ids = [
-      ...pending.filter((p) => p.status === "ready" && p.uploadId).map((p) => p.uploadId!),
-      ...audioUploadIds
-    ];
+    const imageIds = pending
+      .filter((p) => p.status === "ready" && p.uploadId)
+      .map((p) => p.uploadId!);
+    const audioIds = [...audioUploadIds];
     text = "";
     pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
     pending = [];
     audioUploadIds = [];
-    await onsend(value, ids);
+    await onsend(value, imageIds, audioIds);
   }
 
   function keydown(event: KeyboardEvent) {

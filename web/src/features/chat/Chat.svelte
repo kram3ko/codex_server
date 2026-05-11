@@ -72,7 +72,8 @@
     await loadChatMessages(chat);
   }
 
-  async function send(text: string, uploadIds: bigint[] = []) {
+  async function send(text: string, imageIds: bigint[] = [], audioIds: bigint[] = []) {
+    const uploadIds = [...imageIds, ...audioIds];
     // Steer the running turn instead of interrupting+restarting. Codex
     // appends `text` to the in-flight prompt; uploads still require a fresh
     // turn (sidecar's steer API only accepts text), so fall through if any.
@@ -102,14 +103,15 @@
     attachments = [];
     typer.reset();
     draftStartedAt = Date.now();
+    const metaJson: { upload_ids?: number[]; audio_upload_ids?: number[] } = {};
+    if (imageIds.length) metaJson.upload_ids = imageIds.map((id) => Number(id));
+    if (audioIds.length) metaJson.audio_upload_ids = audioIds.map((id) => Number(id));
     const userMessage = new ChatMessage({
       id: BigInt(Date.now()),
       chatId: selected?.id ?? 0n,
       role: 1,
       text,
-      meta: uploadIds.length
-        ? Struct.fromJson({ upload_ids: uploadIds.map((id) => Number(id)) })
-        : undefined
+      meta: Object.keys(metaJson).length ? Struct.fromJson(metaJson) : undefined
     });
     messages = [...messages, userMessage];
     draft = new ChatMessage({

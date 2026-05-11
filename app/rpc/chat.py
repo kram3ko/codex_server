@@ -125,8 +125,15 @@ class ChatRPC(ChatProtocol):
         persisted_chat_id = session.db_chat_id
         user_pk = session.db_user_id
         upload_ids = list(request.upload_ids)
-        data_urls, voice_reply = await _resolve_uploads(upload_ids)
-        user_meta: dict[str, Any] | None = {"upload_ids": upload_ids} if upload_ids else None
+        data_urls, image_ids, audio_ids = await _resolve_uploads(upload_ids)
+        voice_reply = bool(audio_ids)
+        user_meta: dict[str, Any] | None = None
+        if image_ids or audio_ids:
+            user_meta = {}
+            if image_ids:
+                user_meta["upload_ids"] = image_ids
+            if audio_ids:
+                user_meta["audio_upload_ids"] = audio_ids
         async with SessionLocal() as db:
             await message_service.append(
                 db, persisted_chat_id, MessageRole.USER, text, meta=user_meta
@@ -213,28 +220,33 @@ async def _load_chat_owned(db, chat_id: int, user_id: int) -> Chat:
     return chat
 
 
-async def _resolve_uploads(upload_ids: list[int]) -> tuple[tuple[str, ...], bool]:
-    # Returns (data_urls_for_codex, voice_reply). data: URIs because codex
-    # forwards `url` to OpenAI, where Docker-internal MinIO is unreachable.
-    # `voice_reply` mirrors the input: if any upload is audio, we synthesize
-    # TTS for the assistant reply ("voice in → voice out").
+async def _resolve_uploads(
+    upload_ids: list[int],
+) -> tuple[tuple[str, ...], list[int], list[int]]:
+    # Returns (data_urls_for_codex, image_ids, audio_ids). Codex receives
+    # image data URIs inline (its `url` is forwarded straight to OpenAI, where
+    # Docker-internal MinIO would be unreachable). Audio is excluded from the
+    # codex input — the transcript already lives in `text` — but the id is
+    # kept so the UI can render `<audio>` from history.
     if not upload_ids:
-        return (), False
+        return (), [], []
     urls: list[str] = []
-    has_audio = False
+    image_ids: list[int] = []
+    audio_ids: list[int] = []
     async with SessionLocal() as db:
         for uid in upload_ids:
             upload = await upload_service.get(db, uid)
             if upload is None:
                 raise ConnectError(Code.NOT_FOUND, f"upload {uid} not found")
             if upload.mime.startswith("audio/"):
-                has_audio = True
-                continue  # codex sees the transcript via `text`, not the audio itself
+                audio_ids.append(uid)
+                continue
+            image_ids.append(uid)
             buf = BytesIO()
             await upload_service.download_to_stream(upload, buf)
             b64 = base64.b64encode(buf.getvalue()).decode("ascii")
             urls.append(f"data:{upload.mime};base64,{b64}")
-    return tuple(urls), has_audio
+    return tuple(urls), image_ids, audio_ids
 
 
 async def _stream_turn(
