@@ -67,11 +67,8 @@ class S3Storage:
     async def download_bytes(self, key: str) -> bytes:
         async with self._client() as s3:
             obj = await s3.get_object(Bucket=self._bucket, Key=key)
-            body = obj["Body"]
-            try:
+            async with obj["Body"] as body:
                 return await body.read()
-            finally:
-                body.close()
 
     async def delete(self, key: str) -> None:
         async with self._client() as s3:

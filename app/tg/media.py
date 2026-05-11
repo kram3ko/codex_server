@@ -34,7 +34,13 @@ class PreparedTurn:
     had_voice_input: bool = False
 
 
-async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTurn:
+async def prepare_turn(
+    message: Message,
+    transcriber: STTBackend,
+    *,
+    db_user_id: int,
+    db_chat_id: int,
+) -> PreparedTurn:
     if message.chat is None:
         return PreparedTurn(text="", attachments=(), upload_ids=())
 
@@ -44,14 +50,16 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
     had_voice_input = message.voice is not None or message.video_note is not None
 
     if message.photo:
-        data_url, upload_id = await _save_image(message, message.photo[-1], "image/jpeg")
+        data_url, upload_id = await _save_image(
+            message, message.photo[-1], "image/jpeg", db_user_id, db_chat_id
+        )
         attachments.append(data_url)
         upload_ids.append(upload_id)
 
     document = message.document
     if document is not None:
         doc_text, doc_attachment, doc_upload_id = await _prepare_document(
-            message, document, transcriber
+            message, document, transcriber, db_user_id, db_chat_id
         )
         text = _merge_text(text, doc_text)
         if doc_attachment is not None:
@@ -61,7 +69,13 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
 
     if message.voice:
         voice_text, upload_id = await _transcribe_and_persist(
-            message, message.voice, transcriber, "audio/ogg", "voice.ogg"
+            message,
+            message.voice,
+            transcriber,
+            "audio/ogg",
+            "voice.ogg",
+            db_user_id,
+            db_chat_id,
         )
         text = _merge_text(text, voice_text, label="Voice transcript")
         if upload_id is not None:
@@ -69,7 +83,13 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
 
     if message.video_note:
         note_text, upload_id = await _transcribe_and_persist(
-            message, message.video_note, transcriber, "video/mp4", "video_note.mp4"
+            message,
+            message.video_note,
+            transcriber,
+            "video/mp4",
+            "video_note.mp4",
+            db_user_id,
+            db_chat_id,
         )
         text = _merge_text(text, note_text, label="Voice transcript")
         if upload_id is not None:
@@ -79,7 +99,13 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
         mime = message.audio.mime_type or "audio/mpeg"
         ext = _guess_ext(mime, message.audio.file_name, ".mp3")
         audio_text, upload_id = await _transcribe_and_persist(
-            message, message.audio, transcriber, mime, f"audio{ext}"
+            message,
+            message.audio,
+            transcriber,
+            mime,
+            f"audio{ext}",
+            db_user_id,
+            db_chat_id,
         )
         text = _merge_text(text, audio_text, label="Audio transcript")
         if upload_id is not None:
@@ -96,10 +122,22 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
     )
 
 
-async def _save_image(message: Message, media: Any, mime: str) -> tuple[str, int]:
+async def _save_image(
+    message: Message,
+    media: Any,
+    mime: str,
+    user_id: int,
+    chat_id: int,
+) -> tuple[str, int]:
     """Download → upload to MinIO + return (data URI, upload_id)."""
     buf = await _download_to_buf(message, media)
-    upload_id = await _persist_buf(buf, filename=_default_filename(mime), mime=mime)
+    upload_id = await _persist_buf(
+        buf,
+        filename=_default_filename(mime),
+        mime=mime,
+        user_id=user_id,
+        chat_id=chat_id,
+    )
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
     return f"data:{mime};base64,{b64}", upload_id
 
@@ -110,6 +148,8 @@ async def _transcribe_and_persist(
     transcriber: STTBackend,
     mime: str,
     filename: str,
+    user_id: int,
+    chat_id: int,
 ) -> tuple[str, int | None]:
     """Download → upload to MinIO + transcribe; both from the same BytesIO.
 
@@ -117,7 +157,9 @@ async def _transcribe_and_persist(
     we still want the transcript even if persistence flopped."""
     buf = await _download_to_buf(message, media)
     try:
-        upload_id = await _persist_buf(buf, filename=filename, mime=mime)
+        upload_id = await _persist_buf(
+            buf, filename=filename, mime=mime, user_id=user_id, chat_id=chat_id
+        )
     except Exception as exc:  # noqa: BLE001 — log + continue, transcript still useful
         log.warning("tg_media_persist_failed", filename=filename, error=str(exc))
         upload_id = None
@@ -129,12 +171,14 @@ async def _prepare_document(
     message: Message,
     document: Any,
     transcriber: STTBackend,
+    user_id: int,
+    chat_id: int,
 ) -> tuple[str, str | None, int | None]:
     mime_type = getattr(document, "mime_type", None)
     file_name = getattr(document, "file_name", None)
     if is_image_document(mime_type, file_name):
         mime = mime_type or (mimetypes.guess_type(file_name or "")[0] or "image/jpeg")
-        data_url, upload_id = await _save_image(message, document, mime)
+        data_url, upload_id = await _save_image(message, document, mime, user_id, chat_id)
         return "", data_url, upload_id
     if is_audio_document(mime_type, file_name):
         mime = mime_type or (mimetypes.guess_type(file_name or "")[0] or "audio/mpeg")
@@ -144,6 +188,8 @@ async def _prepare_document(
             transcriber,
             mime,
             file_name or f"document{_guess_ext(mime, None, '.mp3')}",
+            user_id,
+            chat_id,
         )
         return text, None, upload_id
     return "", None, None
@@ -159,7 +205,14 @@ async def _download_to_buf(message: Message, media: Any) -> BytesIO:
     return buf
 
 
-async def _persist_buf(buf: BytesIO, *, filename: str, mime: str) -> int:
+async def _persist_buf(
+    buf: BytesIO,
+    *,
+    filename: str,
+    mime: str,
+    user_id: int,
+    chat_id: int,
+) -> int:
     """Push BytesIO to MinIO via upload_service; returns Upload.id."""
     data = buf.getvalue()
 
@@ -168,7 +221,12 @@ async def _persist_buf(buf: BytesIO, *, filename: str, mime: str) -> int:
 
     async with SessionLocal() as db:
         upload = await upload_service.persist_chunks(
-            db, chat_id=None, filename=filename, mime=mime, chunks=_one_chunk()
+            db,
+            user_id=user_id,
+            chat_id=chat_id,
+            filename=filename,
+            mime=mime,
+            chunks=_one_chunk(),
         )
         await db.commit()
         await db.refresh(upload)

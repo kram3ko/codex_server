@@ -20,6 +20,7 @@ from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
 from app.services.bus.default import event_bus
 from app.services.cache.default import cache
+from app.services.chats.default import chat_service
 from app.services.codex.events import (
     Attachment,
     DoneEvent,
@@ -35,6 +36,7 @@ from app.services.messages.default import message_service
 from app.services.sessions.store import cancel_session_turn, quarantine_key
 from app.services.stt.base import STTBackend
 from app.services.uploads.default import upload_service
+from app.services.users.default import user_service
 from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn, prepare_turn
 from app.tg.output import send_attachment, send_text, send_voice_reply
@@ -53,7 +55,25 @@ class TurnRunner:
         if message.chat is None or message.from_user is None:
             return
 
-        prepared = await prepare_turn(message, self._transcriber)
+        # Resolve user + chat FIRST — media persistence in prepare_turn needs
+        # both ids to scope `uploads` rows. Idempotent — session bootstrap
+        # re-uses these rows.
+        display_name = message.from_user.full_name or message.from_user.username
+        async with SessionLocal() as db:
+            user = await user_service.get_or_create_by_tg(
+                db, message.from_user.id, display_name
+            )
+            chat = await chat_service.get_or_create_for_tg(db, user.id, message.chat.id)
+            db_user_id = user.id
+            db_chat_id = chat.id
+            await db.commit()
+
+        prepared = await prepare_turn(
+            message,
+            self._transcriber,
+            db_user_id=db_user_id,
+            db_chat_id=db_chat_id,
+        )
         log.info(
             "tg_prepared_turn",
             chat_id=message.chat.id,
@@ -67,7 +87,7 @@ class TurnRunner:
         session = await self._sessions.get_or_open(
             tg_user_id=message.from_user.id,
             tg_chat_id=message.chat.id,
-            display_name=message.from_user.full_name or message.from_user.username,
+            display_name=display_name,
         )
 
         if session.consume_steer():
@@ -373,8 +393,9 @@ class TurnRunner:
         async with SessionLocal() as db:
             upload_ids = await upload_service.persist_attachments(
                 db,
-                session.db_chat_id,
-                attachments,
+                chat_id=session.db_chat_id,
+                user_id=session.db_user_id,
+                attachments=attachments,
             )
             meta = _build_assistant_meta(tool_calls, upload_ids, partial=partial)
             await message_service.append(

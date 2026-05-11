@@ -15,7 +15,6 @@ from app.rpc import auth as auth_rpc
 from app.services.auth.service import AuthService
 from app.services.users.service import UserService
 
-
 # --- shared fakes -----------------------------------------------------------
 
 
@@ -28,7 +27,7 @@ class _Session:
     async def flush(self) -> None:
         return None
 
-    async def __aenter__(self) -> "_Session":
+    async def __aenter__(self) -> _Session:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -113,24 +112,22 @@ async def test_login_normalizes_email(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_login_rejects_unknown_email(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = _make_auth_service()
-    with _wire(monkeypatch, user=None, auth_service=svc):
-        with pytest.raises(ConnectError) as exc:
-            await auth_rpc.AuthRPC().login(
-                auth_pb2.LoginRequest(email="ghost@example.com", password="x"),
-                _Ctx(),  # type: ignore[arg-type]
-            )
+    with _wire(monkeypatch, user=None, auth_service=svc), pytest.raises(ConnectError) as exc:
+        await auth_rpc.AuthRPC().login(
+            auth_pb2.LoginRequest(email="ghost@example.com", password="x"),
+            _Ctx(),  # type: ignore[arg-type]
+        )
     assert exc.value.code is Code.UNAUTHENTICATED
 
 
 async def test_login_rejects_wrong_password(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = _make_auth_service()
     user = User(email="user@example.com", password_hash=svc.hash_password("real"))
-    with _wire(monkeypatch, user=user, auth_service=svc):
-        with pytest.raises(ConnectError) as exc:
-            await auth_rpc.AuthRPC().login(
-                auth_pb2.LoginRequest(email="user@example.com", password="wrong"),
-                _Ctx(),  # type: ignore[arg-type]
-            )
+    with _wire(monkeypatch, user=user, auth_service=svc), pytest.raises(ConnectError) as exc:
+        await auth_rpc.AuthRPC().login(
+            auth_pb2.LoginRequest(email="user@example.com", password="wrong"),
+            _Ctx(),  # type: ignore[arg-type]
+        )
     assert exc.value.code is Code.UNAUTHENTICATED
 
 
@@ -140,12 +137,11 @@ async def test_login_rejects_user_without_password_hash(
     """TG-only юзер (password_hash=None) не може залогінитись паролем."""
     svc = _make_auth_service()
     user = User(email="tg@example.com", password_hash=None)
-    with _wire(monkeypatch, user=user, auth_service=svc):
-        with pytest.raises(ConnectError) as exc:
-            await auth_rpc.AuthRPC().login(
-                auth_pb2.LoginRequest(email="tg@example.com", password="x"),
-                _Ctx(),  # type: ignore[arg-type]
-            )
+    with _wire(monkeypatch, user=user, auth_service=svc), pytest.raises(ConnectError) as exc:
+        await auth_rpc.AuthRPC().login(
+            auth_pb2.LoginRequest(email="tg@example.com", password="x"),
+            _Ctx(),  # type: ignore[arg-type]
+        )
     assert exc.value.code is Code.UNAUTHENTICATED
 
 
@@ -167,23 +163,21 @@ async def test_refresh_issues_new_token_for_valid_bearer(
 
 async def test_refresh_rejects_missing_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = _make_auth_service()
-    with _wire(monkeypatch, user=None, auth_service=svc):
-        with pytest.raises(ConnectError) as exc:
-            await auth_rpc.AuthRPC().refresh(
-                auth_pb2.RefreshRequest(),
-                _Ctx(),  # type: ignore[arg-type]
-            )
+    with _wire(monkeypatch, user=None, auth_service=svc), pytest.raises(ConnectError) as exc:
+        await auth_rpc.AuthRPC().refresh(
+            auth_pb2.RefreshRequest(),
+            _Ctx(),  # type: ignore[arg-type]
+        )
     assert exc.value.code is Code.UNAUTHENTICATED
 
 
 async def test_refresh_rejects_invalid_jwt(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = _make_auth_service()
-    with _wire(monkeypatch, user=None, auth_service=svc):
-        with pytest.raises(ConnectError) as exc:
-            await auth_rpc.AuthRPC().refresh(
-                auth_pb2.RefreshRequest(),
-                _Ctx({"authorization": "Bearer not.a.jwt"}),  # type: ignore[arg-type]
-            )
+    with _wire(monkeypatch, user=None, auth_service=svc), pytest.raises(ConnectError) as exc:
+        await auth_rpc.AuthRPC().refresh(
+            auth_pb2.RefreshRequest(),
+            _Ctx({"authorization": "Bearer not.a.jwt"}),  # type: ignore[arg-type]
+        )
     assert exc.value.code is Code.UNAUTHENTICATED
 
 
@@ -208,11 +202,10 @@ async def test_require_user_rejects_unknown_email(
 ) -> None:
     svc = _make_auth_service()
     token, _ = svc.issue_token("ghost@example.com")
-    with _wire(monkeypatch, user=None, auth_service=svc):
-        with pytest.raises(ConnectError) as exc:
-            await auth_helper.require_user(
-                _Ctx({"authorization": f"Bearer {token}"}),  # type: ignore[arg-type]
-            )
+    with _wire(monkeypatch, user=None, auth_service=svc), pytest.raises(ConnectError) as exc:
+        await auth_helper.require_user(
+            _Ctx({"authorization": f"Bearer {token}"}),  # type: ignore[arg-type]
+        )
     assert exc.value.code is Code.UNAUTHENTICATED
 
 
@@ -220,7 +213,6 @@ async def test_require_user_rejects_missing_bearer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     svc = _make_auth_service()
-    with _wire(monkeypatch, user=None, auth_service=svc):
-        with pytest.raises(ConnectError) as exc:
-            await auth_helper.require_user(_Ctx())  # type: ignore[arg-type]
+    with _wire(monkeypatch, user=None, auth_service=svc), pytest.raises(ConnectError) as exc:
+        await auth_helper.require_user(_Ctx())  # type: ignore[arg-type]
     assert exc.value.code is Code.UNAUTHENTICATED

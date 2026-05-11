@@ -13,12 +13,14 @@ import structlog
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
+from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
 from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import chat_pb2, common_pb2
 from app.grpc_generated.codex.v1.chat_connect import ChatService as ChatProtocol
-from app.models import Chat, EventKind, MessageRole
+from app.models import Chat, EventKind, Message, MessageRole
 from app.rpc._auth import require_user
 from app.rpc._mappers import chat_to_pb, to_struct, to_ts
 from app.services.bus.default import event_bus
@@ -125,7 +127,7 @@ class ChatRPC(ChatProtocol):
         persisted_chat_id = session.db_chat_id
         user_pk = session.db_user_id
         upload_ids = list(request.upload_ids)
-        data_urls, image_ids, audio_ids = await _resolve_uploads(upload_ids)
+        data_urls, image_ids, audio_ids = await _resolve_uploads(upload_ids, user_id=user_pk)
         voice_reply = bool(audio_ids)
         user_meta: dict[str, Any] | None = None
         if image_ids or audio_ids:
@@ -153,7 +155,12 @@ class ChatRPC(ChatProtocol):
             session.current_turn_task = current
             try:
                 async for event in _stream_turn(
-                    session, text, persisted_chat_id, user_pk, data_urls, voice_reply
+                    session,
+                    text,
+                    persisted_chat_id,
+                    user_pk,
+                    image_urls=data_urls,
+                    voice_reply=voice_reply,
                 ):
                     yield event
             finally:
@@ -222,6 +229,8 @@ async def _load_chat_owned(db, chat_id: int, user_id: int) -> Chat:
 
 async def _resolve_uploads(
     upload_ids: list[int],
+    *,
+    user_id: int,
 ) -> tuple[tuple[str, ...], list[int], list[int]]:
     # Returns (data_urls_for_codex, image_ids, audio_ids). Codex receives
     # image data URIs inline (its `url` is forwarded straight to OpenAI, where
@@ -235,7 +244,7 @@ async def _resolve_uploads(
     audio_ids: list[int] = []
     async with SessionLocal() as db:
         for uid in upload_ids:
-            upload = await upload_service.get(db, uid)
+            upload = await upload_service.get(db, uid, user_id=user_id)
             if upload is None:
                 raise ConnectError(Code.NOT_FOUND, f"upload {uid} not found")
             if upload.mime.startswith("audio/"):
@@ -254,15 +263,16 @@ async def _stream_turn(
     text: str,
     persisted_chat_id: int,
     user_pk: int,
-    attachments: tuple[str, ...] = (),
+    *,
+    image_urls: tuple[str, ...] = (),
     voice_reply: bool = False,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     final_text = ""
     streamed_text = ""
     tool_calls: list[ToolCallRecord] = []
-    attachments: list[Attachment] = []
+    tool_attachments: list[Attachment] = []
     done_seen = False
-    stream = session.client.run_turn(text, attachments=attachments)
+    stream = session.client.run_turn(text, attachments=image_urls)
     events_count = 0
     last_event_type = "none"
 
@@ -292,7 +302,7 @@ async def _stream_turn(
                 case ToolCallEvent(name=name, args=args):
                     tool_calls.append({"name": name, "args": args})
                 case ToolResultEvent(attachments=tool_files):
-                    attachments.extend(tool_files)
+                    tool_attachments.extend(tool_files)
                 case ErrorEvent(code=code, detail=detail):
                     yield _chat_event_to_pb(ev)
                     await _emit_event(
@@ -318,14 +328,22 @@ async def _stream_turn(
         )
         return
     except asyncio.CancelledError:
-        # Persist the interrupt event then propagate cancellation. Don't
-        # `yield` after CancelledError — async-gen транспорт уже закривається,
-        # client все одно бачить stream як cancelled, не як error frame.
+        # Persist the partial assistant text + tool calls so chat reload shows
+        # the interrupted bubble instead of a hole; mirrors TG dropped-stream
+        # path. Don't `yield` after CancelledError — async-gen транспорт уже
+        # закривається, client бачить stream як cancelled, не як error frame.
+        await _persist_partial_assistant(
+            persisted_chat_id,
+            user_pk,
+            streamed_text,
+            tool_calls,
+            tool_attachments,
+        )
         await _emit_event(
             persisted_chat_id,
             user_pk,
             EventKind.TURN_INTERRUPTED,
-            {"source": "web"},
+            {"source": "web", "partial_len": len(streamed_text)},
         )
         raise
     except Exception as exc:  # noqa: BLE001
@@ -352,8 +370,9 @@ async def _stream_turn(
     async with SessionLocal() as db:
         upload_ids = await upload_service.persist_attachments(
             db,
-            persisted_chat_id,
-            attachments,
+            chat_id=persisted_chat_id,
+            user_id=user_pk,
+            attachments=tool_attachments,
         )
         meta: dict[str, Any] = {}
         if tool_calls:
@@ -386,7 +405,7 @@ async def _stream_turn(
     # audio meta when synthesis lands. Codex flagged the prior blocking flow.
     if voice_reply and final_text.strip():
         asyncio.create_task(
-            _attach_tts_to_message(assistant_msg_id, final_text, persisted_chat_id)
+            _attach_tts_to_message(assistant_msg_id, final_text, persisted_chat_id, user_pk)
         )
 
     yield chat_pb2.ChatEvent(
@@ -412,6 +431,39 @@ async def _emit_event(
             payload=payload,
         )
         await session.commit()
+
+
+async def _persist_partial_assistant(
+    chat_id: int,
+    user_pk: int,
+    streamed_text: str,
+    tool_calls: list[ToolCallRecord],
+    tool_attachments: list[Attachment],
+) -> None:
+    """Save what the model streamed before interruption. Marks meta.partial=True
+    so the UI can badge it; mirrors `tg/turn._handle_dropped_stream`."""
+    if not streamed_text and not tool_calls and not tool_attachments:
+        return
+    async with SessionLocal() as db:
+        upload_ids = await upload_service.persist_attachments(
+            db,
+            chat_id=chat_id,
+            user_id=user_pk,
+            attachments=tool_attachments,
+        )
+        meta: dict[str, Any] = {"partial": True}
+        if tool_calls:
+            meta["calls"] = tool_calls
+        if upload_ids:
+            meta["upload_ids"] = upload_ids
+        await message_service.append(
+            db,
+            chat_id,
+            MessageRole.ASSISTANT,
+            streamed_text,
+            meta=meta,
+        )
+        await db.commit()
 
 
 def _chat_event_to_pb(event) -> chat_pb2.ChatEvent:
@@ -443,22 +495,22 @@ def _chat_event_to_pb(event) -> chat_pb2.ChatEvent:
             return _error_event("unknown_event", type(event).__name__)
 
 
-async def _attach_tts_to_message(message_id: int, final_text: str, chat_id: int) -> None:
+async def _attach_tts_to_message(
+    message_id: int,
+    final_text: str,
+    chat_id: int,
+    user_id: int,
+) -> None:
     """Post-stream: synth TTS, persist upload, patch the assistant message's
     `audio_upload_ids`. Background task — never blocks the client stream."""
     try:
-        tts_upload_id = await _synthesize_reply(final_text, chat_id)
+        tts_upload_id = await _synthesize_reply(final_text, chat_id, user_id)
     except Exception as exc:  # noqa: BLE001 — log + swallow; TTS is optional
         log.warning("web_tts_attach_failed", message_id=message_id, error=str(exc))
         return
     if tts_upload_id is None:
         return
     async with SessionLocal() as db:
-        from sqlalchemy import select
-        from sqlalchemy.orm.attributes import flag_modified
-
-        from app.models import Message
-
         msg = await db.scalar(select(Message).where(Message.id == message_id))
         if msg is None:
             return
@@ -471,7 +523,7 @@ async def _attach_tts_to_message(message_id: int, final_text: str, chat_id: int)
         await db.commit()
 
 
-async def _synthesize_reply(text: str, chat_id: int) -> int | None:
+async def _synthesize_reply(text: str, chat_id: int, user_id: int) -> int | None:
     """TTS → MinIO upload; returns upload_id, or None if TTS disabled/failed.
 
     TTS backend wants a Path → write to a tempfile, read bytes, upload, drop.
@@ -497,6 +549,7 @@ async def _synthesize_reply(text: str, chat_id: int) -> int | None:
     async with SessionLocal() as db:
         upload = await upload_service.persist_chunks(
             db,
+            user_id=user_id,
             chat_id=chat_id,
             filename="reply.ogg",
             mime="audio/ogg",

@@ -53,14 +53,12 @@ class UploadResponse(_message.Message):
     def __init__(self, upload: _Optional[_Union[Upload, _Mapping]] = ..., presigned_url: _Optional[str] = ..., presigned_ttl_seconds: _Optional[int] = ...) -> None: ...
 
 class GetPresignedRequest(_message.Message):
-    __slots__ = ("upload_id", "source", "ttl_seconds")
+    __slots__ = ("upload_id", "ttl_seconds")
     UPLOAD_ID_FIELD_NUMBER: _ClassVar[int]
-    SOURCE_FIELD_NUMBER: _ClassVar[int]
     TTL_SECONDS_FIELD_NUMBER: _ClassVar[int]
     upload_id: int
-    source: str
     ttl_seconds: int
-    def __init__(self, upload_id: _Optional[int] = ..., source: _Optional[str] = ..., ttl_seconds: _Optional[int] = ...) -> None: ...
+    def __init__(self, upload_id: _Optional[int] = ..., ttl_seconds: _Optional[int] = ...) -> None: ...
 
 class GetPresignedResponse(_message.Message):
     __slots__ = ("url", "expires_at")

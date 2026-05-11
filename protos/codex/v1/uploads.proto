@@ -36,12 +36,11 @@ message UploadResponse {
   int32 presigned_ttl_seconds = 3;
 }
 
-// Видати presigned URL для існуючого Upload (наприклад, для рендеру
-// `Attachment` у web — клієнт знає `source` з ChatEvent'а, шле сюди).
+// Видати presigned URL для існуючого Upload — клієнт знає upload_id з
+// `meta.upload_ids` чи `Attachment.upload_id` і шле сюди.
 message GetPresignedRequest {
   oneof target {
     int64 upload_id = 1;
-    string source = 2;  // S3 key чи повний URL з ChatEvent.Attachment.source
   }
   int32 ttl_seconds = 3;  // 0 → default 3600
 }

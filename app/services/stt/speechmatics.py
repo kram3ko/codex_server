@@ -65,6 +65,7 @@ class SpeechmaticsSTT:
             language=self._language,
             operating_point=OperatingPoint(self._operating_point),
         )
+        text = ""
         try:
             async with AsyncClient(api_key=self._api_key) as client:
                 try:
@@ -72,14 +73,12 @@ class SpeechmaticsSTT:
                         audio_file=str(tmp_path),
                         transcription_config=config,
                     )
-                    text = await asyncio.wait_for(
-                        client.wait_for_completion(
+                    async with asyncio.timeout(_TIMEOUT_S):
+                        text = await client.wait_for_completion(
                             job.id,
                             format_type=FormatType.TXT,
                             polling_interval=_POLL_S,
-                        ),
-                        timeout=_TIMEOUT_S,
-                    )
+                        )
                 except JobError as exc:
                     if _is_no_speech(str(exc)):
                         log.info("speechmatics_no_speech", reason=str(exc)[:120])

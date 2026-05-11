@@ -214,11 +214,18 @@
         const resp = await uploadsClient.transcribeUpload({ uploadId: upload.upload.id });
         transcript = resp.text.trim();
       } catch {
-        /* STT failed — still send the audio track */
+        /* STT failed — still attach the audio */
+      }
+      const carriedText = (text + (text && transcript ? " " : "") + transcript).trim();
+      // Empty audio (silence/no-speech) without a typed prompt: don't fire an
+      // empty turn — server would reject `text=""`. Stage the upload so user
+      // can type a prompt and Send normally.
+      if (!carriedText) {
+        audioUploadIds = [...audioUploadIds, upload.upload.id];
+        return;
       }
       // TG-style: voice = self-contained message. Send straight away with
       // transcript as the prompt and the audio attached.
-      const carriedText = (text + (text && transcript ? " " : "") + transcript).trim();
       text = "";
       const stagedImages = pending
         .filter((p) => p.status === "ready" && p.uploadId)
