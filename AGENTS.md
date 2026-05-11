@@ -28,6 +28,9 @@ Reply in whatever language the user wrote in. Don't switch unless they do.
   `drop table`) warn in one line first.
 - Server container is `codex-server` — `docker exec codex-server gunicornc -c reload` after code edits.
 - Docker socket mounted at `/var/run/docker.sock`; you run as root.
+- Stack = two compose projects (`codex_codex` + `codex_server`). Up/down via `bash docker/up.sh` / `bash docker/down.sh` so both get the right `-p` flag. If you ever invoke `docker compose -f ...` directly, pass `-p <project>` — otherwise CWD becomes the project name and clashes with live containers.
+- Watchdog (`docker/watchdog/watch.sh`) auto-restarts containers labeled `codex.watchdog=true` and sweeps hashed orphans on boot. Add the label to put a new sidecar under watch.
+- `docker restart <name>` works as-is (watchdog will log a harmless retry). For real maintenance stop, `docker stop codex-watchdog` first.
 
 ## Images
 

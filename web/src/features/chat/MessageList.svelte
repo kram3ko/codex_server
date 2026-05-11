@@ -33,6 +33,7 @@
   // → re-stick. Programmatic `scrollTop = scrollHeight` завжди йде ВНИЗ, тож
   // воно нічого не ламає.
   let lastScrollTop = 0;
+  let lastMessagesLen = 0;
 
   function onscroll() {
     if (!container) return;
@@ -44,6 +45,15 @@
     }
     lastScrollTop = scrollTop;
   }
+
+  // Нове повідомлення в історії (юзер натиснув Send або turn finalize'нувся) —
+  // форс-stickToBottom, навіть якщо юзер до того скролив угору.
+  $effect(() => {
+    if (messages.length > lastMessagesLen) {
+      stickToBottom = true;
+    }
+    lastMessagesLen = messages.length;
+  });
 
   // Snap to bottom on any list/draft/tool/attachment change while sticking.
   $effect(() => {

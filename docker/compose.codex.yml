@@ -7,7 +7,9 @@ services:
       context: ..
       dockerfile: docker/codex/Dockerfile
     container_name: codex-cli
-    restart: always
+    restart: unless-stopped
+    labels:
+      codex.watchdog: "true"
     user: "0:0"
     environment:
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
@@ -31,7 +33,9 @@ services:
       context: ..
       dockerfile: docker/codex/Dockerfile
     container_name: codex-cli-guest
-    restart: always
+    restart: unless-stopped
+    labels:
+      codex.watchdog: "true"
     user: "0:0"
     environment:
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
@@ -49,6 +53,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # Watchdog for label `codex.watchdog=true`; see watchdog/watch.sh.
+  codex-watchdog:
+    image: docker:cli
+    container_name: codex-watchdog
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/watch.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./watchdog/watch.sh:/watch.sh:ro
 
 networks:
   default:
