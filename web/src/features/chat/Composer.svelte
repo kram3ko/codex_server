@@ -29,6 +29,27 @@
   let recording = $state(false);
   let transcribing = $state(false);
   let audioUploadIds = $state<bigint[]>([]);
+  let recordingStartedAt = $state<number | null>(null);
+  let recordingElapsed = $state(0);
+
+  $effect(() => {
+    if (!recording || !recordingStartedAt) {
+      recordingElapsed = 0;
+      return;
+    }
+    const start = recordingStartedAt;
+    recordingElapsed = Math.floor((Date.now() - start) / 1000);
+    const id = setInterval(() => {
+      recordingElapsed = Math.floor((Date.now() - start) / 1000);
+    }, 500);
+    return () => clearInterval(id);
+  });
+
+  function fmtRec(s: number): string {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${r.toString().padStart(2, "0")}`;
+  }
   const uploadingNow = $derived(pending.some((p) => p.status === "uploading"));
   const canSend = $derived(
     !uploadingNow &&
@@ -166,11 +187,13 @@
       stream.getTracks().forEach((t) => t.stop());
       recording = false;
       recorder = null;
+      recordingStartedAt = null;
       const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
       await processAudio(blob);
     };
     recorder = mr;
     recording = true;
+    recordingStartedAt = Date.now();
     mr.start();
   }
 
@@ -185,13 +208,28 @@
         mime,
         data: bytes
       });
-      if (!upload.upload) throw new Error("empty upload response");
-      const transcript = await uploadsClient.transcribeUpload({ uploadId: upload.upload.id });
-      const piece = transcript.text.trim();
-      if (piece) text = text ? `${text} ${piece}` : piece;
-      audioUploadIds = [...audioUploadIds, upload.upload.id];
+      if (!upload.upload) return;
+      let transcript = "";
+      try {
+        const resp = await uploadsClient.transcribeUpload({ uploadId: upload.upload.id });
+        transcript = resp.text.trim();
+      } catch {
+        /* STT failed — still send the audio track */
+      }
+      // TG-style: voice = self-contained message. Send straight away with
+      // transcript as the prompt and the audio attached.
+      const carriedText = (text + (text && transcript ? " " : "") + transcript).trim();
+      text = "";
+      const stagedImages = pending
+        .filter((p) => p.status === "ready" && p.uploadId)
+        .map((p) => p.uploadId!);
+      pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
+      pending = [];
+      const allAudio = [...audioUploadIds, upload.upload.id];
+      audioUploadIds = [];
+      await onsend(carriedText, stagedImages, allAudio);
     } catch {
-      /* swallow — user re-records if needed */
+      /* upload itself failed */
     } finally {
       transcribing = false;
     }

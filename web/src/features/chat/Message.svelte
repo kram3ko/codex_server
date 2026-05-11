@@ -3,6 +3,7 @@
 
   import HistoricalAudio from "./HistoricalAudio.svelte";
   import HistoricalImage from "./HistoricalImage.svelte";
+  import ToolCall, { type ToolEvent } from "./ToolCall.svelte";
   import { renderMarkdown } from "./markdown";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import { formatTime } from "../../shared/lib/time";
@@ -30,6 +31,19 @@
   const audioUploadIds = $derived.by((): number[] =>
     idsFromMeta(metaJson?.audio_upload_ids)
   );
+  const historicalCalls = $derived.by((): ToolEvent[] => {
+    const raw = metaJson?.calls;
+    if (!Array.isArray(raw)) return [];
+    return raw.map((entry, idx) => {
+      const obj = (entry ?? {}) as Record<string, unknown>;
+      return {
+        id: `hist-${message.id}-${idx}`,
+        name: typeof obj.name === "string" ? obj.name : "tool",
+        args: obj.args,
+        status: "done"
+      };
+    });
+  });
 
   function idsFromMeta(value: unknown): number[] {
     if (!Array.isArray(value)) return [];
@@ -125,6 +139,14 @@
             class="ml-[2px] inline-block h-[1em] w-[7px] -translate-y-px rounded-sm bg-[var(--color-accent)] align-middle animate-blink"
           ></span>{/if}
       </div>
+
+      {#if historicalCalls.length}
+        <div class="mt-3 space-y-2">
+          {#each historicalCalls as call (call.id)}
+            <ToolCall event={call} />
+          {/each}
+        </div>
+      {/if}
 
       {#if uploadIds.length}
         <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">

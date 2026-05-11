@@ -349,10 +349,6 @@ async def _stream_turn(
         )
         return
 
-    tts_upload_id: int | None = None
-    if voice_reply and final_text.strip():
-        tts_upload_id = await _synthesize_reply(final_text, persisted_chat_id)
-
     async with SessionLocal() as db:
         upload_ids = await upload_service.persist_attachments(
             db,
@@ -364,9 +360,7 @@ async def _stream_turn(
             meta["calls"] = tool_calls
         if upload_ids:
             meta["upload_ids"] = upload_ids
-        if tts_upload_id is not None:
-            meta["audio_upload_ids"] = [tts_upload_id]
-        await message_service.append(
+        assistant_msg = await message_service.append(
             db,
             persisted_chat_id,
             MessageRole.ASSISTANT,
@@ -385,6 +379,15 @@ async def _stream_turn(
             },
         )
         await db.commit()
+        await db.refresh(assistant_msg)
+        assistant_msg_id = assistant_msg.id
+
+    # TTS off the hot path — finalize the turn for the client first, attach
+    # audio meta when synthesis lands. Codex flagged the prior blocking flow.
+    if voice_reply and final_text.strip():
+        asyncio.create_task(
+            _attach_tts_to_message(assistant_msg_id, final_text, persisted_chat_id)
+        )
 
     yield chat_pb2.ChatEvent(
         done=chat_pb2.DoneEvent(
@@ -438,6 +441,34 @@ def _chat_event_to_pb(event) -> chat_pb2.ChatEvent:
             return chat_pb2.ChatEvent(done=chat_pb2.DoneEvent(final_text=final_text))
         case _:
             return _error_event("unknown_event", type(event).__name__)
+
+
+async def _attach_tts_to_message(message_id: int, final_text: str, chat_id: int) -> None:
+    """Post-stream: synth TTS, persist upload, patch the assistant message's
+    `audio_upload_ids`. Background task — never blocks the client stream."""
+    try:
+        tts_upload_id = await _synthesize_reply(final_text, chat_id)
+    except Exception as exc:  # noqa: BLE001 — log + swallow; TTS is optional
+        log.warning("web_tts_attach_failed", message_id=message_id, error=str(exc))
+        return
+    if tts_upload_id is None:
+        return
+    async with SessionLocal() as db:
+        from sqlalchemy import select
+        from sqlalchemy.orm.attributes import flag_modified
+
+        from app.models import Message
+
+        msg = await db.scalar(select(Message).where(Message.id == message_id))
+        if msg is None:
+            return
+        meta = dict(msg.meta or {})
+        existing = list(meta.get("audio_upload_ids", []))
+        existing.append(tts_upload_id)
+        meta["audio_upload_ids"] = existing
+        msg.meta = meta
+        flag_modified(msg, "meta")
+        await db.commit()
 
 
 async def _synthesize_reply(text: str, chat_id: int) -> int | None:
