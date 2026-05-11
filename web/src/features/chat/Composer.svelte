@@ -15,7 +15,7 @@
 
   async function send() {
     const value = text.trim();
-    if (!value || busy) {
+    if (!value) {
       return;
     }
     text = "";
@@ -43,12 +43,11 @@
       <textarea
         class="max-h-48 min-h-[3.25rem] w-full resize-y rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-transparent"
         bind:value={text}
-        disabled={busy}
         onkeydown={keydown}
         placeholder="Message Codex — Enter to send, Shift+Enter for newline"
       ></textarea>
     </div>
-    {#if busy}
+    {#if busy && !text.trim()}
       <button
         class="grid size-[3.25rem] place-items-center rounded-xl border border-[oklch(70%_0.18_25/0.45)] bg-[oklch(70%_0.18_25/0.12)] text-[var(--color-danger)] transition hover:bg-[oklch(70%_0.18_25/0.2)]"
         title="Interrupt"

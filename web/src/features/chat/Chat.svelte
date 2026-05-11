@@ -71,6 +71,11 @@
   }
 
   async function send(text: string) {
+    // If a turn is in flight, ask the server to drop it first so the new run_turn
+    // can grab the session lock без черги.
+    if (busy && selected) {
+      await chatClient.interruptTurn({ chatId: selected.id }).catch(() => undefined);
+    }
     const turnId = activeTurnId + 1;
     activeTurnId = turnId;
     busy = true;

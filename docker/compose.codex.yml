@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: docker/codex/Dockerfile
     container_name: codex-cli
-    restart: unless-stopped
+    restart: always
     user: "0:0"
     environment:
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
@@ -31,7 +31,7 @@ services:
       context: ..
       dockerfile: docker/codex/Dockerfile
     container_name: codex-cli-guest
-    restart: unless-stopped
+    restart: always
     user: "0:0"
     environment:
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}

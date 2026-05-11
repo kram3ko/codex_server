@@ -29,11 +29,20 @@
   const completedTools = $derived(tools.filter((t) => t.status !== "running"));
   const currentToolName = $derived(runningTools[0]?.name);
 
+  // Напрямок скролу — найнадійніший signal: user-up → unstick; back-to-bottom
+  // → re-stick. Programmatic `scrollTop = scrollHeight` завжди йде ВНИЗ, тож
+  // воно нічого не ламає.
+  let lastScrollTop = 0;
+
   function onscroll() {
     if (!container) return;
     const { scrollTop, scrollHeight, clientHeight } = container;
-    // <80px from bottom — вважаємо що юзер хоче бачити нові, autoscroll on
-    stickToBottom = scrollHeight - scrollTop - clientHeight < 80;
+    if (scrollTop < lastScrollTop) {
+      stickToBottom = false;
+    } else if (scrollHeight - scrollTop - clientHeight < 50) {
+      stickToBottom = true;
+    }
+    lastScrollTop = scrollTop;
   }
 
   // Snap to bottom on any list/draft/tool/attachment change while sticking.
@@ -49,7 +58,11 @@
   });
 </script>
 
-<div bind:this={container} {onscroll} class="min-h-0 flex-1 overflow-y-auto scroll-smooth px-5 py-4">
+<div
+  bind:this={container}
+  {onscroll}
+  class="min-h-0 flex-1 overflow-y-auto scroll-smooth px-5 py-4"
+>
   <div class="mx-auto flex max-w-5xl flex-col gap-4">
     {#each messages as message (message.id.toString())}
       <Message {message} />
