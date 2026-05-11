@@ -3,8 +3,10 @@
 import asyncio
 import base64
 import contextlib
+import tempfile
 from collections.abc import AsyncIterator
 from io import BytesIO
+from pathlib import Path
 from typing import Any, override
 
 import structlog
@@ -37,6 +39,8 @@ from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.sessions.store import ChatSession
 from app.services.sessions.web import web_sessions
+from app.services.tts.base import SpeechSynthesisError
+from app.services.tts.default import tts_service
 from app.services.uploads.default import upload_service
 
 _DEFAULT_LIMIT = 50
@@ -121,7 +125,7 @@ class ChatRPC(ChatProtocol):
         persisted_chat_id = session.db_chat_id
         user_pk = session.db_user_id
         upload_ids = list(request.upload_ids)
-        data_urls = await _upload_data_urls(upload_ids)
+        data_urls, voice_reply = await _resolve_uploads(upload_ids)
         user_meta: dict[str, Any] | None = {"upload_ids": upload_ids} if upload_ids else None
         async with SessionLocal() as db:
             await message_service.append(
@@ -142,7 +146,7 @@ class ChatRPC(ChatProtocol):
             session.current_turn_task = current
             try:
                 async for event in _stream_turn(
-                    session, text, persisted_chat_id, user_pk, data_urls
+                    session, text, persisted_chat_id, user_pk, data_urls, voice_reply
                 ):
                     yield event
             finally:
@@ -179,9 +183,7 @@ class ChatRPC(ChatProtocol):
         accepted = await session.client.steer(text)
         if accepted:
             async with SessionLocal() as db:
-                await message_service.append(
-                    db, session.db_chat_id, MessageRole.USER, text
-                )
+                await message_service.append(db, session.db_chat_id, MessageRole.USER, text)
                 await db.commit()
         return chat_pb2.SteerTurnResponse(accepted=accepted)
 
@@ -211,22 +213,28 @@ async def _load_chat_owned(db, chat_id: int, user_id: int) -> Chat:
     return chat
 
 
-async def _upload_data_urls(upload_ids: list[int]) -> tuple[str, ...]:
-    # Codex forwards `url` straight to OpenAI; a Docker-internal MinIO URL is
-    # unreachable from there, so we inline the bytes as data: URIs.
+async def _resolve_uploads(upload_ids: list[int]) -> tuple[tuple[str, ...], bool]:
+    # Returns (data_urls_for_codex, voice_reply). data: URIs because codex
+    # forwards `url` to OpenAI, where Docker-internal MinIO is unreachable.
+    # `voice_reply` mirrors the input: if any upload is audio, we synthesize
+    # TTS for the assistant reply ("voice in → voice out").
     if not upload_ids:
-        return ()
+        return (), False
     urls: list[str] = []
+    has_audio = False
     async with SessionLocal() as db:
         for uid in upload_ids:
             upload = await upload_service.get(db, uid)
             if upload is None:
                 raise ConnectError(Code.NOT_FOUND, f"upload {uid} not found")
+            if upload.mime.startswith("audio/"):
+                has_audio = True
+                continue  # codex sees the transcript via `text`, not the audio itself
             buf = BytesIO()
             await upload_service.download_to_stream(upload, buf)
             b64 = base64.b64encode(buf.getvalue()).decode("ascii")
             urls.append(f"data:{upload.mime};base64,{b64}")
-    return tuple(urls)
+    return tuple(urls), has_audio
 
 
 async def _stream_turn(
@@ -235,6 +243,7 @@ async def _stream_turn(
     persisted_chat_id: int,
     user_pk: int,
     attachments: tuple[str, ...] = (),
+    voice_reply: bool = False,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     final_text = ""
     streamed_text = ""
@@ -328,6 +337,10 @@ async def _stream_turn(
         )
         return
 
+    tts_upload_id: int | None = None
+    if voice_reply and final_text.strip():
+        tts_upload_id = await _synthesize_reply(final_text, persisted_chat_id)
+
     async with SessionLocal() as db:
         upload_ids = await upload_service.persist_attachments(
             db,
@@ -339,6 +352,8 @@ async def _stream_turn(
             meta["calls"] = tool_calls
         if upload_ids:
             meta["upload_ids"] = upload_ids
+        if tts_upload_id is not None:
+            meta["audio_upload_ids"] = [tts_upload_id]
         await message_service.append(
             db,
             persisted_chat_id,
@@ -411,6 +426,42 @@ def _chat_event_to_pb(event) -> chat_pb2.ChatEvent:
             return chat_pb2.ChatEvent(done=chat_pb2.DoneEvent(final_text=final_text))
         case _:
             return _error_event("unknown_event", type(event).__name__)
+
+
+async def _synthesize_reply(text: str, chat_id: int) -> int | None:
+    """TTS → MinIO upload; returns upload_id, or None if TTS disabled/failed.
+
+    TTS backend wants a Path → write to a tempfile, read bytes, upload, drop.
+    Tempfile is the only on-disk hop in the otherwise streaming pipeline."""
+    if not tts_service.enabled:
+        return None
+    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        try:
+            await tts_service.synthesize(text, tmp_path, audio_encoding="OGG_OPUS")
+        except SpeechSynthesisError as exc:
+            log.warning("web_tts_failed", chat_id=chat_id, error=str(exc)[:200])
+            return None
+        data = tmp_path.read_bytes()
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            tmp_path.unlink()
+
+    async def _one_chunk() -> AsyncIterator[bytes]:
+        yield data
+
+    async with SessionLocal() as db:
+        upload = await upload_service.persist_chunks(
+            db,
+            chat_id=chat_id,
+            filename="reply.ogg",
+            mime="audio/ogg",
+            chunks=_one_chunk(),
+        )
+        await db.commit()
+        await db.refresh(upload)
+    return upload.id
 
 
 def _redact_for_user(text: str, *, source: str) -> str:

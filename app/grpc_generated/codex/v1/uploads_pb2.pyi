@@ -89,3 +89,15 @@ class DeleteUploadRequest(_message.Message):
     UPLOAD_ID_FIELD_NUMBER: _ClassVar[int]
     upload_id: int
     def __init__(self, upload_id: _Optional[int] = ...) -> None: ...
+
+class TranscribeUploadRequest(_message.Message):
+    __slots__ = ("upload_id",)
+    UPLOAD_ID_FIELD_NUMBER: _ClassVar[int]
+    upload_id: int
+    def __init__(self, upload_id: _Optional[int] = ...) -> None: ...
+
+class TranscribeUploadResponse(_message.Message):
+    __slots__ = ("text",)
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    text: str
+    def __init__(self, text: _Optional[str] = ...) -> None: ...

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Send, Square, X } from "lucide-svelte";
+  import { File as FileIcon, Mic, Paperclip, Send, Square, X } from "lucide-svelte";
 
   import Spinner from "../../shared/components/Spinner.svelte";
   import { uploadsClient } from "../../shared/lib/clients";
@@ -25,18 +25,28 @@
 
   let text = $state("");
   let pending = $state<Pending[]>([]);
+  let recorder = $state<MediaRecorder | null>(null);
+  let recording = $state(false);
+  let transcribing = $state(false);
+  let audioUploadIds = $state<bigint[]>([]);
   const uploadingNow = $derived(pending.some((p) => p.status === "uploading"));
   const canSend = $derived(
-    !uploadingNow && (text.trim().length > 0 || pending.some((p) => p.status === "ready"))
+    !uploadingNow &&
+      !transcribing &&
+      (text.trim().length > 0 || pending.some((p) => p.status === "ready") || audioUploadIds.length > 0)
   );
 
   async function send() {
     if (!canSend) return;
     const value = text.trim();
-    const ids = pending.filter((p) => p.status === "ready" && p.uploadId).map((p) => p.uploadId!);
+    const ids = [
+      ...pending.filter((p) => p.status === "ready" && p.uploadId).map((p) => p.uploadId!),
+      ...audioUploadIds
+    ];
     text = "";
     pending.forEach((p) => URL.revokeObjectURL(p.previewUrl));
     pending = [];
+    audioUploadIds = [];
     await onsend(value, ids);
   }
 
@@ -89,6 +99,103 @@
     if (item) URL.revokeObjectURL(item.previewUrl);
     pending = pending.filter((p) => p.key !== key);
   }
+
+  let fileInput = $state<HTMLInputElement | null>(null);
+
+  function pickFiles() {
+    fileInput?.click();
+  }
+
+  async function onFilesPicked(event: Event) {
+    const target = event.currentTarget as HTMLInputElement;
+    const files = Array.from(target.files ?? []);
+    target.value = "";
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        void attach(file);
+      } else if (file.type.startsWith("audio/") || file.type.startsWith("video/")) {
+        void processAudio(file);
+      } else {
+        void attachGeneric(file);
+      }
+    }
+  }
+
+  async function attachGeneric(file: File) {
+    const key = `${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    const item: Pending = { key, file, previewUrl: "", status: "uploading" };
+    pending = [...pending, item];
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const response = await uploadsClient.uploadOnce({
+        filename: file.name || "file",
+        mime: file.type || "application/octet-stream",
+        data: bytes
+      });
+      if (!response.upload) throw new Error("empty upload response");
+      pending = pending.map((p) =>
+        p.key === key ? { ...p, uploadId: response.upload!.id, status: "ready" } : p
+      );
+    } catch (exc) {
+      pending = pending.map((p) =>
+        p.key === key
+          ? { ...p, status: "failed", error: exc instanceof Error ? exc.message : "upload failed" }
+          : p
+      );
+    }
+  }
+
+  async function toggleMic() {
+    if (recording && recorder) {
+      recorder.stop();
+      return;
+    }
+    if (recording || transcribing) return;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      return;
+    }
+    const mr = new MediaRecorder(stream);
+    const chunks: Blob[] = [];
+    mr.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+    mr.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      recording = false;
+      recorder = null;
+      const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+      await processAudio(blob);
+    };
+    recorder = mr;
+    recording = true;
+    mr.start();
+  }
+
+  async function processAudio(blob: Blob) {
+    transcribing = true;
+    try {
+      const mime = (blob.type.split(";")[0] || "audio/webm").trim();
+      const ext = mime.split("/")[1] || "webm";
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const upload = await uploadsClient.uploadOnce({
+        filename: `voice.${ext}`,
+        mime,
+        data: bytes
+      });
+      if (!upload.upload) throw new Error("empty upload response");
+      const transcript = await uploadsClient.transcribeUpload({ uploadId: upload.upload.id });
+      const piece = transcript.text.trim();
+      if (piece) text = text ? `${text} ${piece}` : piece;
+      audioUploadIds = [...audioUploadIds, upload.upload.id];
+    } catch {
+      /* swallow — user re-records if needed */
+    } finally {
+      transcribing = false;
+    }
+  }
 </script>
 
 <form
@@ -103,7 +210,14 @@
       <div class="flex flex-wrap gap-2">
         {#each pending as p (p.key)}
           <div class="group relative h-16 w-16 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <img src={p.previewUrl} alt="" class="h-full w-full object-cover {p.status === 'failed' ? 'opacity-40' : ''}" />
+            {#if p.previewUrl}
+              <img src={p.previewUrl} alt="" class="h-full w-full object-cover {p.status === 'failed' ? 'opacity-40' : ''}" />
+            {:else}
+              <div class="flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-[var(--color-text-muted)] {p.status === 'failed' ? 'opacity-40' : ''}">
+                <FileIcon size={20} />
+                <span class="line-clamp-2 text-center text-[8px] leading-tight">{p.file.name}</span>
+              </div>
+            {/if}
             {#if p.status === "uploading"}
               <div class="absolute inset-0 grid place-items-center bg-[oklch(0%_0_0/0.4)]">
                 <Spinner />
@@ -128,6 +242,38 @@
     {/if}
 
     <div class="flex items-end gap-2">
+      <input
+        bind:this={fileInput}
+        class="hidden"
+        type="file"
+        multiple
+        onchange={onFilesPicked}
+      />
+      <button
+        class="grid size-[3.25rem] place-items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] transition hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/40"
+        title="Attach file"
+        type="button"
+        onclick={pickFiles}
+      >
+        <Paperclip size={18} />
+      </button>
+      <button
+        class="grid size-[3.25rem] place-items-center rounded-xl border border-[var(--color-border)] transition {recording
+          ? 'bg-[oklch(70%_0.18_25/0.15)] text-[var(--color-danger)] animate-pulse'
+          : transcribing
+            ? 'bg-[var(--color-surface)] text-[var(--color-text-muted)]'
+            : 'bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/40'}"
+        disabled={transcribing}
+        title={recording ? "Stop recording" : transcribing ? "Transcribing…" : "Voice input"}
+        type="button"
+        onclick={toggleMic}
+      >
+        {#if transcribing}
+          <Spinner />
+        {:else}
+          <Mic size={18} />
+        {/if}
+      </button>
       <div class="glow-ring flex-1 rounded-xl">
         <textarea
           class="max-h-48 min-h-[3.25rem] w-full resize-y rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3 text-base leading-7 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-transparent"

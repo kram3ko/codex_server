@@ -64,9 +64,21 @@ message DeleteUploadRequest {
   int64 upload_id = 1;
 }
 
+// Run STT over an audio/video upload that already lives in object storage.
+// Lets the web composer turn a mic recording into editable text before send,
+// while keeping the original blob for history replay.
+message TranscribeUploadRequest {
+  int64 upload_id = 1;
+}
+
+message TranscribeUploadResponse {
+  string text = 1;
+}
+
 service UploadsService {
   rpc UploadOnce(UploadOnceRequest) returns (UploadResponse);
   rpc GetPresigned(GetPresignedRequest) returns (GetPresignedResponse);
   rpc ListUploads(ListUploadsRequest) returns (ListUploadsResponse);
   rpc DeleteUpload(DeleteUploadRequest) returns (Empty);
+  rpc TranscribeUpload(TranscribeUploadRequest) returns (TranscribeUploadResponse);
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Check, Copy, Sparkles, UserRound } from "lucide-svelte";
 
+  import HistoricalAudio from "./HistoricalAudio.svelte";
   import HistoricalImage from "./HistoricalImage.svelte";
   import { renderMarkdown } from "./markdown";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
@@ -22,12 +23,18 @@
   const empty = $derived(streaming && !message.text);
 
   // Витягти upload_ids з message.meta (Struct → JSON) — для рендеру історії з MinIO/S3.
-  const uploadIds = $derived.by((): number[] => {
-    const meta = message.meta?.toJson() as Record<string, unknown> | undefined;
-    const ids = meta?.upload_ids;
-    if (!Array.isArray(ids)) return [];
-    return ids.map((v) => Number(v)).filter((n) => Number.isFinite(n));
-  });
+  const metaJson = $derived(
+    message.meta?.toJson() as Record<string, unknown> | undefined
+  );
+  const uploadIds = $derived.by((): number[] => idsFromMeta(metaJson?.upload_ids));
+  const audioUploadIds = $derived.by((): number[] =>
+    idsFromMeta(metaJson?.audio_upload_ids)
+  );
+
+  function idsFromMeta(value: unknown): number[] {
+    if (!Array.isArray(value)) return [];
+    return value.map((v) => Number(v)).filter((n) => Number.isFinite(n));
+  }
 
   let elapsed = $state(0);
   $effect(() => {
@@ -123,6 +130,14 @@
         <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
           {#each uploadIds as uploadId (uploadId)}
             <HistoricalImage {uploadId} />
+          {/each}
+        </div>
+      {/if}
+
+      {#if audioUploadIds.length}
+        <div class="mt-3 space-y-2">
+          {#each audioUploadIds as uploadId (uploadId)}
+            <HistoricalAudio {uploadId} autoplay={!isUser} />
           {/each}
         </div>
       {/if}

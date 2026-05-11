@@ -423,3 +423,81 @@ export class DeleteUploadRequest extends Message<DeleteUploadRequest> {
   }
 }
 
+/**
+ * Run STT over an audio/video upload that already lives in object storage.
+ * Lets the web composer turn a mic recording into editable text before send,
+ * while keeping the original blob for history replay.
+ *
+ * @generated from message codex.v1.TranscribeUploadRequest
+ */
+export class TranscribeUploadRequest extends Message<TranscribeUploadRequest> {
+  /**
+   * @generated from field: int64 upload_id = 1;
+   */
+  uploadId = protoInt64.zero;
+
+  constructor(data?: PartialMessage<TranscribeUploadRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "codex.v1.TranscribeUploadRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "upload_id", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TranscribeUploadRequest {
+    return new TranscribeUploadRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TranscribeUploadRequest {
+    return new TranscribeUploadRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TranscribeUploadRequest {
+    return new TranscribeUploadRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TranscribeUploadRequest | PlainMessage<TranscribeUploadRequest> | undefined, b: TranscribeUploadRequest | PlainMessage<TranscribeUploadRequest> | undefined): boolean {
+    return proto3.util.equals(TranscribeUploadRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message codex.v1.TranscribeUploadResponse
+ */
+export class TranscribeUploadResponse extends Message<TranscribeUploadResponse> {
+  /**
+   * @generated from field: string text = 1;
+   */
+  text = "";
+
+  constructor(data?: PartialMessage<TranscribeUploadResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "codex.v1.TranscribeUploadResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "text", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TranscribeUploadResponse {
+    return new TranscribeUploadResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TranscribeUploadResponse {
+    return new TranscribeUploadResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TranscribeUploadResponse {
+    return new TranscribeUploadResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TranscribeUploadResponse | PlainMessage<TranscribeUploadResponse> | undefined, b: TranscribeUploadResponse | PlainMessage<TranscribeUploadResponse> | undefined): boolean {
+    return proto3.util.equals(TranscribeUploadResponse, a, b);
+  }
+}
+

@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from typing import override
 
 from connectrpc.code import Code
@@ -13,6 +14,7 @@ from app.grpc_generated.codex.v1 import common_pb2, uploads_pb2
 from app.grpc_generated.codex.v1.uploads_connect import UploadsService as UploadsProtocol
 from app.rpc._auth import require_user
 from app.rpc._mappers import to_ts, upload_to_pb
+from app.services.stt.default import stt_service
 from app.services.uploads.default import upload_service
 
 _DEFAULT_LIMIT = 50
@@ -110,6 +112,24 @@ class UploadsRPC(UploadsProtocol):
                 raise ConnectError(Code.NOT_FOUND, f"upload {request.upload_id} not found")
             await db.commit()
         return common_pb2.Empty()
+
+    @override
+    async def transcribe_upload(
+        self,
+        request: uploads_pb2.TranscribeUploadRequest,
+        ctx: RequestContext,
+    ) -> uploads_pb2.TranscribeUploadResponse:
+        await require_user(ctx)
+        async with SessionLocal() as db:
+            upload = await upload_service.get(db, request.upload_id)
+        if upload is None:
+            raise ConnectError(Code.NOT_FOUND, f"upload {request.upload_id} not found")
+        if not (upload.mime.startswith("audio/") or upload.mime.startswith("video/")):
+            raise ConnectError(Code.INVALID_ARGUMENT, f"upload {upload.id} is not audio/video")
+        buf = BytesIO()
+        await upload_service.download_to_stream(upload, buf)
+        text = await stt_service.transcribe(buf, upload.filename)
+        return uploads_pb2.TranscribeUploadResponse(text=text)
 
 
 def _resolve_ttl(seconds: int) -> int:

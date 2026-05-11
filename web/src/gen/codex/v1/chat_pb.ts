@@ -323,7 +323,8 @@ export class RunTurnRequest extends Message<RunTurnRequest> {
   /**
    * Attachments uploaded via UploadsService.Upload prior to this turn.
    * Server resolves each to a presigned URL and passes to the sidecar as
-   * multimodal input alongside `text`.
+   * multimodal input alongside `text`. If any of these is audio/*, server
+   * also synthesizes a TTS reply ("voice in → voice out").
    *
    * @generated from field: repeated int64 upload_ids = 3;
    */

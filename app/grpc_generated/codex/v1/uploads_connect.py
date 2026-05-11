@@ -31,6 +31,9 @@ class UploadsService(Protocol):
     async def delete_upload(self, request: codex_dot_v1_dot_uploads__pb2.DeleteUploadRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    async def transcribe_upload(self, request: codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
 
 class UploadsServiceASGIApplication(ConnectASGIApplication[UploadsService]):
     def __init__(self, service: UploadsService | AsyncGenerator[UploadsService], *, interceptors: Iterable[Interceptor]=(), read_max_bytes: int | None = None, compressions: Iterable[Compression] | None = None, codecs: Iterable[Codec] | None = None) -> None:
@@ -76,6 +79,16 @@ class UploadsServiceASGIApplication(ConnectASGIApplication[UploadsService]):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=svc.delete_upload,
+                ),
+                "/codex.v1.UploadsService/TranscribeUpload": Endpoint.unary(
+                    method=MethodInfo(
+                        name="TranscribeUpload",
+                        service_name="codex.v1.UploadsService",
+                        input=codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+                        output=codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.transcribe_upload,
                 ),
             },
             interceptors=interceptors,
@@ -171,6 +184,26 @@ class UploadsServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    async def transcribe_upload(
+        self,
+        request: codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="TranscribeUpload",
+                service_name="codex.v1.UploadsService",
+                input=codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+                output=codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
 
 
 
@@ -183,6 +216,8 @@ class UploadsServiceSync(Protocol):
     def list_uploads(self, request: codex_dot_v1_dot_uploads__pb2.ListUploadsRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.ListUploadsResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def delete_upload(self, request: codex_dot_v1_dot_uploads__pb2.DeleteUploadRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def transcribe_upload(self, request: codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
@@ -229,6 +264,16 @@ class UploadsServiceWSGIApplication(ConnectWSGIApplication):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=service.delete_upload,
+                ),
+                "/codex.v1.UploadsService/TranscribeUpload": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="TranscribeUpload",
+                        service_name="codex.v1.UploadsService",
+                        input=codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+                        output=codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.transcribe_upload,
                 ),
             },
             interceptors=interceptors,
@@ -318,6 +363,26 @@ class UploadsServiceClientSync(ConnectClientSync):
                 service_name="codex.v1.UploadsService",
                 input=codex_dot_v1_dot_uploads__pb2.DeleteUploadRequest,
                 output=codex_dot_v1_dot_common__pb2.Empty,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def transcribe_upload(
+        self,
+        request: codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="TranscribeUpload",
+                service_name="codex.v1.UploadsService",
+                input=codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+                output=codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteUploadRequest, GetPresignedRequest, GetPresignedResponse, ListUploadsRequest, ListUploadsResponse, UploadOnceRequest, UploadResponse } from "./uploads_pb.js";
+import { DeleteUploadRequest, GetPresignedRequest, GetPresignedResponse, ListUploadsRequest, ListUploadsResponse, TranscribeUploadRequest, TranscribeUploadResponse, UploadOnceRequest, UploadResponse } from "./uploads_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 import { Empty } from "./common_pb.js";
 
@@ -47,6 +47,15 @@ export const UploadsService = {
       name: "DeleteUpload",
       I: DeleteUploadRequest,
       O: Empty,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc codex.v1.UploadsService.TranscribeUpload
+     */
+    transcribeUpload: {
+      name: "TranscribeUpload",
+      I: TranscribeUploadRequest,
+      O: TranscribeUploadResponse,
       kind: MethodKind.Unary,
     },
   }
