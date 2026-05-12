@@ -18,9 +18,20 @@ _SENSITIVE_HEADERS = frozenset(
         "proxy-authorization",
     }
 )
+# Транзієнтні події інфраструктури — гарантовано не наші баги, тільки шумлять.
+# WORKER TIMEOUT / SIGKILL спеціально НЕ дропаємо — після `worker_tmp_dir=
+# /dev/shm` вони мають бути рідкими, тож якщо знов прилетять — це regression
+# signal, треба бачити в Bugsink.
+_DROP_LOG_PATTERNS = (
+    "Failed to fetch updates",   # aiogram polling-blip до Telegram, true noise
+)
 
 
-def scrub_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any]:
+def scrub_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
+    msg = (event.get("logentry") or {}).get("message") or event.get("message") or ""
+    if any(p in msg for p in _DROP_LOG_PATTERNS):
+        return None
+
     request = event.get("request")
     if isinstance(request, dict):
         _scrub_headers(request.get("headers"))

@@ -24,6 +24,20 @@ class MessageService:
         await session.flush()
         return message
 
+    async def update_text(
+        self,
+        session: AsyncSession,
+        message_id: int,
+        text: str,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        msg = await session.get(Message, message_id)
+        if msg is None:
+            return
+        msg.text = text
+        msg.meta = meta  # always assign — allow clearing stale partial flag
+        await session.flush()
+
     async def list(
         self,
         session: AsyncSession,

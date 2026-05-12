@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     TG_DRAFT_ENABLED: bool = False
     # Idle cap на турн: якщо Codex sidecar мовчить довше цього часу між
     # events/chunks → interrupt() і звільняємо turn_lock.
-    TG_TURN_TIMEOUT_SECONDS: float = 300.0
-    WEB_TURN_TIMEOUT_SECONDS: float = 300.0
+    TG_TURN_TIMEOUT_SECONDS: float = 120.0
+    WEB_TURN_TIMEOUT_SECONDS: float = 120.0
     TG_WEBHOOK_URL: str = ""
     TG_WEBHOOK_SECRET: str = ""
 

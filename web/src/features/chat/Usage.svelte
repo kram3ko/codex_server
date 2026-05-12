@@ -36,7 +36,7 @@
 
   function formatReset(w: UsageWindow): string {
     if (!w.resetsAt) return "—";
-    return formatUtc(new Date(Number(w.resetsAt.seconds) * 1000), true);
+    return formatLocal(new Date(Number(w.resetsAt.seconds) * 1000), true);
   }
 
   function barGradient(percent: number): string {
@@ -66,10 +66,10 @@
 
   const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-  function formatUtc(d: Date, withWeekday = false): string {
+  function formatLocal(d: Date, withWeekday = false): string {
     const pad = (n: number) => String(n).padStart(2, "0");
-    const base = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
-    return withWeekday ? `${WEEKDAYS[d.getUTCDay()]} ${base}` : base;
+    const base = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return withWeekday ? `${WEEKDAYS[d.getDay()]} ${base}` : base;
   }
 </script>
 
@@ -124,7 +124,7 @@
 
   {#if loadedAt}
     <div class="mt-2.5 text-[10px] text-[oklch(72%_0.012_100)]">
-      updated {formatUtc(loadedAt)}
+      updated {formatLocal(loadedAt)}
     </div>
   {/if}
 </div>

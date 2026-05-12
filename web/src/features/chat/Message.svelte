@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, Copy, Sparkles, UserRound } from "lucide-svelte";
+  import { Check, Copy } from "lucide-svelte";
 
   import CompletedTools from "./CompletedTools.svelte";
   import HistoricalAudio from "./HistoricalAudio.svelte";
@@ -82,20 +82,11 @@
   }
 </script>
 
-<article class="msg-in flex gap-3 {isUser ? 'justify-end' : 'justify-start'}">
-  {#if !isUser}
-    <div
-      class="mt-1 grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-[oklch(72%_0.18_175)] to-[oklch(64%_0.16_320)] text-[var(--color-bg)] shadow-md shadow-[oklch(72%_0.18_175/0.25)] {streaming ? 'animate-pulse-glow' : ''}"
-    >
-      <Sparkles size={15} strokeWidth={2.5} />
-    </div>
-  {/if}
-
-  <div
-    class="max-w-[min(760px,80%)] rounded-2xl px-4 py-3 transition-colors {isUser
-      ? 'bg-[oklch(64%_0.16_230/0.42)] border border-[oklch(70%_0.16_230/0.55)] backdrop-blur-md'
-      : 'glass-bubble'}"
-  >
+<div
+  class="rounded-2xl px-4 py-3 transition-colors {isUser
+    ? 'bg-[oklch(64%_0.16_230/0.42)] border border-[oklch(70%_0.16_230/0.55)] backdrop-blur-md'
+    : 'glass-bubble'}"
+>
     <div class="mb-1.5 flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
       <span class="font-medium">{isUser ? "You" : "Codex"}</span>
       {#if isSteered}
@@ -176,11 +167,4 @@
         </div>
       {/if}
     {/if}
-  </div>
-
-  {#if isUser}
-    <div class="mt-1 grid size-8 shrink-0 place-items-center rounded-lg border border-[oklch(70%_0.16_230/0.35)] bg-[var(--color-user-soft)] text-[var(--color-user)]">
-      <UserRound size={15} />
-    </div>
-  {/if}
-</article>
+</div>

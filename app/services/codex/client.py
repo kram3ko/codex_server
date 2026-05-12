@@ -12,6 +12,7 @@ fail → відкриває новий thread + повідомляє через 
 кеш оновився.
 """
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from enum import StrEnum
@@ -23,10 +24,10 @@ import structlog
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
     ChatEvent,
+    CodexItem,
     DoneEvent,
     ErrorEvent,
     TokenEvent,
-    iterate_with_idle_timeout,
 )
 from app.services.codex.events import (
     translate_notification as _translate,
@@ -36,6 +37,21 @@ from app.services.codex.transport import AppServerClient, AppServerError, Notifi
 log = structlog.get_logger(__name__)
 
 _CLIENT_INFO = {"name": "codex-api", "version": "0.1.0"}
+
+# Visible item types → fire boundary callback. Hidden (reasoning, plan, etc.)
+# не дают видимого текста, persistить нечего.
+_PERSIST_BOUNDARY_ITEMS: frozenset[str] = frozenset(
+    {
+        CodexItem.AGENT_MESSAGE,
+        CodexItem.COMMAND_EXECUTION,
+        CodexItem.FILE_CHANGE,
+        CodexItem.WEB_SEARCH,
+        CodexItem.MCP_TOOL_CALL,
+        CodexItem.DYNAMIC_TOOL_CALL,
+        CodexItem.IMAGE_VIEW,
+        CodexItem.IMAGE_GENERATION,
+    }
+)
 
 
 class _Method(StrEnum):
@@ -53,6 +69,9 @@ class _Method(StrEnum):
 type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
 
 
+type _ActiveItem = tuple[str | None, str | None, float | None]
+
+
 class _TurnDiagnostics:
     """Small in-memory state for explaining idle timeouts after the fact."""
 
@@ -66,15 +85,22 @@ class _TurnDiagnostics:
         self.raw_count = 0
         self.chat_event_count = 0
         self.completed_items = 0
+        self.stale_raw_count = 0
+        self.noise_raw_count = 0
         self.last_raw_method = "none"
         self.last_raw_turn_id: str | None = None
+        self.last_stale_method = "none"
+        self.last_stale_turn_id: str | None = None
+        self.last_stale_at: float | None = None
+        self.last_stale_item_type: str | None = None
+        self.last_stale_tool: str | None = None
+        self.last_noise_method = "none"
+        self.last_noise_at: float | None = None
         self.last_item_type: str | None = None
         self.last_tool: str | None = None
         self.last_chat_event_type = "none"
         self.turn_completed_seen = False
-        self.active_item_type: str | None = None
-        self.active_tool: str | None = None
-        self.active_item_started_at: float | None = None
+        self._active_items: dict[str, _ActiveItem] = {}
 
     def absorb_raw(self, note: Notification) -> None:
         now = time.monotonic()
@@ -93,15 +119,27 @@ class _TurnDiagnostics:
         self.last_item_type = item_type if isinstance(item_type, str) else None
         self.last_tool = tool
         if note.method == "item/started":
-            self.active_item_type = self.last_item_type
-            self.active_tool = tool
-            self.active_item_started_at = now
+            self._active_items[_item_key(item)] = (self.last_item_type, tool, now)
         elif note.method == "item/completed":
             self.completed_items += 1
-            if self.active_item_type == self.last_item_type and self.active_tool == tool:
-                self.active_item_type = None
-                self.active_tool = None
-                self.active_item_started_at = None
+            self._active_items.pop(_item_key(item), None)
+
+    def absorb_stale_raw(self, note: Notification) -> None:
+        now = time.monotonic()
+        self.stale_raw_count += 1
+        self.last_stale_at = now
+        self.last_stale_method = note.method
+        self.last_stale_turn_id = note.turn_id
+        item = note.params.get("item")
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            self.last_stale_item_type = item_type if isinstance(item_type, str) else None
+            self.last_stale_tool = _item_label(item)
+
+    def absorb_noise_raw(self, note: Notification) -> None:
+        self.noise_raw_count += 1
+        self.last_noise_at = time.monotonic()
+        self.last_noise_method = note.method
 
     def absorb_chat_event(self, event: ChatEvent) -> None:
         self.chat_event_count += 1
@@ -117,20 +155,40 @@ class _TurnDiagnostics:
             "raw_count": self.raw_count,
             "chat_event_count": self.chat_event_count,
             "completed_items": self.completed_items,
+            "stale_raw_count": self.stale_raw_count,
+            "noise_raw_count": self.noise_raw_count,
             "last_raw_method": self.last_raw_method,
             "last_raw_turn_id": self.last_raw_turn_id,
             "last_raw_age_s": _age(now, self.last_raw_at),
+            "last_stale_method": self.last_stale_method,
+            "last_stale_turn_id": self.last_stale_turn_id,
+            "last_stale_age_s": _age(now, self.last_stale_at),
+            "last_stale_item_type": self.last_stale_item_type,
+            "last_stale_tool": self.last_stale_tool,
+            "last_noise_method": self.last_noise_method,
+            "last_noise_age_s": _age(now, self.last_noise_at),
             "last_item_type": self.last_item_type,
             "last_tool": self.last_tool,
             "last_chat_event_type": self.last_chat_event_type,
             "last_chat_event_age_s": _age(now, self.last_chat_event_at),
             "turn_completed_seen": self.turn_completed_seen,
-            "active_item_type": self.active_item_type,
-            "active_tool": self.active_tool,
-            "active_item_age_s": _age(now, self.active_item_started_at),
         }
+        active_item_type, active_tool, active_started_at = self._selected_active_item()
+        data.update(
+            {
+                "active_items": len(self._active_items),
+                "active_item_type": active_item_type,
+                "active_tool": active_tool,
+                "active_item_age_s": _age(now, active_started_at),
+            }
+        )
         data.update(transport.diagnostic_snapshot())
         return data
+
+    def _selected_active_item(self) -> _ActiveItem:
+        if not self._active_items:
+            return (None, None, None)
+        return max(self._active_items.values(), key=_active_item_rank)
 
 
 class CodexClient:
@@ -238,13 +296,14 @@ class CodexClient:
         on_started: Callable[[str, str], Awaitable[None]] | None = None,
         idle_s: float | None = None,
         on_idle: Callable[[], Awaitable[None]] | None = None,
+        on_item_boundary: Callable[[str], Awaitable[None]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """Stream ChatEvent'и. `on_started(turn_id, thread_id)` fires як тільки
         sidecar повернув turn/start — caller пише запис у Redis turn_registry.
 
-        `idle_s` ставить watchdog НА СИРИЙ Notification-стрім (не на ChatEvent).
-        Інакше довге `item/started{reasoning}` — translator повертає None →
-        ChatEvent-стрім тихий → watchdog фалшиво fail'ить активний turn.
+        `idle_s` ставить watchdog на notification-и поточного turn'а (не на
+        ChatEvent). Чужі leftover-и з попереднього turn не мають скидати таймер
+        і не мають доходити до translator.
         """
         input_payload = self._build_input(text, attachments)
         result = await self._begin_turn_with_retry(input_payload)
@@ -262,19 +321,22 @@ class CodexClient:
                 await on_started(self._current_turn_id, self._thread_id)
             accumulated = ""
 
-            notes = self._transport.notifications()
-            if idle_s is not None:
-                notes = iterate_with_idle_timeout(notes, idle_s, on_idle=on_idle)
-            async for note in notes:
+            async for note in self._current_turn_notifications(idle_s, on_idle):
                 self._record_raw_note(note)
                 event = _translate(note, accumulated)
-                if event is None:
-                    continue
-                self._turn_diagnostics.absorb_chat_event(event)
-                if isinstance(event, TokenEvent):
-                    accumulated += event.delta
-                yield event
-                if isinstance(event, DoneEvent):
+                if event is not None:
+                    self._turn_diagnostics.absorb_chat_event(event)
+                    if isinstance(event, TokenEvent):
+                        accumulated += event.delta
+                    yield event
+                # Boundary callback ПІСЛЯ yield щоб stream.py встиг collector.absorb
+                # цього event'а. Інакше partial-write бачить state на один event позаду.
+                if on_item_boundary is not None and note.method == "item/completed":
+                    item = note.params.get("item")
+                    item_type = item.get("type") if isinstance(item, dict) else None
+                    if isinstance(item_type, str) and item_type in _PERSIST_BOUNDARY_ITEMS:
+                        await on_item_boundary(item_type)
+                if event is not None and isinstance(event, DoneEvent):
                     return
         finally:
             self._current_turn_id = None
@@ -355,10 +417,85 @@ class CodexClient:
     async def close(self) -> None:
         await self._transport.close()
 
+    async def _current_turn_notifications(
+        self,
+        idle_s: float | None,
+        on_idle: Callable[[], Awaitable[None]] | None,
+    ) -> AsyncIterator[Notification]:
+        notes = self._transport.notifications()
+        deadline = time.monotonic() + idle_s if idle_s is not None else None
+        while True:
+            try:
+                note = await self._next_notification(notes, deadline, on_idle)
+            except StopAsyncIteration:
+                return
+            if self._is_stale_turn_note(note):
+                self._record_stale_raw_note(note)
+                continue
+            if self._is_session_noise_note(note):
+                self._record_noise_raw_note(note)
+                continue
+            if idle_s is not None:
+                deadline = time.monotonic() + idle_s
+            yield note
+
+    async def _next_notification(
+        self,
+        notes: AsyncIterator[Notification],
+        deadline: float | None,
+        on_idle: Callable[[], Awaitable[None]] | None,
+    ) -> Notification:
+        if deadline is None:
+            return await anext(notes)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            if on_idle is not None:
+                await on_idle()
+            raise TimeoutError
+        try:
+            async with asyncio.timeout(remaining):
+                return await anext(notes)
+        except TimeoutError:
+            if on_idle is not None:
+                await on_idle()
+            raise
+
+    def _is_stale_turn_note(self, note: Notification) -> bool:
+        return (
+            self._current_turn_id is not None
+            and note.turn_id is not None
+            and note.turn_id != self._current_turn_id
+        )
+
+    def _is_session_noise_note(self, note: Notification) -> bool:
+        return (
+            note.turn_id is None
+            and note.method != "turn/completed"
+            and not note.method.startswith("item/")
+        )
+
+    def _record_stale_raw_note(self, note: Notification) -> None:
+        if self._turn_diagnostics is None:
+            return
+        self._turn_diagnostics.absorb_stale_raw(note)
+        log.warning(
+            "codex_stale_turn_notification_ignored",
+            **self._turn_diagnostics.snapshot(self._transport),
+        )
+
+    def _record_noise_raw_note(self, note: Notification) -> None:
+        if self._turn_diagnostics is None:
+            return
+        self._turn_diagnostics.absorb_noise_raw(note)
+        log.debug(
+            "codex_session_notification_ignored",
+            **self._turn_diagnostics.snapshot(self._transport),
+        )
+
     def _record_raw_note(self, note: Notification) -> None:
         if self._turn_diagnostics is None:
             return
-        prev_active = (self._turn_diagnostics.active_item_type, self._turn_diagnostics.active_tool)
+        prev_active = self._turn_diagnostics._selected_active_item()
         self._turn_diagnostics.absorb_raw(note)
         match note.method:
             case "item/started":
@@ -377,10 +514,7 @@ class CodexClient:
                     **self._turn_diagnostics.snapshot(self._transport),
                 )
             case _:
-                if prev_active != (
-                    self._turn_diagnostics.active_item_type,
-                    self._turn_diagnostics.active_tool,
-                ):
+                if prev_active != self._turn_diagnostics._selected_active_item():
                     log.info(
                         "codex_active_item_changed",
                         **self._turn_diagnostics.snapshot(self._transport),
@@ -473,6 +607,38 @@ def _extract_turn_id(result: dict[str, Any]) -> str:
 
 def _age(now: float, at: float | None) -> float | None:
     return None if at is None else round(now - at, 3)
+
+
+def _item_key(item: dict[str, Any]) -> str:
+    for key in ("id", "callId", "toolCallId"):
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return f"{item.get('type')}:{_item_label(item)}"
+
+
+def _active_item_rank(item: _ActiveItem) -> tuple[int, float]:
+    item_type, tool, started_at = item
+    return (_active_item_priority(item_type, tool), -(started_at or 0.0))
+
+
+def _active_item_priority(item_type: str | None, tool: str | None) -> int:
+    if item_type in {
+        "commandExecution",
+        "mcpToolCall",
+        "dynamicToolCall",
+        "webSearch",
+        "imageGeneration",
+        "fileChange",
+    }:
+        return 30
+    if tool not in {None, "reasoning", "agentMessage", "userMessage"}:
+        return 20
+    if item_type == "agentMessage":
+        return 10
+    if item_type == "reasoning":
+        return 5
+    return 0
 
 
 def _item_label(item: dict[str, Any]) -> str | None:

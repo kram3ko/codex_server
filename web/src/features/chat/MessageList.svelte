@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Sparkles, UserRound } from "lucide-svelte";
   import { tick } from "svelte";
 
   import type { Attachment as ChatAttachment } from "../../gen/codex/v1/chat_pb";
@@ -39,20 +40,20 @@
   }
 
   let container = $state<HTMLDivElement | null>(null);
+  let topSentinel = $state<HTMLDivElement | null>(null);
   let stickToBottom = $state(true);
 
   const runningTools = $derived(tools.filter((t) => t.status === "running"));
   const completedTools = $derived(tools.filter((t) => t.status !== "running"));
   const currentToolName = $derived(runningTools[0]?.name);
 
-
-
-  // Напрямок скролу — найнадійніший signal: user-up → unstick; back-to-bottom
-  // → re-stick. Programmatic `scrollTop = scrollHeight` завжди йде ВНИЗ, тож
-  // воно нічого не ламає.
   let lastScrollTop = 0;
   let lastMessagesLen = 0;
   let lastFirstMessageId: bigint | null = null;
+  // Snapshot перед load-older — після того як прийшли нові, відновлюємо
+  // scrollTop = newScrollHeight - prevScrollHeight + prevScrollTop. Гарантоване
+  // збереження viewport на тому ж повідомленні (надійніше browser anchor).
+  let scrollAnchor: { scrollHeight: number; scrollTop: number } | null = null;
 
   function onscroll() {
     if (!container) return;
@@ -62,15 +63,30 @@
     } else if (scrollHeight - scrollTop - clientHeight < 50) {
       stickToBottom = true;
     }
-    if (scrollTop < 100 && hasMoreOlder && !loadingOlder) {
-      onloadolder?.();
-    }
     lastScrollTop = scrollTop;
   }
 
+  // IntersectionObserver на top-sentinel — спрацьовує один раз коли він
+  // в'їжджає у viewport, замість шумного `scrollTop<100` на кожен onscroll.
+  $effect(() => {
+    if (!container || !topSentinel) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0].isIntersecting) return;
+        if (!hasMoreOlder || loadingOlder || !container) return;
+        scrollAnchor = {
+          scrollHeight: container.scrollHeight,
+          scrollTop: container.scrollTop
+        };
+        onloadolder?.();
+      },
+      { root: container, rootMargin: "100px 0px 0px 0px" }
+    );
+    io.observe(topSentinel);
+    return () => io.disconnect();
+  });
+
   // Append (новий send / done) → стик-вниз. Prepend (load-older) → НЕ стикаємо.
-  // Scroll-position при prepend утримує сам браузер через `overflow-anchor: auto`
-  // (default для будь-якого scrollable container'а у сучасних браузерах).
   $effect(() => {
     const firstId = messages[0]?.id ?? null;
     const prepended = lastFirstMessageId !== null && firstId !== lastFirstMessageId;
@@ -81,11 +97,21 @@
     lastFirstMessageId = firstId;
   });
 
-  // Snap to bottom on any list/tool/attachment change while sticking.
+  // Після prepend — відновити viewport через delta-correction. Інакше — snap
+  // до низу при `stickToBottom`.
   $effect(() => {
     void messages;
     void tools;
     void attachments;
+    if (scrollAnchor && container) {
+      const anchor = scrollAnchor;
+      scrollAnchor = null;
+      tick().then(() => {
+        if (!container) return;
+        container.scrollTop = container.scrollHeight - anchor.scrollHeight + anchor.scrollTop;
+      });
+      return;
+    }
     if (!stickToBottom) return;
     tick().then(() => {
       if (container) container.scrollTop = container.scrollHeight;
@@ -96,9 +122,11 @@
 <div
   bind:this={container}
   {onscroll}
-  class="min-h-0 flex-1 overflow-y-auto scroll-smooth px-5 py-4"
+  class="min-h-0 flex-1 overflow-y-auto px-5 py-4"
 >
   <div class="mx-auto flex max-w-5xl flex-col gap-4">
+    <!-- Sentinel for IntersectionObserver — triggers loadOlder when visible. -->
+    <div bind:this={topSentinel} aria-hidden="true"></div>
     {#if loadingOlder}
       <div class="grid place-items-center py-2 text-[11px] text-[var(--color-text-muted)]">
         loading older…
@@ -106,27 +134,44 @@
     {/if}
     {#each messages as message (messageKey(message))}
       {@const streaming = clientIdOf(message) === streamingClientId}
-      <Message
-        {message}
-        {streaming}
-        startedAt={streaming ? draftStartedAt : undefined}
-        currentToolName={streaming ? currentToolName : undefined}
-      />
-      {#if streaming && tools.length}
-        <div class="ml-11 max-w-[760px] space-y-2">
-          {#each runningTools as tool (tool.id)}
-            <ToolCall event={tool} />
-          {/each}
-          <CompletedTools tools={completedTools} />
+      {@const isUser = message.role === 1}
+      <article class="msg-in flex gap-3 {isUser ? 'justify-end' : 'justify-start'}">
+        {#if !isUser}
+          <div
+            class="mt-1 grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-[oklch(72%_0.18_175)] to-[oklch(64%_0.16_320)] text-[var(--color-bg)] shadow-md shadow-[oklch(72%_0.18_175/0.25)] {streaming ? 'animate-pulse-glow' : ''}"
+          >
+            <Sparkles size={15} strokeWidth={2.5} />
+          </div>
+        {/if}
+        <div class="flex min-w-0 max-w-bubble flex-col gap-2">
+          <Message
+            {message}
+            {streaming}
+            startedAt={streaming ? draftStartedAt : undefined}
+            currentToolName={streaming ? currentToolName : undefined}
+          />
+          {#if streaming && tools.length}
+            <div class="space-y-2">
+              {#each runningTools as tool (tool.id)}
+                <ToolCall event={tool} />
+              {/each}
+              <CompletedTools tools={completedTools} />
+            </div>
+          {/if}
+          {#if streaming && attachments.length}
+            <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
+              {#each attachments as attachment (`${attachment.kind}:${attachment.source}`)}
+                <Attachment {attachment} />
+              {/each}
+            </div>
+          {/if}
         </div>
-      {/if}
-      {#if streaming && attachments.length}
-        <div class="ml-11 grid max-w-[760px] grid-cols-1 gap-2 md:grid-cols-2">
-          {#each attachments as attachment (`${attachment.kind}:${attachment.source}`)}
-            <Attachment {attachment} />
-          {/each}
-        </div>
-      {/if}
+        {#if isUser}
+          <div class="mt-1 grid size-8 shrink-0 place-items-center rounded-lg border border-[oklch(70%_0.16_230/0.35)] bg-[var(--color-user-soft)] text-[var(--color-user)]">
+            <UserRound size={15} />
+          </div>
+        {/if}
+      </article>
     {/each}
   </div>
 </div>
