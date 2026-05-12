@@ -236,6 +236,7 @@ class AppServerClient:
             params=params,
             turn_id=turn_id if isinstance(turn_id, str) else None,
         )
+        log.info("app_server_note_in", method=note.method, turn_id=note.turn_id)
         handler = self._notification_handler
         if handler is None:
             log.warning("app_server_no_notification_handler", method=note.method)

@@ -28,7 +28,6 @@ from app.services.codex.events import (
     DoneEvent,
     ErrorEvent,
     ToolCallRecord,
-    iterate_with_idle_timeout,
 )
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
@@ -48,7 +47,6 @@ async def stream_turn(
     voice_reply: bool = False,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     collector = StreamCollector()
-    stream = session.client.run_turn(text, attachments=image_urls)
     events_count = 0
     last_event_type = "none"
 
@@ -63,12 +61,15 @@ async def stream_turn(
         with contextlib.suppress(Exception):
             await session.client.interrupt()
 
+    stream = session.client.run_turn(
+        text,
+        attachments=image_urls,
+        idle_s=settings.WEB_TURN_TIMEOUT_SECONDS,
+        on_idle=_on_idle,
+    )
+
     try:
-        async for ev in iterate_with_idle_timeout(
-            stream,
-            settings.WEB_TURN_TIMEOUT_SECONDS,
-            on_idle=_on_idle,
-        ):
+        async for ev in stream:
             events_count += 1
             last_event_type = type(ev).__name__
             await event_bus.publish(persisted_chat_id, ev)

@@ -29,6 +29,7 @@ from app.services.codex.events import (
     DoneEvent,
     ErrorEvent,
     TokenEvent,
+    iterate_with_idle_timeout,
 )
 from app.services.codex.events import (
     translate_notification as _translate,
@@ -147,6 +148,9 @@ class CodexClient:
         self,
         text: str,
         attachments: tuple[str, ...] = (),
+        *,
+        idle_s: float | None = None,
+        on_idle: Callable[[], Awaitable[None]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         await self._ensure_alive()
         input_payload = self._build_input(text, attachments)
@@ -159,17 +163,38 @@ class CodexClient:
         self._current_turn_id = turn_id
         accumulated = ""
 
-        async with self._router.subscribe_turn(turn_id) as notes:
-            async for note in notes:
-                event = _translate(note, accumulated)
-                if event is None:
-                    continue
-                if isinstance(event, TokenEvent):
-                    accumulated += event.delta
-                yield event
-                if isinstance(event, DoneEvent):
-                    self._current_turn_id = None
-                    return
+        log.info("codex_subscribe_enter", turn_id=turn_id)
+        notes_seen = 0
+        events_yielded = 0
+        last_method = "none"
+        try:
+            async with self._router.subscribe_turn(turn_id) as notes:
+                notes_iter = (
+                    iterate_with_idle_timeout(notes, idle_s, on_idle=on_idle)
+                    if idle_s is not None
+                    else notes
+                )
+                async for note in notes_iter:
+                    notes_seen += 1
+                    last_method = note.method
+                    event = _translate(note, accumulated)
+                    if event is None:
+                        continue
+                    events_yielded += 1
+                    if isinstance(event, TokenEvent):
+                        accumulated += event.delta
+                    yield event
+                    if isinstance(event, DoneEvent):
+                        self._current_turn_id = None
+                        return
+        finally:
+            log.info(
+                "codex_subscribe_exit",
+                turn_id=turn_id,
+                notes_seen=notes_seen,
+                events_yielded=events_yielded,
+                last_method=last_method,
+            )
 
     async def interrupt(self) -> None:
         turn_id = self._current_turn_id

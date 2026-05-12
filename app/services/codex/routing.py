@@ -90,6 +90,12 @@ class TurnRouter:
                 self._evict_oldest_unsubscribed()
             queue = asyncio.Queue(maxsize=_BUFFER_MAX)
             self._buffers[note.turn_id] = queue
+            log.info(
+                "codex_note_buffer_created",
+                turn_id=note.turn_id,
+                method=note.method,
+                subscribed=note.turn_id in self._subscribed,
+            )
         try:
             queue.put_nowait(note)
         except asyncio.QueueFull:

@@ -92,6 +92,9 @@
         messages = [...messages, userMessage];
         return;
       }
+      // Steer rejected → не валимо стейт turn'а silent interrupt+restart'ом.
+      error = "Steer rejected — running turn continues; check server logs";
+      return;
     }
     if (busy && selected) {
       await chatClient.interruptTurn({ chatId: selected.id }).catch(() => undefined);

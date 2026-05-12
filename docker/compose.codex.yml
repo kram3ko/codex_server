@@ -12,6 +12,7 @@ services:
       codex.watchdog: "true"
     user: "0:0"
     environment:
+      TZ: Europe/Kyiv
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
     volumes:
       - ../.codex:/home/codex/.codex:rw
@@ -38,6 +39,7 @@ services:
       codex.watchdog: "true"
     user: "0:0"
     environment:
+      TZ: Europe/Kyiv
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
     volumes:
       - ../.codex-guest:/home/codex/.codex:rw

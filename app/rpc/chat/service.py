@@ -166,12 +166,25 @@ class ChatRPC(ChatProtocol):
         user = await require_user(ctx)
         text = request.text.strip()
         if not text:
+            log.warning("steer_rejected", user_id=user.id, reason="empty_text")
             return chat_pb2.SteerTurnResponse(accepted=False)
         session = await web_sessions.get(user.id)
-        if session is None or session.db_chat_id != request.chat_id:
+        if session is None:
+            log.warning("steer_rejected", user_id=user.id, reason="no_session")
+            return chat_pb2.SteerTurnResponse(accepted=False)
+        if session.db_chat_id != request.chat_id:
+            log.warning(
+                "steer_rejected",
+                user_id=user.id,
+                reason="chat_mismatch",
+                requested=request.chat_id,
+                session_chat=session.db_chat_id,
+            )
             return chat_pb2.SteerTurnResponse(accepted=False)
         accepted = await session.client.steer(text)
-        if accepted:
+        if not accepted:
+            log.warning("steer_rejected", user_id=user.id, reason="sidecar_rejected")
+        else:
             async with SessionLocal() as db:
                 await message_service.append(db, session.db_chat_id, MessageRole.USER, text)
                 await db.commit()

@@ -1,26 +1,24 @@
-"""Idle-watchdog для async-стрімів ChatEvent."""
+"""Idle-watchdog для async-стрімів — generic per item-type."""
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from app.services.codex.events.types import ChatEvent
 
-
-async def iterate_with_idle_timeout(
-    stream: AsyncIterator[ChatEvent],
+async def iterate_with_idle_timeout[T](
+    stream: AsyncIterator[T],
     idle_s: float,
     *,
     on_idle: Callable[[], Awaitable[None]] | None = None,
-) -> AsyncIterator[ChatEvent]:
-    """Ресетить таймер на кожен yield. idle_s тиші між events → on_idle + TimeoutError."""
+) -> AsyncIterator[T]:
+    """idle_s тиші між items → on_idle + TimeoutError. Таймер ресетиться на кожен yield."""
     while True:
         try:
             async with asyncio.timeout(idle_s):
-                event = await anext(stream)
+                item = await anext(stream)
         except StopAsyncIteration:
             return
         except TimeoutError:
             if on_idle is not None:
                 await on_idle()
             raise
-        yield event
+        yield item

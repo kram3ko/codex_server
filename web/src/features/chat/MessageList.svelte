@@ -36,6 +36,7 @@
   // воно нічого не ламає.
   let lastScrollTop = 0;
   let lastMessagesLen = 0;
+  let lastScrollHeight = 0;
 
   function onscroll() {
     if (!container) return;
@@ -57,7 +58,7 @@
     lastMessagesLen = messages.length;
   });
 
-  // Snap to bottom on any list/draft/tool/attachment change while sticking.
+  // Snap тільки на ROST висоти; на shrink (tool collapse у <details> при finalize) лишаємо позицію.
   $effect(() => {
     void messages;
     void draft?.text;
@@ -65,7 +66,11 @@
     void attachments;
     if (!stickToBottom) return;
     tick().then(() => {
-      if (container) container.scrollTop = container.scrollHeight;
+      if (!container) return;
+      if (container.scrollHeight >= lastScrollHeight) {
+        container.scrollTop = container.scrollHeight;
+      }
+      lastScrollHeight = container.scrollHeight;
     });
   });
 </script>

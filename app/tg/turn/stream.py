@@ -17,7 +17,6 @@ from app.services.codex.events import (
     TokenEvent,
     ToolCallEvent,
     ToolResultEvent,
-    iterate_with_idle_timeout,
 )
 from app.services.sessions.store import ChatSession
 from app.tg.markdown import tg_markdown
@@ -36,7 +35,6 @@ async def stream_turn(
     progress: TurnProgressReporter,
 ) -> None:
     collector = StreamCollector()
-    stream = session.client.run_turn(prepared.text, attachments=prepared.attachments)
     events_count = 0
     last_event_type = "none"
 
@@ -50,11 +48,14 @@ async def stream_turn(
             last_event_type=last_event_type,
         )
 
-    async for ev in iterate_with_idle_timeout(
-        stream,
-        settings.TG_TURN_TIMEOUT_SECONDS,
+    stream = session.client.run_turn(
+        prepared.text,
+        attachments=prepared.attachments,
+        idle_s=settings.TG_TURN_TIMEOUT_SECONDS,
         on_idle=_on_idle,
-    ):
+    )
+
+    async for ev in stream:
         events_count += 1
         last_event_type = type(ev).__name__
         await event_bus.publish(session.db_chat_id, ev)
