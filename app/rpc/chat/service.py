@@ -28,6 +28,7 @@ from app.rpc.chat.stream import stream_turn
 from app.rpc.chat.uploads import resolve_uploads
 from app.services.chats.default import chat_service
 from app.services.codex import turn_registry
+from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
 from app.services.codex_usage.default import codex_usage_service
 from app.services.events.default import event_service
@@ -100,7 +101,7 @@ class ChatRPC(ChatProtocol):
         await require_user(ctx)
         text = request.text.strip()
         if not text:
-            yield error_event("empty_text", "text is required")
+            yield error_event(CodexErrorCode.EMPTY_TEXT, "text is required")
             return
 
         persisted_chat_id, user_pk = await _ensure_web_chat()

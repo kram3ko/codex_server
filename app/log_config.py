@@ -42,7 +42,7 @@ def configure_logging(level: str = "INFO") -> None:
         else structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
     )
 
-    timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
+    timestamper = structlog.processors.TimeStamper(fmt="iso", utc=False)
 
     pre_chain = [
         structlog.contextvars.merge_contextvars,

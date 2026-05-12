@@ -8,6 +8,7 @@ from typing import Any
 
 from app.db.base import SessionLocal
 from app.models import EventKind, MessageRole
+from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import Attachment, ToolCallRecord
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
@@ -101,5 +102,5 @@ def _build_turn_payload(
         "uploads": len(upload_ids),
     }
     if partial:
-        payload["reason"] = "stream_dropped"
+        payload["reason"] = CodexErrorCode.STREAM_DROPPED
     return payload

@@ -16,6 +16,7 @@ from app.config import settings
 from app.db.base import SessionLocal
 from app.services.chats.default import chat_service
 from app.services.codex import turn_registry
+from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
 from app.services.sessions.store import ChatSession
 from app.services.stt.base import STTBackend
@@ -131,7 +132,7 @@ class TurnRunner:
         )
         await emit_failure(
             session,
-            code="turn_timeout",
+            code=CodexErrorCode.TURN_TIMEOUT,
             detail=f"idle>{settings.TG_TURN_TIMEOUT_SECONDS}s",
         )
         await auto_reset_thread(session)

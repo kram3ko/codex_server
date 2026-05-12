@@ -8,7 +8,7 @@ import asyncio
 import contextlib
 import time
 from dataclasses import dataclass
-from typing import Literal
+from enum import StrEnum
 
 import structlog
 from aiogram.enums import ChatAction
@@ -24,15 +24,34 @@ CB_TURN_STOP = "turn:stop"
 CB_TURN_NEW = "turn:new"
 
 
-_ToolStatus = Literal["running", "done", "error"]
-_STATUS_ICONS: dict[_ToolStatus, str] = {"running": "🔧", "done": "✓", "error": "✗"}
+class _ToolStatus(StrEnum):
+    RUNNING = "running"
+    DONE = "done"
+    ERROR = "error"
 
-_TurnOutcome = Literal["success", "failed", "interrupted"]
-_OUTCOME_ICON: dict[_TurnOutcome, str] = {"success": "✓", "failed": "✗", "interrupted": "⏸"}
+
+_STATUS_ICONS: dict[_ToolStatus, str] = {
+    _ToolStatus.RUNNING: "🔧",
+    _ToolStatus.DONE: "✓",
+    _ToolStatus.ERROR: "✗",
+}
+
+
+class _TurnOutcome(StrEnum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
+
+
+_OUTCOME_ICON: dict[_TurnOutcome, str] = {
+    _TurnOutcome.SUCCESS: "✓",
+    _TurnOutcome.FAILED: "✗",
+    _TurnOutcome.INTERRUPTED: "⏸",
+}
 _OUTCOME_LABEL: dict[_TurnOutcome, str] = {
-    "success": "Завершено",
-    "failed": "Помилка",
-    "interrupted": "Зупинено",
+    _TurnOutcome.SUCCESS: "Завершено",
+    _TurnOutcome.FAILED: "Помилка",
+    _TurnOutcome.INTERRUPTED: "Зупинено",
 }
 
 _DRAFT_TEXT_MAX = 4000

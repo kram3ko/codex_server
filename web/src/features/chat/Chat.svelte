@@ -75,9 +75,10 @@
 
   async function send(text: string, imageIds: bigint[] = [], audioIds: bigint[] = []) {
     const uploadIds = [...imageIds, ...audioIds];
-    // Steer the running turn instead of interrupting+restarting. Codex
-    // appends `text` to the in-flight prompt; uploads still require a fresh
-    // turn (sidecar's steer API only accepts text), so fall through if any.
+    // Busy + no uploads → пробуємо steer running turn. Reject = turn закінчився
+    // між нашим busy=true і RPC; просто відкриваємо новий turn без interrupt.
+    // Uploads + busy → юзер свідомо хоче новий turn (steer API не приймає
+    // attachments), тож interrupt'имо явно.
     if (busy && selected && uploadIds.length === 0) {
       const resp = await chatClient
         .steerTurn({ chatId: selected.id, text })
@@ -92,8 +93,7 @@
         messages = [...messages, userMessage];
         return;
       }
-    }
-    if (busy && selected) {
+    } else if (busy && selected) {
       await chatClient.interruptTurn({ chatId: selected.id }).catch(() => undefined);
     }
     const turnId = activeTurnId + 1;

@@ -19,11 +19,13 @@ from urllib.parse import urlparse
 
 import structlog
 
+from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
     ChatEvent,
     DoneEvent,
     ErrorEvent,
     TokenEvent,
+    iterate_with_idle_timeout,
 )
 from app.services.codex.events import (
     translate_notification as _translate,
@@ -141,10 +143,16 @@ class CodexClient:
         attachments: tuple[str, ...] = (),
         *,
         on_started: Callable[[str, str], Awaitable[None]] | None = None,
+        idle_s: float | None = None,
+        on_idle: Callable[[], Awaitable[None]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """Stream ChatEvent'и. `on_started(turn_id, thread_id)` fires як тільки
-        sidecar повернув turn/start — потрібно для Redis turn_registry write
-        перед першим event'ом."""
+        sidecar повернув turn/start — caller пише запис у Redis turn_registry.
+
+        `idle_s` ставить watchdog НА СИРИЙ Notification-стрім (не на ChatEvent).
+        Інакше довге `item/started{reasoning}` — translator повертає None →
+        ChatEvent-стрім тихий → watchdog фалшиво fail'ить активний turn.
+        """
         input_payload = self._build_input(text, attachments)
         result = await self._begin_turn_with_retry(input_payload)
         if isinstance(result, ErrorEvent):
@@ -156,7 +164,10 @@ class CodexClient:
             await on_started(self._current_turn_id, self._thread_id)
         accumulated = ""
 
-        async for note in self._transport.notifications():
+        notes = self._transport.notifications()
+        if idle_s is not None:
+            notes = iterate_with_idle_timeout(notes, idle_s, on_idle=on_idle)
+        async for note in notes:
             event = _translate(note, accumulated)
             if event is None:
                 continue
@@ -256,7 +267,7 @@ class CodexClient:
             )
         except AppServerError as exc:
             if not _is_thread_not_found(exc):
-                return ErrorEvent(code="codex_error", detail=str(exc))
+                return ErrorEvent(code=CodexErrorCode.CODEX_ERROR, detail=str(exc))
         log.info("codex_thread_stale_retrying", stale_thread_id=thread_id)
         self._thread_id = None
         self._thread_resumed_or_started = False
@@ -268,7 +279,7 @@ class CodexClient:
                 self._build_turn_params(thread_id, input_payload),
             )
         except AppServerError as exc:
-            return ErrorEvent(code="codex_error", detail=str(exc))
+            return ErrorEvent(code=CodexErrorCode.CODEX_ERROR, detail=str(exc))
 
     def _build_turn_params(
         self,

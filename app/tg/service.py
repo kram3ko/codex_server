@@ -63,8 +63,8 @@ class TGBotService:
         )
         try:
             me = await bot.get_me()
-        except TelegramAPIError as exc:
-            log.error("tg_bot_auth_failed", error=str(exc))
+        except TelegramAPIError:
+            log.exception("tg_bot_auth_failed")
             await bot.session.close()
             return
 
@@ -158,16 +158,16 @@ class TGBotService:
             task.result()
         except asyncio.CancelledError:
             return
-        except Exception as exc:  # noqa: BLE001 — done-callback backstop
-            log.error("tg_polling_failed", error=str(exc))
+        except Exception:  # noqa: BLE001 — done-callback backstop
+            log.exception("tg_polling_failed")
 
     async def _acquire_polling_lock(self) -> bool:
         token = f"{os.getpid()}:{uuid4()}"
         ttl = settings.TG_POLLING_LOCK_TTL_SECONDS
         try:
             acquired = await cache.set(_TG_POLLING_LOCK_KEY, token, nx=True, ex=ttl)
-        except RedisError as exc:
-            log.error("tg_polling_lock_acquire_failed", error=str(exc))
+        except RedisError:
+            log.exception("tg_polling_lock_acquire_failed")
             return False
         if not acquired:
             return False
@@ -194,8 +194,8 @@ class TGBotService:
                         with contextlib.suppress(Exception):
                             await self._dispatcher.stop_polling()
                     return
-            except RedisError as exc:
-                log.error("tg_polling_lock_renew_failed", error=str(exc))
+            except RedisError:
+                log.exception("tg_polling_lock_renew_failed")
                 if self._dispatcher is not None:
                     with contextlib.suppress(Exception):
                         await self._dispatcher.stop_polling()

@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates libssl3 \
+        ca-certificates libssl3 tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /root/.local/share/uv/python /root/.local/share/uv/python

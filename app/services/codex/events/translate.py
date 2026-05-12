@@ -25,7 +25,7 @@ from app.services.codex.events.types import (
 from app.services.codex.transport import Notification
 
 
-class _Notif(StrEnum):
+class CodexNotif(StrEnum):
     TURN_STARTED = "turn/started"
     TURN_COMPLETED = "turn/completed"
     AGENT_MSG_DELTA = "item/agentMessage/delta"
@@ -33,7 +33,7 @@ class _Notif(StrEnum):
     ITEM_COMPLETED = "item/completed"
 
 
-class _Item(StrEnum):
+class CodexItem(StrEnum):
     # Source of truth: openai/codex codex-rs/app-server-protocol/src/protocol/v2/item.rs
     AGENT_MESSAGE = "agentMessage"
     USER_MESSAGE = "userMessage"
@@ -55,14 +55,14 @@ class _Item(StrEnum):
 
 _HIDDEN_ITEMS: frozenset[str] = frozenset(
     {
-        _Item.USER_MESSAGE,
-        _Item.HOOK_PROMPT,
-        _Item.PLAN,
-        _Item.REASONING,
-        _Item.COLLAB_AGENT_TOOL_CALL,
-        _Item.ENTERED_REVIEW_MODE,
-        _Item.EXITED_REVIEW_MODE,
-        _Item.CONTEXT_COMPACTION,
+        CodexItem.USER_MESSAGE,
+        CodexItem.HOOK_PROMPT,
+        CodexItem.PLAN,
+        CodexItem.REASONING,
+        CodexItem.COLLAB_AGENT_TOOL_CALL,
+        CodexItem.ENTERED_REVIEW_MODE,
+        CodexItem.EXITED_REVIEW_MODE,
+        CodexItem.CONTEXT_COMPACTION,
     }
 )
 
@@ -121,8 +121,8 @@ def _attachment_from_dict(data: dict[str, Any]) -> Attachment | None:
     )
 
 
-type _ItemExtractor[T] = Callable[[dict[str, Any]], T]
-type _LabelGetter = str | _ItemExtractor[str]
+type CodexItemExtractor[T] = Callable[[dict[str, Any]], T]
+type _LabelGetter = str | CodexItemExtractor[str]
 
 
 _MCP_TOOL_LABELS: dict[str, str] = {}
@@ -139,15 +139,15 @@ class _BuiltinSpec(BaseModel):
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     label: _LabelGetter = Field(description="UI-label: str або callable(item)→str.")
-    args: _ItemExtractor[dict[str, Any]] = Field(
+    args: CodexItemExtractor[dict[str, Any]] = Field(
         default=lambda _: {},
         description="Extract args для ToolCallEvent.args.",
     )
-    text: _ItemExtractor[str] = Field(
+    text: CodexItemExtractor[str] = Field(
         default=lambda _: "",
         description="Extract text-вивід тулзи для ToolResultEvent.text.",
     )
-    attachments: _ItemExtractor[tuple[Attachment, ...]] = Field(
+    attachments: CodexItemExtractor[tuple[Attachment, ...]] = Field(
         default=lambda _: (),
         description="Extract media-артефакти для ToolResultEvent.attachments.",
     )
@@ -168,25 +168,25 @@ class _BuiltinSpec(BaseModel):
 
 
 _BUILTINS: dict[str, _BuiltinSpec] = {
-    _Item.COMMAND_EXECUTION: _BuiltinSpec(
+    CodexItem.COMMAND_EXECUTION: _BuiltinSpec(
         label="shell",
         args=_command_args,
         text=lambda item: item.get("aggregatedOutput") or "",
     ),
-    _Item.FILE_CHANGE: _BuiltinSpec(
+    CodexItem.FILE_CHANGE: _BuiltinSpec(
         label="file_change",
         args=lambda item: {"changes": item["changes"]},
     ),
-    _Item.WEB_SEARCH: _BuiltinSpec(
+    CodexItem.WEB_SEARCH: _BuiltinSpec(
         label="web_search",
         args=lambda item: {"query": item["query"]},
     ),
-    _Item.MCP_TOOL_CALL: _BuiltinSpec(
+    CodexItem.MCP_TOOL_CALL: _BuiltinSpec(
         label=_mcp_label,
         args=lambda item: {"server": item["server"], "tool": item["tool"]},
         attachments=_mcp_attachments,
     ),
-    _Item.IMAGE_GENERATION: _BuiltinSpec(
+    CodexItem.IMAGE_GENERATION: _BuiltinSpec(
         # `revisedPrompt` від OpenAI Image API завжди англ — НЕ як TG caption.
         label="image_generation",
         args=lambda item: {"prompt": item.get("revisedPrompt", "")},
@@ -195,7 +195,7 @@ _BUILTINS: dict[str, _BuiltinSpec] = {
             _image_attachment(item["savedPath"], "") if item.get("savedPath") else ()
         ),
     ),
-    _Item.IMAGE_VIEW: _BuiltinSpec(
+    CodexItem.IMAGE_VIEW: _BuiltinSpec(
         label="image_view",
         args=lambda item: {"path": item["path"]},
         attachments=lambda item: _image_attachment(item["path"]),
@@ -211,16 +211,16 @@ def translate_notification(note: Notification, accumulated: str) -> ChatEvent | 
     не потрапляють ноти чужих турнів.
     """
     match note.method:
-        case _Notif.TURN_STARTED:
+        case CodexNotif.TURN_STARTED:
             return None
-        case _Notif.AGENT_MSG_DELTA:
+        case CodexNotif.AGENT_MSG_DELTA:
             delta: str = note.params["delta"]
             return TokenEvent(delta=delta) if delta else None
-        case _Notif.ITEM_STARTED:
+        case CodexNotif.ITEM_STARTED:
             return _on_item_started(note.params["item"])
-        case _Notif.ITEM_COMPLETED:
+        case CodexNotif.ITEM_COMPLETED:
             return _on_item_completed(note.params["item"], accumulated)
-        case _Notif.TURN_COMPLETED:
+        case CodexNotif.TURN_COMPLETED:
             return DoneEvent(final_text=note.params.get("finalText", accumulated))
         case _:
             return None
@@ -228,7 +228,7 @@ def translate_notification(note: Notification, accumulated: str) -> ChatEvent | 
 
 def _on_item_started(item: dict[str, Any]) -> ChatEvent | None:
     item_type: str = item["type"]
-    if item_type == _Item.AGENT_MESSAGE or item_type in _HIDDEN_ITEMS:
+    if item_type == CodexItem.AGENT_MESSAGE or item_type in _HIDDEN_ITEMS:
         return None
     spec = _BUILTINS.get(item_type)
     if spec is not None:
@@ -238,11 +238,11 @@ def _on_item_started(item: dict[str, Any]) -> ChatEvent | None:
 
 def _on_item_completed(item: dict[str, Any], accumulated: str) -> ChatEvent | None:
     item_type: str = item["type"]
-    if item_type == _Item.AGENT_MESSAGE:
+    if item_type == CodexItem.AGENT_MESSAGE:
         return _agent_message_to_token(item, accumulated)
     if item_type in _HIDDEN_ITEMS:
         return None
-    if item_type == _Item.DYNAMIC_TOOL_CALL:
+    if item_type == CodexItem.DYNAMIC_TOOL_CALL:
         return _dynamic_tool_call_to_event(item)
     spec = _BUILTINS.get(item_type)
     if spec is not None:

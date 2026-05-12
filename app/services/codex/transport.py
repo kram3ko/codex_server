@@ -188,8 +188,8 @@ class AppServerClient:
             raise
         except websockets.ConnectionClosed:
             log.info("app_server_ws_closed")
-        except Exception as exc:  # noqa: BLE001 — backstop для read-loop, must never crash silently
-            log.error("app_server_reader_error", error=str(exc))
+        except Exception:  # noqa: BLE001 — backstop для read-loop, must never crash silently
+            log.exception("app_server_reader_error")
         finally:
             # Reader умер — транспорт втрачено, але не explicit close;
             # CodexClient побачить is_connected=False і реконектить.
@@ -241,8 +241,8 @@ class AppServerClient:
             return
         try:
             handler(note)
-        except Exception as exc:  # noqa: BLE001 — handler має sync semantics, лог + continue
-            log.error("app_server_notification_handler_failed", method=note.method, error=str(exc))
+        except Exception:  # noqa: BLE001 — handler має sync semantics, лог + continue
+            log.exception("app_server_notification_handler_failed", method=note.method)
 
     def _resolve_response(self, message: dict[str, Any]) -> None:
         req_id = message["id"]
@@ -267,8 +267,8 @@ class AppServerClient:
             return
         try:
             handler()
-        except Exception as exc:  # noqa: BLE001 — user-supplied callback, isolate
-            log.error("app_server_close_handler_failed", error=str(exc))
+        except Exception:  # noqa: BLE001 — user-supplied callback, isolate
+            log.exception("app_server_close_handler_failed")
 
     def _fail_pending(self, exc: Exception) -> None:
         for future in self._pending.values():

@@ -8,6 +8,7 @@ ARG TARGETARCH
 
 RUN apk add --no-cache \
         ca-certificates \
+        tzdata \
         bash \
         coreutils \
         curl \

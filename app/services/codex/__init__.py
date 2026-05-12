@@ -7,6 +7,7 @@
 """
 
 from app.services.codex.client import CodexClient
+from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
     ChatEvent,
     DoneEvent,
@@ -23,6 +24,7 @@ __all__ = [
     "AppServerError",
     "ChatEvent",
     "CodexClient",
+    "CodexErrorCode",
     "DoneEvent",
     "ErrorEvent",
     "Notification",
