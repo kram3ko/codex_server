@@ -1,118 +1,28 @@
-"""Типізовані chat-event'и між Codex client'ом і WebSocket-handler'ом.
+"""Codex sidecar notification → typed ChatEvent.
 
-Pydantic v2 моделі — кожне поле з `Field(description=...)`, тому JSON Schema
-генерується із самих типів, а wire-frame має чітку документацію.
-
-Серіалізація — orjson, bytes-native, без проміжних `str` чи ascii-fallback'ів.
-Збираємо з `ORJSON_BUILD_FREETHREADED=1` у Dockerfile (3.14t opt-in).
+Translator stateless щодо турнів — `accumulated` приходить ззовні (від caller'а
+що тримає state одного турну). TurnRouter гарантує що сюди потрапляють лише
+ноти поточного турну, тож reconcile delta-stream ↔ item/completed чесний.
 """
 
-import asyncio
 import mimetypes
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Callable
 from enum import StrEnum
-from typing import Any, ClassVar, TypedDict, cast
+from typing import Any
 
 import orjson
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.services.codex.events.types import (
+    Attachment,
+    AttachmentKind,
+    ChatEvent,
+    DoneEvent,
+    TokenEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+)
 from app.services.codex.transport import Notification
-
-
-class ToolCallRecord(TypedDict):
-    """Згорнутий tool-call для `messages.meta.calls` (mirror `ToolCallEvent.{name, args}`)."""
-
-    name: str
-    args: dict[str, Any]
-
-
-class AttachmentKind(StrEnum):
-    IMAGE = "image"
-    AUDIO = "audio"
-    FILE = "file"
-
-
-class _Frame(BaseModel):
-    """Базовий frozen-frame: усі ChatEvent'и наслідують і несуть дискриминатор."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    # Перевизначається у кожного підкласу — використовується для wire-tag'а.
-    type_tag: ClassVar[str]
-
-
-class Attachment(_Frame):
-    """Один файл/медіа-артефакт, що його тулза прислала разом з результатом.
-
-    `source` — URL або локальний шлях під довіреним коренем. Рендерер сам
-    ресолвить його (Telegram → bytes, web → presigned URL); markdown bridge
-    більше не потрібен.
-    """
-
-    type_tag: ClassVar[str] = "attachment"
-    kind: AttachmentKind = Field(description="Тип контенту: image / audio / file.")
-    source: str = Field(description="URL або локальний шлях під довіреним коренем.")
-    caption: str = Field(default="", description="Caption або alt-текст (порожній — без підпису).")
-
-
-class TokenEvent(_Frame):
-    type_tag: ClassVar[str] = "token"
-    delta: str = Field(description="Інкрементальний шматок agentMessage стріму.")
-
-
-class ToolCallEvent(_Frame):
-    type_tag: ClassVar[str] = "tool_call"
-    name: str = Field(description="Ім'я тулзи (Codex builtin label чи toolName).")
-    args: dict[str, Any] = Field(description="Аргументи виклику як отримано від Codex.")
-
-
-class ToolResultEvent(_Frame):
-    type_tag: ClassVar[str] = "tool_result"
-    name: str = Field(description="Ім'я тулзи, результат якої прийшов.")
-    text: str = Field(default="", description="Текстовий вивід тулзи (stdout, опис тощо).")
-    attachments: tuple[Attachment, ...] = Field(
-        default=(), description="Файли/медіа, що їх тулза вкладає у результат."
-    )
-    error: str | None = Field(default=None, description="Текст помилки, якщо тулза впала.")
-
-
-class DoneEvent(_Frame):
-    type_tag: ClassVar[str] = "done"
-    final_text: str = Field(description="Фінальний agentMessage після завершення турну.")
-
-
-class ErrorEvent(_Frame):
-    type_tag: ClassVar[str] = "error"
-    code: str = Field(description="Стабільний machine-readable код (наприклад, 'codex_error').")
-    detail: str | None = Field(default=None, description="Людинозрозумілий опис помилки.")
-
-
-ChatEvent = TokenEvent | ToolCallEvent | ToolResultEvent | DoneEvent | ErrorEvent
-
-
-_TAG_TO_CLS: dict[str, type[_Frame]] = {
-    cls.type_tag: cls for cls in (TokenEvent, ToolCallEvent, ToolResultEvent, DoneEvent, ErrorEvent)
-}
-
-
-def event_to_frame(event: ChatEvent) -> dict[str, Any]:
-    """Дискриминатор `type` + плоский dump. Серіалізація — окремо (orjson)."""
-    return {"type": event.type_tag, **event.model_dump(mode="json")}
-
-
-def event_to_bytes(event: ChatEvent) -> bytes:
-    """Hot-path серіалізатор для bus / WS (orjson — bytes-native, no copies)."""
-    return orjson.dumps(event_to_frame(event))
-
-
-def frame_to_event(frame: dict[str, Any]) -> ChatEvent:
-    cls = _TAG_TO_CLS[frame["type"]]
-    payload = {k: v for k, v in frame.items() if k != "type"}
-    return cast(ChatEvent, cls.model_validate(payload))
-
-
-def bytes_to_event(raw: bytes | str) -> ChatEvent:
-    return frame_to_event(orjson.loads(raw))
 
 
 class _Notif(StrEnum):
@@ -143,9 +53,6 @@ class _Item(StrEnum):
     CONTEXT_COMPACTION = "contextCompaction"
 
 
-# Items that don't surface as progress events. agentMessage is hidden in the
-# `started` branch but extracted as a TokenEvent in `completed` (the long
-# fallback path when sidecar emits whole text instead of streaming deltas).
 _HIDDEN_ITEMS: frozenset[str] = frozenset(
     {
         _Item.USER_MESSAGE,
@@ -161,7 +68,6 @@ _HIDDEN_ITEMS: frozenset[str] = frozenset(
 
 
 def _command_args(item: dict[str, Any]) -> dict[str, Any]:
-    # `command` був list[str] у v1, став str у v2 — shape-bridge між версіями.
     cmd = item["command"]
     if isinstance(cmd, list):
         cmd = " ".join(str(c) for c in cmd)
@@ -173,25 +79,17 @@ def _image_attachment(source: str, caption: str = "") -> tuple[Attachment, ...]:
 
 
 def _mcp_attachments(item: dict[str, Any]) -> tuple[Attachment, ...]:
-    """Витягти `Attachment` з MCP-результату.
-
-    Контракт: MCP-тула повертає `{"path": "<image>", "caption": "..."}`.
-    MCP SDK може покласти його у `structuredContent` (typed) або всередині
-    text-блоків `content[].text` як JSON-стрінг — підтримуємо обидва. Path
-    має бути image MIME — інакше ризик надіслати .env/.json як photo.
-    """
+    """Витягти `Attachment` з MCP-результату (structuredContent або content[].text)."""
     result = item.get("result")
     if not isinstance(result, dict):
         return ()
 
-    # Prefer typed structuredContent (newer MCP feature).
     structured = result.get("structuredContent")
     if isinstance(structured, dict):
         attachment = _attachment_from_dict(structured)
         if attachment is not None:
             return (attachment,)
 
-    # Fallback: text blocks з JSON-payload.
     for block in result.get("content") or []:
         if not isinstance(block, dict) or block.get("type") != "text":
             continue
@@ -227,33 +125,23 @@ type _ItemExtractor[T] = Callable[[dict[str, Any]], T]
 type _LabelGetter = str | _ItemExtractor[str]
 
 
-# Optional UI-label override per MCP tool (operation_id → human label). Empty
-# dict ⇒ label == operation_id raw — додавати рядки сюди коли захочеш
-# локалізації або емодзі-префіксу для прогрес-бульбашки.
 _MCP_TOOL_LABELS: dict[str, str] = {}
 
 
 def _mcp_label(item: dict[str, Any]) -> str:
-    """MCP item → label: friendly override якщо є, інакше operation_id."""
     tool = item.get("tool") or "mcp"
     return _MCP_TOOL_LABELS.get(tool, tool)
 
 
 class _BuiltinSpec(BaseModel):
-    """Декларативний опис builtin-Codex item'у: як його показати у progress
-    і як зібрати ToolResultEvent (text + attachments)."""
+    """Декларативний опис builtin-Codex item'у: progress + ToolResultEvent."""
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-    label: _LabelGetter = Field(
-        description=(
-            "UI-label. Статичний str для билт-інів (`shell`, `image_generation`),"
-            " або callable(item)→str для динамічних (MCP — лейбл з operation_id)."
-        ),
-    )
+    label: _LabelGetter = Field(description="UI-label: str або callable(item)→str.")
     args: _ItemExtractor[dict[str, Any]] = Field(
         default=lambda _: {},
-        description="Extract args dict з raw item payload для ToolCallEvent.args.",
+        description="Extract args для ToolCallEvent.args.",
     )
     text: _ItemExtractor[str] = Field(
         default=lambda _: "",
@@ -261,7 +149,7 @@ class _BuiltinSpec(BaseModel):
     )
     attachments: _ItemExtractor[tuple[Attachment, ...]] = Field(
         default=lambda _: (),
-        description="Extract структурні media-артефакти для ToolResultEvent.attachments.",
+        description="Extract media-артефакти для ToolResultEvent.attachments.",
     )
 
     def _resolve_label(self, item: dict[str, Any]) -> str:
@@ -279,7 +167,6 @@ class _BuiltinSpec(BaseModel):
         )
 
 
-# Codex builtin item-types які surface'имо як pseudo-tools у progress'і.
 _BUILTINS: dict[str, _BuiltinSpec] = {
     _Item.COMMAND_EXECUTION: _BuiltinSpec(
         label="shell",
@@ -300,10 +187,8 @@ _BUILTINS: dict[str, _BuiltinSpec] = {
         attachments=_mcp_attachments,
     ),
     _Item.IMAGE_GENERATION: _BuiltinSpec(
+        # `revisedPrompt` від OpenAI Image API завжди англ — НЕ як TG caption.
         label="image_generation",
-        # `revisedPrompt` від OpenAI Image API завжди англ — тримаємо у args
-        # для меми/трейсу, але НЕ робимо з нього TG caption: модель пише власну
-        # відповідь у мові юзера окремою бульбашкою перед фото.
         args=lambda item: {"prompt": item.get("revisedPrompt", "")},
         text=lambda item: item.get("revisedPrompt", ""),
         attachments=lambda item: (
@@ -319,6 +204,12 @@ _BUILTINS: dict[str, _BuiltinSpec] = {
 
 
 def translate_notification(note: Notification, accumulated: str) -> ChatEvent | None:
+    """Codex notification → typed ChatEvent.
+
+    `accumulated` — text streamed via agentMessage/delta so far (turn-scoped).
+    Caller тримає його і ресетить між турнами. TurnRouter гарантує що сюди
+    не потрапляють ноти чужих турнів.
+    """
     match note.method:
         case _Notif.TURN_STARTED:
             return None
@@ -403,32 +294,19 @@ def _generic_tool_result(item: dict[str, Any]) -> ToolResultEvent | None:
 
 
 def _agent_message_to_token(item: dict[str, Any], accumulated: str) -> ChatEvent | None:
-    # Sidecar may emit the whole agent-message as one item instead of streaming
-    # `agentMessage/delta`. Reconcile against `accumulated` to avoid double text.
+    """Reconcile fallback item/completed agentMessage with delta-stream.
+
+    Three cases:
+    - text fully streamed already (accumulated ends with text)        → None
+    - text extends accumulated (startswith)                            → suffix delta
+    - divergence (model rewrote earlier tokens, whitespace mismatch)   → None.
+      DoneEvent.final_text несе авторитетну версію; персистимо її у БД,
+      web/TG на reload показують правильний текст. Краще не дублювати
+      бабблу всередині турну — це і був той самий «бомба»-кейс.
+    """
     text: str = item["text"]
     if not text or accumulated.endswith(text):
         return None
     if text.startswith(accumulated):
         return TokenEvent(delta=text[len(accumulated) :])
-    return TokenEvent(delta=text)
-
-
-async def iterate_with_idle_timeout(
-    stream: AsyncIterator[ChatEvent],
-    idle_s: float,
-    *,
-    on_idle: Callable[[], Awaitable[None]] | None = None,
-) -> AsyncIterator[ChatEvent]:
-    """Stream-watchdog: ресетить таймер на кожен yield. Спрацьовує idle_s
-    тиші між events → on_idle (якщо є) + TimeoutError."""
-    while True:
-        try:
-            async with asyncio.timeout(idle_s):
-                event = await anext(stream)
-        except StopAsyncIteration:
-            return
-        except TimeoutError:
-            if on_idle is not None:
-                await on_idle()
-            raise
-        yield event
+    return None

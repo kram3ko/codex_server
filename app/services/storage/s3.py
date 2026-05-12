@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 import structlog
 from aiobotocore.session import get_session
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import settings
 from app.services.storage.base import StorageError
@@ -74,5 +75,5 @@ class S3Storage:
         async with self._client() as s3:
             try:
                 await s3.delete_object(Bucket=self._bucket, Key=key)
-            except Exception as exc:  # noqa: BLE001
+            except (BotoCoreError, ClientError) as exc:
                 raise StorageError(f"S3 delete failed for {key}: {exc}") from exc

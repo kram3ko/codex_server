@@ -11,8 +11,10 @@ import structlog
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import BotCommand, BotCommandScopeChat
+from redis.exceptions import RedisError
 
 from app.config import settings
 from app.services.cache.default import cache
@@ -61,7 +63,7 @@ class TGBotService:
         )
         try:
             me = await bot.get_me()
-        except Exception as exc:  # noqa: BLE001
+        except TelegramAPIError as exc:
             log.error("tg_bot_auth_failed", error=str(exc))
             await bot.session.close()
             return
@@ -150,11 +152,13 @@ class TGBotService:
 
     @staticmethod
     def _on_polling_done(task: asyncio.Task) -> None:
+        # Done-callback бачить будь-яку експенцію з полінг-таску — лог + drop,
+        # бо повторний raise тут летить у asyncio default handler.
         try:
             task.result()
         except asyncio.CancelledError:
             return
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — done-callback backstop
             log.error("tg_polling_failed", error=str(exc))
 
     async def _acquire_polling_lock(self) -> bool:
@@ -162,7 +166,7 @@ class TGBotService:
         ttl = settings.TG_POLLING_LOCK_TTL_SECONDS
         try:
             acquired = await cache.set(_TG_POLLING_LOCK_KEY, token, nx=True, ex=ttl)
-        except Exception as exc:  # noqa: BLE001
+        except RedisError as exc:
             log.error("tg_polling_lock_acquire_failed", error=str(exc))
             return False
         if not acquired:
@@ -190,7 +194,7 @@ class TGBotService:
                         with contextlib.suppress(Exception):
                             await self._dispatcher.stop_polling()
                     return
-            except Exception as exc:  # noqa: BLE001
+            except RedisError as exc:
                 log.error("tg_polling_lock_renew_failed", error=str(exc))
                 if self._dispatcher is not None:
                     with contextlib.suppress(Exception):
