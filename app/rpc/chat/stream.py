@@ -14,7 +14,8 @@ import structlog
 from app.config import settings
 from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import chat_pb2
-from app.models import EventKind, MessageRole
+from app.models import EventKind, Message, MessageRole
+from app.rpc._mappers import message_to_pb
 from app.rpc.chat.mappers import (
     chat_event_to_pb,
     error_event,
@@ -48,6 +49,7 @@ async def stream_turn(
     *,
     image_urls: tuple[str, ...] = (),
     voice_reply: bool = False,
+    client_id: str | None = None,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     collector = StreamCollector()
 
@@ -162,12 +164,13 @@ async def stream_turn(
         )
         return
 
-    assistant_msg_id = await _persist_assistant_turn(
+    assistant_msg = await _persist_assistant_turn(
         persisted_chat_id,
         user_pk,
         collector.final_text,
         collector.tool_calls,
         collector.attachments,
+        client_id=client_id,
     )
 
     # TTS off the hot path — finalize turn for client first, attach audio коли
@@ -175,7 +178,7 @@ async def stream_turn(
     if voice_reply and collector.final_text.strip():
         asyncio.create_task(
             attach_tts_to_message(
-                assistant_msg_id, collector.final_text, persisted_chat_id, user_pk
+                assistant_msg.id, collector.final_text, persisted_chat_id, user_pk
             )
         )
 
@@ -183,6 +186,7 @@ async def stream_turn(
         done=chat_pb2.DoneEvent(
             chat_id=persisted_chat_id,
             final_text=final_text_for_done_frame(collector.final_text, collector.buffer),
+            message=message_to_pb(assistant_msg),
         )
     )
 
@@ -195,11 +199,14 @@ async def _persist_assistant_turn(
     tool_attachments: list[Attachment],
     *,
     partial: bool = False,
-) -> int:
+    client_id: str | None = None,
+) -> Message:
     """Persist assistant message + emit journal event.
 
     `partial=True` коли турн обірваний (CancelledError) — meta тегається
     `partial: True` щоб UI відмалював badge; event — TURN_FAILED + reason.
+    `client_id` — клієнтський idempotency key, зберігається у meta щоб client
+    зміг swap temp draft → real id без remount.
     """
     async with SessionLocal() as db:
         upload_ids = await upload_service.persist_attachments(
@@ -215,6 +222,8 @@ async def _persist_assistant_turn(
             meta["calls"] = tool_calls
         if upload_ids:
             meta["upload_ids"] = upload_ids
+        if client_id:
+            meta["client_id"] = client_id
         assistant_msg = await message_service.append(
             db,
             persisted_chat_id,
@@ -238,7 +247,7 @@ async def _persist_assistant_turn(
         )
         await db.commit()
         await db.refresh(assistant_msg)
-        return assistant_msg.id
+        return assistant_msg
 
 
 async def _emit_event(

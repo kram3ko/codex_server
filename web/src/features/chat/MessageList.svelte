@@ -10,17 +10,27 @@
 
   let {
     messages,
-    draft,
+    streamingClientId,
     tools,
     attachments,
     draftStartedAt
   }: {
     messages: ChatMessage[];
-    draft: ChatMessage | null;
+    streamingClientId: string | null;
     tools: ToolEvent[];
     attachments: ChatAttachment[];
     draftStartedAt?: number;
   } = $props();
+
+  function clientIdOf(message: ChatMessage): string | undefined {
+    const meta = message.meta as Record<string, unknown> | undefined;
+    const cid = meta?.client_id;
+    return typeof cid === "string" ? cid : undefined;
+  }
+
+  function messageKey(message: ChatMessage): string {
+    return clientIdOf(message) ?? message.id.toString();
+  }
 
   let container = $state<HTMLDivElement | null>(null);
   let stickToBottom = $state(true);
@@ -57,10 +67,9 @@
     lastMessagesLen = messages.length;
   });
 
-  // Snap to bottom on any list/draft/tool/attachment change while sticking.
+  // Snap to bottom on any list/tool/attachment change while sticking.
   $effect(() => {
     void messages;
-    void draft?.text;
     void tools;
     void attachments;
     if (!stickToBottom) return;
@@ -76,29 +85,29 @@
   class="min-h-0 flex-1 overflow-y-auto scroll-smooth px-5 py-4"
 >
   <div class="mx-auto flex max-w-5xl flex-col gap-4">
-    {#each messages as message (message.id.toString())}
-      <Message {message} />
+    {#each messages as message (messageKey(message))}
+      {@const streaming = clientIdOf(message) === streamingClientId}
+      <Message
+        {message}
+        {streaming}
+        startedAt={streaming ? draftStartedAt : undefined}
+        currentToolName={streaming ? currentToolName : undefined}
+      />
+      {#if streaming && tools.length}
+        <div class="ml-11 max-w-[760px] space-y-2">
+          {#each runningTools as tool (tool.id)}
+            <ToolCall event={tool} />
+          {/each}
+          <CompletedTools tools={completedTools} />
+        </div>
+      {/if}
+      {#if streaming && attachments.length}
+        <div class="ml-11 grid max-w-[760px] grid-cols-1 gap-2 md:grid-cols-2">
+          {#each attachments as attachment (`${attachment.kind}:${attachment.source}`)}
+            <Attachment {attachment} />
+          {/each}
+        </div>
+      {/if}
     {/each}
-
-    {#if tools.length}
-      <div class="ml-11 max-w-[760px] space-y-2">
-        {#each runningTools as tool (tool.id)}
-          <ToolCall event={tool} />
-        {/each}
-        <CompletedTools tools={completedTools} />
-      </div>
-    {/if}
-
-    {#if attachments.length}
-      <div class="ml-11 grid max-w-[760px] grid-cols-1 gap-2 md:grid-cols-2">
-        {#each attachments as attachment (`${attachment.kind}:${attachment.source}`)}
-          <Attachment {attachment} />
-        {/each}
-      </div>
-    {/if}
-
-    {#if draft}
-      <Message message={draft} streaming startedAt={draftStartedAt} {currentToolName} />
-    {/if}
   </div>
 </div>

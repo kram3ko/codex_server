@@ -1,11 +1,10 @@
-"""Telegram bot lifecycle: starts polling, owns dispatcher wiring."""
+"""Telegram bot lifecycle. Webhook (prod) or polling fallback (local/dev).
 
-import asyncio
+Toggle через `TG_WEBHOOK_URL`: задано → webhook, інакше → polling
+(`app/tg/polling.py`, видаляється коли публічний URL доступний).
+"""
+
 import contextlib
-import os
-from collections.abc import Awaitable
-from typing import Any, cast
-from uuid import uuid4
 
 import structlog
 from aiogram import Bot, Dispatcher, F
@@ -13,44 +12,40 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
-from aiogram.types import BotCommand, BotCommandScopeChat
-from redis.exceptions import RedisError
+from aiogram.types import BotCommand, BotCommandScopeChat, Update
 
 from app.config import settings
-from app.services.cache.default import cache
 from app.services.stt.default import stt_service
 from app.tg.handlers import TGHandlers
+from app.tg.polling import PollingMode
 from app.tg.sessions import ChatSessionStore
 from app.tg.turn import TurnRunner
 
 log = structlog.get_logger(__name__)
-
-_TG_POLLING_LOCK_KEY = "tg:polling:lock"
-_RELEASE_LOCK_SCRIPT = """
-if redis.call("get", KEYS[1]) == ARGV[1] then
-    return redis.call("del", KEYS[1])
-end
-return 0
-"""
-_RENEW_LOCK_SCRIPT = """
-if redis.call("get", KEYS[1]) == ARGV[1] then
-    return redis.call("expire", KEYS[1], ARGV[2])
-end
-return 0
-"""
 
 
 class TGBotService:
     def __init__(self) -> None:
         self._bot: Bot | None = None
         self._dispatcher: Dispatcher | None = None
-        self._polling_task: asyncio.Task | None = None
-        self._lock_renew_task: asyncio.Task | None = None
-        self._lock_token: str | None = None
+        self._polling: PollingMode | None = None
+        self._mode: str = "off"
         self._sessions = ChatSessionStore()
         self._stt = stt_service
         self._runner = TurnRunner(self._sessions, self._stt)
         self._handlers = TGHandlers(self._sessions, self._runner)
+
+    @property
+    def bot(self) -> Bot | None:
+        return self._bot
+
+    @property
+    def webhook_secret(self) -> str:
+        return settings.TG_WEBHOOK_SECRET
+
+    @property
+    def mode(self) -> str:
+        return self._mode
 
     async def start(self) -> None:
         if not settings.TG_BOT_TOKEN or settings.TG_BOT_TOKEN.startswith("123456:"):
@@ -68,74 +63,98 @@ class TGBotService:
             await bot.session.close()
             return
 
-        if not await self._acquire_polling_lock():
-            log.warning("tg_bot_skipped", reason="polling_lock_held")
-            await bot.session.close()
-            return
-
         self._bot = bot
+        self._dispatcher = self._build_dispatcher()
         log.info("tg_bot_connected", username=me.username, id=me.id)
+        await self._register_bot_commands()
+
+        if settings.TG_WEBHOOK_URL and settings.TG_WEBHOOK_SECRET:
+            await self._start_webhook()
+        else:
+            await self._start_polling()
+
+    async def feed_update(self, update: Update) -> None:
+        if self._mode != "webhook" or self._bot is None or self._dispatcher is None:
+            log.warning("tg_update_dropped", reason="bot_not_in_webhook_mode", mode=self._mode)
+            return
+        await self._dispatcher.feed_update(self._bot, update)
+
+    async def interrupt_active_turns(self) -> int:
+        return await self._sessions.interrupt_all_turns()
+
+    async def stop(self) -> None:
+        if self._mode == "webhook" and self._bot is not None:
+            with contextlib.suppress(Exception):
+                await self._bot.delete_webhook(drop_pending_updates=False)
+        if self._polling is not None:
+            await self._polling.stop()
+            self._polling = None
+        if self._bot is not None:
+            with contextlib.suppress(Exception):
+                await self._bot.session.close()
+            self._bot = None
+        self._dispatcher = None
+        self._mode = "off"
+
+    async def _start_webhook(self) -> None:
+        assert self._bot is not None and self._dispatcher is not None
+        try:
+            await self._bot.set_webhook(
+                url=settings.TG_WEBHOOK_URL,
+                secret_token=settings.TG_WEBHOOK_SECRET,
+                allowed_updates=self._dispatcher.resolve_used_update_types(),
+                drop_pending_updates=True,
+            )
+        except TelegramAPIError:
+            log.exception("tg_webhook_register_failed", url=settings.TG_WEBHOOK_URL)
+            with contextlib.suppress(Exception):
+                await self._bot.session.close()
+            self._bot = None
+            self._dispatcher = None
+            return
+        self._mode = "webhook"
+        log.info(
+            "tg_bot_started",
+            mode="webhook",
+            url=settings.TG_WEBHOOK_URL,
+            admin_user_ids=settings.TG_ADMIN_USER_IDS,
+            stt_enabled=self._stt.enabled,
+        )
+
+    async def _start_polling(self) -> None:
+        assert self._bot is not None and self._dispatcher is not None
+        # Drop any leftover webhook config so Telegram переключиться на polling.
+        with contextlib.suppress(Exception):
+            await self._bot.delete_webhook(drop_pending_updates=False)
+        self._polling = PollingMode(self._bot, self._dispatcher)
+        await self._polling.start()
+        self._mode = "polling"
+        log.info(
+            "tg_bot_started",
+            mode=self._mode,
+            owner=self._polling.is_owner,
+            admin_user_ids=settings.TG_ADMIN_USER_IDS,
+            stt_enabled=self._stt.enabled,
+        )
+
+    async def _register_bot_commands(self) -> None:
+        assert self._bot is not None
         with contextlib.suppress(Exception):
             base_commands = [
                 BotCommand(command="new", description="Новий thread (скинути контекст)"),
                 BotCommand(command="stop", description="Зупинити поточну відповідь"),
                 BotCommand(command="reset", description="Закрити сесію"),
             ]
-            await bot.set_my_commands(base_commands)
+            await self._bot.set_my_commands(base_commands)
             admin_commands = [
                 *base_commands,
                 BotCommand(command="codex_usage", description="Codex ліміти"),
             ]
             for admin_id in settings.TG_ADMIN_USER_IDS:
-                await bot.set_my_commands(
+                await self._bot.set_my_commands(
                     admin_commands,
                     scope=BotCommandScopeChat(chat_id=admin_id),
                 )
-
-        dispatcher = self._build_dispatcher()
-        self._dispatcher = dispatcher
-        self._polling_task = asyncio.create_task(
-            dispatcher.start_polling(
-                bot,
-                handle_signals=False,
-                drop_pending_updates=True,
-            ),
-            name="tg_polling",
-        )
-        self._polling_task.add_done_callback(self._on_polling_done)
-        self._lock_renew_task = asyncio.create_task(
-            self._renew_polling_lock(),
-            name="tg_polling_lock_renew",
-        )
-        log.info(
-            "tg_bot_started",
-            admin_user_ids=settings.TG_ADMIN_USER_IDS,
-            stt_enabled=self._stt.enabled,
-        )
-
-    async def interrupt_active_turns(self) -> int:
-        return await self._sessions.interrupt_all_turns()
-
-    async def stop(self) -> None:
-        if self._lock_renew_task is not None:
-            self._lock_renew_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._lock_renew_task
-            self._lock_renew_task = None
-        if self._dispatcher is not None:
-            with contextlib.suppress(Exception):
-                await self._dispatcher.stop_polling()
-        if self._polling_task is not None:
-            self._polling_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._polling_task
-            self._polling_task = None
-        if self._bot is not None:
-            with contextlib.suppress(Exception):
-                await self._bot.session.close()
-            self._bot = None
-        self._dispatcher = None
-        await self._release_polling_lock()
 
     def _build_dispatcher(self) -> Dispatcher:
         dispatcher = Dispatcher()
@@ -148,69 +167,6 @@ class TGBotService:
         dispatcher.message.register(self._handlers.on_incoming, incoming_filter)
         dispatcher.callback_query.register(self._handlers.on_callback, F.data)
         return dispatcher
-
-    @staticmethod
-    def _on_polling_done(task: asyncio.Task) -> None:
-        # Done-callback бачить будь-яку експенцію з полінг-таску — лог + drop,
-        # бо повторний raise тут летить у asyncio default handler.
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            return
-        except Exception:  # noqa: BLE001 — done-callback backstop
-            log.exception("tg_polling_failed")
-
-    async def _acquire_polling_lock(self) -> bool:
-        token = f"{os.getpid()}:{uuid4()}"
-        ttl = settings.TG_POLLING_LOCK_TTL_SECONDS
-        try:
-            acquired = await cache.set(_TG_POLLING_LOCK_KEY, token, nx=True, ex=ttl)
-        except RedisError:
-            log.exception("tg_polling_lock_acquire_failed")
-            return False
-        if not acquired:
-            return False
-        self._lock_token = token
-        log.info("tg_polling_lock_acquired", ttl=ttl)
-        return True
-
-    async def _renew_polling_lock(self) -> None:
-        ttl = settings.TG_POLLING_LOCK_TTL_SECONDS
-        interval = max(1.0, ttl / 3)
-        while True:
-            await asyncio.sleep(interval)
-            token = self._lock_token
-            if token is None:
-                return
-            try:
-                renewed = await cast(
-                    "Awaitable[Any]",
-                    cache.eval(_RENEW_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token, ttl),
-                )
-                if not renewed:
-                    log.error("tg_polling_lock_lost")
-                    if self._dispatcher is not None:
-                        with contextlib.suppress(Exception):
-                            await self._dispatcher.stop_polling()
-                    return
-            except RedisError:
-                log.exception("tg_polling_lock_renew_failed")
-                if self._dispatcher is not None:
-                    with contextlib.suppress(Exception):
-                        await self._dispatcher.stop_polling()
-                return
-
-    async def _release_polling_lock(self) -> None:
-        token = self._lock_token
-        self._lock_token = None
-        if token is None:
-            return
-        with contextlib.suppress(Exception):
-            await cast(
-                "Awaitable[Any]",
-                cache.eval(_RELEASE_LOCK_SCRIPT, 1, _TG_POLLING_LOCK_KEY, token),
-            )
-        log.info("tg_polling_lock_released")
 
 
 tg_bot_service = TGBotService()

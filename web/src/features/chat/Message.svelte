@@ -26,6 +26,7 @@
 
   // protobuf-es v2 — google.protobuf.Struct рендериться як plain JsonObject, не клас.
   const metaJson = $derived(message.meta as Record<string, unknown> | undefined);
+  const isSteered = $derived(metaJson?.steered === true);
   const uploadIds = $derived.by((): number[] => idsFromMeta(metaJson?.upload_ids));
   const audioUploadIds = $derived.by((): number[] =>
     idsFromMeta(metaJson?.audio_upload_ids)
@@ -95,6 +96,14 @@
   >
     <div class="mb-1.5 flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
       <span class="font-medium">{isUser ? "You" : "Codex"}</span>
+      {#if isSteered}
+        <span
+          class="rounded-full border border-[oklch(70%_0.16_230/0.45)] bg-[oklch(64%_0.16_230/0.18)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-user)]"
+          title="Sent into the running response"
+        >
+          steered
+        </span>
+      {/if}
       {#if message.createdAt}
         <span>·</span>
         <span>{formatTime(message.createdAt)}</span>

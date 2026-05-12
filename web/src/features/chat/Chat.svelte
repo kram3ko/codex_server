@@ -18,7 +18,7 @@
   let chats = $state<Chat[]>([]);
   let selected = $state<Chat | null>(null);
   let messages = $state<ChatMessage[]>([]);
-  let draft = $state<ChatMessage | null>(null);
+  let streamingClientId = $state<string | null>(null);
   let tools = $state<ToolEvent[]>([]);
   let attachments = $state<ChatAttachment[]>([]);
   let loading = $state(false);
@@ -40,10 +40,24 @@
   });
 
   const typer = createTypewriter();
-  const liveDraft = $derived(draft ? create(MessageSchema, { ...draft, text: typer.displayed }) : null);
 
-  async function loadChats() {
-    loading = true;
+  function clientIdOf(message: ChatMessage): string | undefined {
+    const meta = message.meta as Record<string, unknown> | undefined;
+    const cid = meta?.client_id;
+    return typeof cid === "string" ? cid : undefined;
+  }
+
+  const displayMessages = $derived.by((): ChatMessage[] => {
+    if (!streamingClientId) return messages;
+    return messages.map((m) =>
+      clientIdOf(m) === streamingClientId
+        ? create(MessageSchema, { ...m, text: typer.displayed })
+        : m
+    );
+  });
+
+  async function loadChats(silent = false) {
+    if (!silent) loading = true;
     error = "";
     try {
       const response = await chatClient.listChats({ pagination: { limit: 100 } });
@@ -60,7 +74,7 @@
 
   async function loadChatMessages(chat: Chat) {
     selected = chat;
-    draft = null;
+    streamingClientId = null;
     const response = await messageClient.listMessages({
       chatId: chat.id,
       pagination: { limit: 250 }
@@ -74,7 +88,7 @@
     const wasBusy = busy;
     activeTurnId += 1;
     busy = false;
-    draft = null;
+    streamingClientId = null;
     draftStartedAt = undefined;
     typer.reset();
     tools = [];
@@ -100,9 +114,20 @@
           id: BigInt(Date.now()),
           chatId: selected.id,
           role: 1,
-          text
+          text,
+          meta: { steered: true }
         });
-        messages = [...messages, userMessage];
+        // Steered user message went INTO the running response — insert it
+        // ABOVE the streaming assistant bubble so the visual order matches
+        // the semantics ("user added context → assistant is responding to all").
+        const streamIdx = streamingClientId
+          ? messages.findIndex((m) => clientIdOf(m) === streamingClientId)
+          : -1;
+        if (streamIdx >= 0) {
+          messages = [...messages.slice(0, streamIdx), userMessage, ...messages.slice(streamIdx)];
+        } else {
+          messages = [...messages, userMessage];
+        }
         return;
       }
       flashInfo("Turn finished — message sent as new turn");
@@ -117,29 +142,33 @@
     attachments = [];
     typer.reset();
     draftStartedAt = Date.now();
-    const metaJson: { upload_ids?: number[]; audio_upload_ids?: number[] } = {};
-    if (imageIds.length) metaJson.upload_ids = imageIds.map((id) => Number(id));
-    if (audioIds.length) metaJson.audio_upload_ids = audioIds.map((id) => Number(id));
+    const userMetaJson: { upload_ids?: number[]; audio_upload_ids?: number[] } = {};
+    if (imageIds.length) userMetaJson.upload_ids = imageIds.map((id) => Number(id));
+    if (audioIds.length) userMetaJson.audio_upload_ids = audioIds.map((id) => Number(id));
     const userMessage = create(MessageSchema, {
       id: BigInt(Date.now()),
       chatId: selected?.id ?? 0n,
       role: 1,
       text,
-      meta: Object.keys(metaJson).length ? metaJson : undefined
+      meta: Object.keys(userMetaJson).length ? userMetaJson : undefined
     });
-    messages = [...messages, userMessage];
-    draft = create(MessageSchema, {
-      id: BigInt(Date.now() + 1),
+    const clientId = crypto.randomUUID();
+    streamingClientId = clientId;
+    const streamingPlaceholder = create(MessageSchema, {
+      id: -BigInt(Date.now()),
       chatId: selected?.id ?? 0n,
       role: 2,
-      text: ""
+      text: "",
+      meta: { client_id: clientId }
     });
+    messages = [...messages, userMessage, streamingPlaceholder];
 
     try {
       const stream = chatClient.runTurn({
         chatId: selected?.id,
         text,
-        uploadIds
+        uploadIds,
+        clientId
       });
       for await (const event of stream) {
         if (turnId !== activeTurnId) {
@@ -201,23 +230,26 @@
               }
             }
             await typer.drained();
-            if (draft) {
-              messages = [...messages, create(MessageSchema, { ...draft, text: typer.displayed })];
+            const persisted = done.message;
+            if (persisted) {
+              // ID swap: streaming placeholder → real DB message by client_id.
+              // Same key (client_id) keeps DOM instance stable, no remount.
+              messages = messages.map((m) =>
+                clientIdOf(m) === clientId ? persisted : m
+              );
+            } else {
+              messages = messages.map((m) =>
+                clientIdOf(m) === clientId
+                  ? create(MessageSchema, { ...m, text: typer.displayed })
+                  : m
+              );
             }
-            draft = null;
+            streamingClientId = null;
             draftStartedAt = undefined;
             typer.reset();
-            await loadChats();
-            if (done.chatId) {
-              const current = chats.find((chat) => chat.id === done.chatId);
-              // Auto-refresh after server persists turn — drop transient
-              // tool/attachment state; historical upload_ids own rendering.
-              if (current) {
-                await loadChatMessages(current);
-                tools = [];
-                attachments = [];
-              }
-            }
+            tools = [];
+            attachments = [];
+            void loadChats(true);
             break;
           }
           case "error":
@@ -225,7 +257,9 @@
               break;
             }
             error = event.kind.value.detail || event.kind.value.code;
-            draft = null;
+            // Drop streaming placeholder on error.
+            messages = messages.filter((m) => clientIdOf(m) !== clientId);
+            streamingClientId = null;
             break;
         }
         await tick();
@@ -233,7 +267,8 @@
     } catch (exc) {
       if (turnId === activeTurnId) {
         error = exc instanceof Error ? exc.message : "Turn failed";
-        draft = null;
+        messages = messages.filter((m) => clientIdOf(m) !== clientId);
+        streamingClientId = null;
       }
     } finally {
       if (turnId === activeTurnId) {
@@ -247,15 +282,20 @@
       return;
     }
     activeTurnId += 1;
-    // Snapshot whatever the model already streamed so the user sees the
-    // partial reply instead of an empty hole. Server-side persistence is
-    // a separate concern (TURN_INTERRUPTED is logged, partial text isn't
-    // saved yet).
-    if (draft && typer.displayed) {
-      messages = [...messages, create(MessageSchema, { ...draft, text: typer.displayed })];
+    // Snapshot partial streamed text into committed message so user sees the
+    // partial reply instead of empty hole. Same client_id key keeps DOM stable.
+    const snapshot = typer.displayed;
+    if (streamingClientId && snapshot) {
+      const cid = streamingClientId;
+      messages = messages.map((m) =>
+        clientIdOf(m) === cid ? create(MessageSchema, { ...m, text: snapshot }) : m
+      );
+    } else if (streamingClientId) {
+      const cid = streamingClientId;
+      messages = messages.filter((m) => clientIdOf(m) !== cid);
     }
+    streamingClientId = null;
     typer.reset();
-    draft = null;
     draftStartedAt = undefined;
     await chatClient.interruptTurn({ chatId: selected.id });
     busy = false;
@@ -287,7 +327,7 @@
         <Spinner />
       </div>
     {:else}
-      <MessageList {messages} draft={liveDraft} {tools} {attachments} {draftStartedAt} />
+      <MessageList messages={displayMessages} streamingClientId={streamingClientId} {tools} {attachments} {draftStartedAt} />
       <Composer {busy} onsend={send} oninterrupt={interrupt} />
     {/if}
   </section>
