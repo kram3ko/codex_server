@@ -30,25 +30,17 @@ class Upload(_message.Message):
     created_at: _timestamp_pb2.Timestamp
     def __init__(self, id: _Optional[int] = ..., chat_id: _Optional[int] = ..., filename: _Optional[str] = ..., mime: _Optional[str] = ..., size: _Optional[int] = ..., s3_path: _Optional[str] = ..., extracted_text: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
-class UploadChunk(_message.Message):
-    __slots__ = ("init", "data")
-    INIT_FIELD_NUMBER: _ClassVar[int]
-    DATA_FIELD_NUMBER: _ClassVar[int]
-    init: UploadInit
-    data: bytes
-    def __init__(self, init: _Optional[_Union[UploadInit, _Mapping]] = ..., data: _Optional[bytes] = ...) -> None: ...
-
-class UploadInit(_message.Message):
-    __slots__ = ("chat_id", "filename", "mime", "expected_size")
+class UploadOnceRequest(_message.Message):
+    __slots__ = ("chat_id", "filename", "mime", "data")
     CHAT_ID_FIELD_NUMBER: _ClassVar[int]
     FILENAME_FIELD_NUMBER: _ClassVar[int]
     MIME_FIELD_NUMBER: _ClassVar[int]
-    EXPECTED_SIZE_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
     chat_id: int
     filename: str
     mime: str
-    expected_size: int
-    def __init__(self, chat_id: _Optional[int] = ..., filename: _Optional[str] = ..., mime: _Optional[str] = ..., expected_size: _Optional[int] = ...) -> None: ...
+    data: bytes
+    def __init__(self, chat_id: _Optional[int] = ..., filename: _Optional[str] = ..., mime: _Optional[str] = ..., data: _Optional[bytes] = ...) -> None: ...
 
 class UploadResponse(_message.Message):
     __slots__ = ("upload", "presigned_url", "presigned_ttl_seconds")
@@ -61,14 +53,12 @@ class UploadResponse(_message.Message):
     def __init__(self, upload: _Optional[_Union[Upload, _Mapping]] = ..., presigned_url: _Optional[str] = ..., presigned_ttl_seconds: _Optional[int] = ...) -> None: ...
 
 class GetPresignedRequest(_message.Message):
-    __slots__ = ("upload_id", "source", "ttl_seconds")
+    __slots__ = ("upload_id", "ttl_seconds")
     UPLOAD_ID_FIELD_NUMBER: _ClassVar[int]
-    SOURCE_FIELD_NUMBER: _ClassVar[int]
     TTL_SECONDS_FIELD_NUMBER: _ClassVar[int]
     upload_id: int
-    source: str
     ttl_seconds: int
-    def __init__(self, upload_id: _Optional[int] = ..., source: _Optional[str] = ..., ttl_seconds: _Optional[int] = ...) -> None: ...
+    def __init__(self, upload_id: _Optional[int] = ..., ttl_seconds: _Optional[int] = ...) -> None: ...
 
 class GetPresignedResponse(_message.Message):
     __slots__ = ("url", "expires_at")
@@ -97,3 +87,15 @@ class DeleteUploadRequest(_message.Message):
     UPLOAD_ID_FIELD_NUMBER: _ClassVar[int]
     upload_id: int
     def __init__(self, upload_id: _Optional[int] = ...) -> None: ...
+
+class TranscribeUploadRequest(_message.Message):
+    __slots__ = ("upload_id",)
+    UPLOAD_ID_FIELD_NUMBER: _ClassVar[int]
+    upload_id: int
+    def __init__(self, upload_id: _Optional[int] = ...) -> None: ...
+
+class TranscribeUploadResponse(_message.Message):
+    __slots__ = ("text",)
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    text: str
+    def __init__(self, text: _Optional[str] = ...) -> None: ...

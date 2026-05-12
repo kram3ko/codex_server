@@ -1,10 +1,10 @@
-import type { Timestamp } from "@bufbuild/protobuf";
+import { timestampDate, type Timestamp } from "@bufbuild/protobuf/wkt";
 
 export function formatTime(timestamp?: Timestamp): string {
   if (!timestamp) {
     return "";
   }
-  return timestamp.toDate().toLocaleString(undefined, {
+  return timestampDate(timestamp).toLocaleString(undefined, {
     month: "short",
     day: "2-digit",
     hour: "2-digit",

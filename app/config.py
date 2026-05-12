@@ -1,5 +1,8 @@
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 32 bytes = HMAC-SHA256 block size, RFC 7518 §3.2 рекомендований мінімум.
+_JWT_SECRET_MIN_LEN = 32
 
 
 class Settings(BaseSettings):
@@ -68,11 +71,14 @@ class Settings(BaseSettings):
     WEB_TURN_TIMEOUT_SECONDS: float = 300.0
     TG_POLLING_LOCK_TTL_SECONDS: int = 60
 
-    # --- Auth (single-user JWT) ---
-    # WEB_API_TOKEN — "пароль", який клієнт обмінює на короткоживучий JWT
-    # через POST /auth/token. JWT_SECRET — окремий ключ для підпису токена.
-    WEB_API_TOKEN: str = ""
-    JWT_SECRET: str = "change-me-please"
+    # --- Auth (email + password → JWT) ---
+    # ADMIN_EMAIL/ADMIN_PASSWORD — bootstrap акаунт: на startup створюється
+    # юзер з таким email і `password_hash = argon2id(ADMIN_PASSWORD)`. Якщо
+    # ADMIN_PASSWORD змінюється у .env — хеш у БД переписується. JWT_SECRET —
+    # ключ для підпису access-токена.
+    ADMIN_EMAIL: str = ""
+    ADMIN_PASSWORD: str = ""
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_TTL_HOURS: int = 24
 
@@ -82,17 +88,38 @@ class Settings(BaseSettings):
     # лінія захисту. Empty = MCP routes відкриті, не для prod.
     MCP_CALLBACK_TOKEN: str = ""
 
+    # --- Bugsink (Sentry-SDK-compatible error tracker) ---
+    # Empty SENTRY_DSN → sentry_sdk.init no-op. BUGSINK_AUTH_TOKEN — Bearer
+    # для codex-server → Bugsink REST API (юзають MCP tools `list_errors`/
+    # `get_error`).
+    SENTRY_DSN: str = ""
+    SENTRY_RELEASE: str = ""
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+    BUGSINK_INTERNAL_URL: str = "http://bugsink:8000"
+    BUGSINK_AUTH_TOKEN: str = ""
+
     @field_validator("TG_ADMIN_USER_IDS", mode="before")
     @classmethod
     def _split_user_ids(cls, value: object) -> object:
         if isinstance(value, int):
             return {value}
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return set()
-            return {int(part) for part in stripped.split(",") if part.strip()}
-        return value
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            return set()
+        return {int(part) for part in stripped.split(",") if part.strip()}
+
+    @model_validator(mode="after")
+    def _validate_jwt_secret(self) -> Settings:
+        # Fail-fast щоб порожнє/коротке значення з .env не підписувало токени
+        # weak ключем. Generate via: secrets.token_urlsafe(64).
+        if len(self.JWT_SECRET.strip()) < _JWT_SECRET_MIN_LEN:
+            raise ValueError(
+                f"JWT_SECRET must be ≥{_JWT_SECRET_MIN_LEN} chars (was "
+                f"{len(self.JWT_SECRET.strip())}); set in .env"
+            )
+        return self
 
 
 settings = Settings()

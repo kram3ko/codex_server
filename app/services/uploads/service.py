@@ -16,6 +16,7 @@ import tempfile
 import uuid
 from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
+from typing import BinaryIO
 
 import structlog
 from sqlalchemy import select
@@ -36,14 +37,21 @@ class UploadService:
     async def persist_attachments(
         self,
         session: AsyncSession,
+        *,
         chat_id: int,
+        user_id: int,
         attachments: Iterable[Attachment],
     ) -> list[int]:
         """Upload each trusted-local attachment to S3, return new upload ids."""
         upload_ids: list[int] = []
         for path in self._unique_local_paths(attachments):
             try:
-                upload = await self._persist_local_file(session, chat_id, path)
+                upload = await self._persist_local_file(
+                    session,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    source=path,
+                )
             except Exception as exc:  # noqa: BLE001 — окремий файл не валить турн
                 log.warning(
                     "uploads_persist_failed",
@@ -59,6 +67,7 @@ class UploadService:
         self,
         session: AsyncSession,
         *,
+        user_id: int,
         chat_id: int | None,
         filename: str,
         mime: str,
@@ -77,33 +86,54 @@ class UploadService:
         try:
             return await self._persist_local_file(
                 session,
-                chat_id,
-                tmp_path,
+                chat_id=chat_id,
+                user_id=user_id,
+                source=tmp_path,
                 filename=filename,
                 mime=mime,
             )
         finally:
             tmp_path.unlink(missing_ok=True)
 
-    async def get(self, session: AsyncSession, upload_id: int) -> Upload | None:
-        return await session.get(Upload, upload_id)
+    async def get(
+        self,
+        session: AsyncSession,
+        upload_id: int,
+        *,
+        user_id: int,
+    ) -> Upload | None:
+        stmt = select(Upload).where(Upload.id == upload_id, Upload.user_id == user_id)
+        return await session.scalar(stmt)
 
     async def list(
         self,
         session: AsyncSession,
         *,
+        user_id: int,
         chat_id: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Upload]:
-        stmt = select(Upload).order_by(Upload.created_at.desc()).limit(limit).offset(offset)
+        stmt = (
+            select(Upload)
+            .where(Upload.user_id == user_id)
+            .order_by(Upload.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         if chat_id is not None:
             stmt = stmt.where(Upload.chat_id == chat_id)
         rows = await session.execute(stmt)
         return list(rows.scalars())
 
-    async def delete(self, session: AsyncSession, upload_id: int) -> bool:
-        upload = await session.get(Upload, upload_id)
+    async def delete(
+        self,
+        session: AsyncSession,
+        upload_id: int,
+        *,
+        user_id: int,
+    ) -> bool:
+        upload = await self.get(session, upload_id, user_id=user_id)
         if upload is None:
             return False
         key = _key_from_s3_path(upload.s3_path)
@@ -120,31 +150,26 @@ class UploadService:
         upload: Upload,
         *,
         ttl_s: int = _DEFAULT_PRESIGNED_TTL_S,
+        public: bool = True,
     ) -> str:
         key = _key_from_s3_path(upload.s3_path)
         if key is None:
             raise ValueError(f"upload {upload.id} has non-S3 path: {upload.s3_path!r}")
-        return await storage_service.presigned_url(key, expires_s=ttl_s)
+        return await storage_service.presigned_url(key, expires_s=ttl_s, public=public)
 
-    async def presigned_for_source(
-        self,
-        source: str,
-        *,
-        ttl_s: int = _DEFAULT_PRESIGNED_TTL_S,
-    ) -> str:
-        """Accept `s3://bucket/key`, голий key, або повну public URL.
-        Public URL повертає сам себе — клієнт відкриє напряму."""
-        if source.startswith(("http://", "https://")):
-            return source
-        key = _key_from_s3_path(source) or source
-        return await storage_service.presigned_url(key, expires_s=ttl_s)
+    async def download_to_stream(self, upload: Upload, dest: BinaryIO) -> None:
+        key = _key_from_s3_path(upload.s3_path)
+        if key is None:
+            raise ValueError(f"upload {upload.id} has non-S3 path: {upload.s3_path!r}")
+        dest.write(await storage_service.download_bytes(key))
 
     @staticmethod
     async def _persist_local_file(
         session: AsyncSession,
-        chat_id: int | None,
-        source: Path,
         *,
+        chat_id: int | None,
+        user_id: int,
+        source: Path,
         filename: str | None = None,
         mime: str | None = None,
     ) -> Upload:
@@ -153,11 +178,12 @@ class UploadService:
         resolved_mime = (
             mime or mimetypes.guess_type(resolved_filename)[0] or "application/octet-stream"
         )
-        chat_segment = str(chat_id) if chat_id is not None else "shared"
+        chat_segment = str(chat_id) if chat_id is not None else f"users/{user_id}"
         key = f"chats/{chat_segment}/uploads/{uuid.uuid4().hex}{Path(resolved_filename).suffix}"
         s3_path = await storage_service.upload_file(key, source, resolved_mime)
 
         upload = Upload(
+            user_id=user_id,
             chat_id=chat_id,
             filename=resolved_filename,
             mime=resolved_mime,
@@ -168,6 +194,7 @@ class UploadService:
         await session.flush()
         log.info(
             "uploads_persisted",
+            user_id=user_id,
             chat_id=chat_id,
             upload_id=upload.id,
             key=key,

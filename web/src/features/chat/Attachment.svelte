@@ -2,29 +2,13 @@
   import { FileDown } from "lucide-svelte";
 
   import type { Attachment as ChatAttachment } from "../../gen/codex/v1/chat_pb";
-  import { uploadsClient } from "../../shared/lib/clients";
 
+  // Streamed ToolResult attachments — server rewrites image_generation
+  // file paths to `/generated/<hash>.png` (FastAPI StaticFiles); others
+  // arrive as http(s) URLs. Both render directly without presigned hop.
   let { attachment }: { attachment: ChatAttachment } = $props();
-  let url = $state("");
-  let failed = $state(false);
-
-  $effect(() => {
-    failed = false;
-    url = attachment.source;
-
-    // Public URL (http(s) or same-origin /path) — render directly.
-    if (/^(https?:\/\/|\/)/.test(attachment.source)) {
-      return;
-    }
-    uploadsClient
-      .getPresigned({ target: { case: "source", value: attachment.source } })
-      .then((response) => {
-        url = response.url;
-      })
-      .catch(() => {
-        failed = true;
-      });
-  });
+  const url = $derived(attachment.source);
+  const failed = $derived(!/^(https?:\/\/|\/)/.test(attachment.source));
 </script>
 
 {#if failed}

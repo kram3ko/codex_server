@@ -209,7 +209,7 @@ class ChatSessionStore[K, B](ABC):
     async def _safe_resolve(future: asyncio.Future[ChatSession]) -> ChatSession | None:
         try:
             return await future
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — future несе будь-яку failure від setter'а
             log.warning("chat_session_resolve_failed", error=str(exc))
             return None
 

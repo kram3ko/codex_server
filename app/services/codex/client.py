@@ -33,6 +33,7 @@ from app.services.codex.events import (
 from app.services.codex.events import (
     translate_notification as _translate,
 )
+from app.services.codex.routing import TurnRouter
 from app.services.codex.transport import AppServerClient, AppServerError
 
 log = structlog.get_logger(__name__)
@@ -75,6 +76,7 @@ class CodexClient:
         self._sandbox = sandbox
         self._reasoning_effort = reasoning_effort
         self._transport = AppServerClient(url=url, request_timeout=request_timeout)
+        self._router = TurnRouter(self._transport)
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
         self._thread_resumed_or_started = False
@@ -153,19 +155,21 @@ class CodexClient:
             yield result
             return
 
-        self._current_turn_id = _extract_turn_id(result)
+        turn_id = _extract_turn_id(result)
+        self._current_turn_id = turn_id
         accumulated = ""
 
-        async for note in self._transport.notifications():
-            event = _translate(note, accumulated)
-            if event is None:
-                continue
-            if isinstance(event, TokenEvent):
-                accumulated += event.delta
-            yield event
-            if isinstance(event, DoneEvent):
-                self._current_turn_id = None
-                return
+        async with self._router.subscribe_turn(turn_id) as notes:
+            async for note in notes:
+                event = _translate(note, accumulated)
+                if event is None:
+                    continue
+                if isinstance(event, TokenEvent):
+                    accumulated += event.delta
+                yield event
+                if isinstance(event, DoneEvent):
+                    self._current_turn_id = None
+                    return
 
     async def interrupt(self) -> None:
         turn_id = self._current_turn_id
@@ -294,7 +298,10 @@ class CodexClient:
         payload: list[dict[str, Any]] = [{"type": "text", "text": text}]
         for attachment in attachments:
             parsed = urlparse(attachment)
-            if parsed.scheme in {"http", "https"}:
+            # `data:` URIs carry bytes inline — OpenAI Vision accepts them
+            # directly. Regular http(s) are forwarded as-is (caller must
+            # ensure the URL is reachable from OpenAI, not just locally).
+            if parsed.scheme in {"http", "https", "data"}:
                 payload.append({"type": "image", "url": attachment})
             else:
                 payload.append({"type": "localImage", "path": attachment})
@@ -336,7 +343,7 @@ class CodexClient:
             return
         try:
             await self._on_thread_change(new_thread_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — user-supplied callback, isolate
             log.warning(
                 "codex_on_thread_change_failed",
                 new=new_thread_id,

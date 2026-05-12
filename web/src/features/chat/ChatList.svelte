@@ -3,6 +3,7 @@
 
   import type { Chat } from "../../gen/codex/v1/chat_pb";
   import { formatTime } from "../../shared/lib/time";
+  import Usage from "./Usage.svelte";
 
   let {
     chats,
@@ -63,4 +64,6 @@
       {/each}
     {/if}
   </div>
+
+  <Usage />
 </aside>

@@ -1,12 +1,12 @@
-import { createPromiseClient } from "@connectrpc/connect";
+import { createClient } from "@connectrpc/connect";
 
-import { ChatService } from "../../gen/codex/v1/chat_connect";
-import { MessageService } from "../../gen/codex/v1/message_connect";
-import { NotesService } from "../../gen/codex/v1/notes_connect";
-import { UploadsService } from "../../gen/codex/v1/uploads_connect";
+import { ChatService } from "../../gen/codex/v1/chat_pb";
+import { MessageService } from "../../gen/codex/v1/message_pb";
+import { NotesService } from "../../gen/codex/v1/notes_pb";
+import { UploadsService } from "../../gen/codex/v1/uploads_pb";
 import { transport } from "./transport";
 
-export const chatClient = createPromiseClient(ChatService, transport);
-export const messageClient = createPromiseClient(MessageService, transport);
-export const notesClient = createPromiseClient(NotesService, transport);
-export const uploadsClient = createPromiseClient(UploadsService, transport);
+export const chatClient = createClient(ChatService, transport);
+export const messageClient = createClient(MessageService, transport);
+export const notesClient = createClient(NotesService, transport);
+export const uploadsClient = createClient(UploadsService, transport);

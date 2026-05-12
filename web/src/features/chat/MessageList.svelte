@@ -4,6 +4,7 @@
   import type { Attachment as ChatAttachment } from "../../gen/codex/v1/chat_pb";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import Attachment from "./Attachment.svelte";
+  import CompletedTools from "./CompletedTools.svelte";
   import Message from "./Message.svelte";
   import ToolCall, { type ToolEvent } from "./ToolCall.svelte";
 
@@ -23,17 +24,38 @@
 
   let container = $state<HTMLDivElement | null>(null);
   let stickToBottom = $state(true);
-  let showCompleted = $state(false);
 
   const runningTools = $derived(tools.filter((t) => t.status === "running"));
   const completedTools = $derived(tools.filter((t) => t.status !== "running"));
+  const currentToolName = $derived(runningTools[0]?.name);
+
+
+
+  // Напрямок скролу — найнадійніший signal: user-up → unstick; back-to-bottom
+  // → re-stick. Programmatic `scrollTop = scrollHeight` завжди йде ВНИЗ, тож
+  // воно нічого не ламає.
+  let lastScrollTop = 0;
+  let lastMessagesLen = 0;
 
   function onscroll() {
     if (!container) return;
     const { scrollTop, scrollHeight, clientHeight } = container;
-    // <80px from bottom — вважаємо що юзер хоче бачити нові, autoscroll on
-    stickToBottom = scrollHeight - scrollTop - clientHeight < 80;
+    if (scrollTop < lastScrollTop) {
+      stickToBottom = false;
+    } else if (scrollHeight - scrollTop - clientHeight < 50) {
+      stickToBottom = true;
+    }
+    lastScrollTop = scrollTop;
   }
+
+  // Нове повідомлення в історії (юзер натиснув Send або turn finalize'нувся) —
+  // форс-stickToBottom, навіть якщо юзер до того скролив угору.
+  $effect(() => {
+    if (messages.length > lastMessagesLen) {
+      stickToBottom = true;
+    }
+    lastMessagesLen = messages.length;
+  });
 
   // Snap to bottom on any list/draft/tool/attachment change while sticking.
   $effect(() => {
@@ -48,7 +70,11 @@
   });
 </script>
 
-<div bind:this={container} {onscroll} class="min-h-0 flex-1 overflow-y-auto scroll-smooth px-5 py-4">
+<div
+  bind:this={container}
+  {onscroll}
+  class="min-h-0 flex-1 overflow-y-auto scroll-smooth px-5 py-4"
+>
   <div class="mx-auto flex max-w-5xl flex-col gap-4">
     {#each messages as message (message.id.toString())}
       <Message {message} />
@@ -59,21 +85,7 @@
         {#each runningTools as tool (tool.id)}
           <ToolCall event={tool} />
         {/each}
-        {#if completedTools.length}
-          <button
-            type="button"
-            class="flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-left text-xs text-[var(--color-text-muted)] transition hover:bg-[oklch(96%_0.01_100/0.04)]"
-            onclick={() => (showCompleted = !showCompleted)}
-          >
-            <span>{showCompleted ? "▼" : "▶"}</span>
-            <span>{completedTools.length} completed</span>
-          </button>
-          {#if showCompleted}
-            {#each completedTools as tool (tool.id)}
-              <ToolCall event={tool} />
-            {/each}
-          {/if}
-        {/if}
+        <CompletedTools tools={completedTools} />
       </div>
     {/if}
 
@@ -86,7 +98,7 @@
     {/if}
 
     {#if draft}
-      <Message message={draft} streaming startedAt={draftStartedAt} />
+      <Message message={draft} streaming startedAt={draftStartedAt} {currentToolName} />
     {/if}
   </div>
 </div>

@@ -4,19 +4,21 @@
   import { auth } from "./auth";
 
   let { onlogin }: { onlogin: () => void } = $props();
-  let token = $state("");
+  let email = $state("");
+  let password = $state("");
   let error = $state("");
   let busy = $state(false);
 
   async function submit() {
-    if (!token.trim()) {
-      error = "Token required";
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password) {
+      error = "Email and password are required";
       return;
     }
     busy = true;
     error = "";
     try {
-      await auth.login(token.trim());
+      await auth.login(trimmedEmail, password);
       onlogin();
     } catch (exc) {
       error = exc instanceof Error ? exc.message : "Login failed";
@@ -34,7 +36,7 @@
       </div>
       <div>
         <h1 class="text-lg font-semibold tracking-tight">Welcome back</h1>
-        <p class="text-sm text-[var(--color-text-muted)]">Sign in with your API token</p>
+        <p class="text-sm text-[var(--color-text-muted)]">Sign in to your Codex</p>
       </div>
     </div>
 
@@ -48,9 +50,18 @@
       <div class="glow-ring rounded-lg">
         <input
           class="h-11 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-transparent"
-          bind:value={token}
+          bind:value={email}
+          autocomplete="email"
+          placeholder="Email"
+          type="email"
+        />
+      </div>
+      <div class="glow-ring rounded-lg">
+        <input
+          class="h-11 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-transparent"
+          bind:value={password}
           autocomplete="current-password"
-          placeholder="WEB_API_TOKEN"
+          placeholder="Password"
           type="password"
         />
       </div>

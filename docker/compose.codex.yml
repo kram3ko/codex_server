@@ -8,6 +8,8 @@ services:
       dockerfile: docker/codex/Dockerfile
     container_name: codex-cli
     restart: unless-stopped
+    labels:
+      codex.watchdog: "true"
     user: "0:0"
     environment:
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
@@ -32,6 +34,8 @@ services:
       dockerfile: docker/codex/Dockerfile
     container_name: codex-cli-guest
     restart: unless-stopped
+    labels:
+      codex.watchdog: "true"
     user: "0:0"
     environment:
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}

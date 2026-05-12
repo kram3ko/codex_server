@@ -22,6 +22,7 @@ class User(Base):
         nullable=True,
         index=True,
     )
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name=ENUM_NAMES[UserRole]),

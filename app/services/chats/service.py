@@ -40,16 +40,20 @@ class ChatService:
 
     async def get_or_create_for_web(self, session: AsyncSession, user_id: int) -> Chat:
         existing = (
-            await session.execute(
-                select(Chat)
-                .where(
-                    Chat.source == ChatSource.WEB,
-                    Chat.user_id == user_id,
+            (
+                await session.execute(
+                    select(Chat)
+                    .where(
+                        Chat.source == ChatSource.WEB,
+                        Chat.user_id == user_id,
+                    )
+                    .order_by(Chat.id.asc())
+                    .limit(1)
                 )
-                .order_by(Chat.id.asc())
-                .limit(1)
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if existing is not None:
             return existing
         return await self.create_web_chat(session, user_id)

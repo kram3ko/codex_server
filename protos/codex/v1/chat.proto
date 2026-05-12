@@ -52,6 +52,11 @@ message DeleteChatRequest {
 message RunTurnRequest {
   optional int64 chat_id = 1;
   string text = 2;
+  // Attachments uploaded via UploadsService.Upload prior to this turn.
+  // Server resolves each to a presigned URL and passes to the sidecar as
+  // multimodal input alongside `text`. If any of these is audio/*, server
+  // also synthesizes a TTS reply ("voice in → voice out").
+  repeated int64 upload_ids = 3;
 }
 
 message ChatEvent {
@@ -102,6 +107,34 @@ message InterruptTurnRequest {
 
 message InterruptTurnResponse {}
 
+// Append text to the currently running turn (codex's `turn/steer` RPC).
+// If no turn is running, server returns accepted=false and the client should
+// fall back to RunTurn.
+message SteerTurnRequest {
+  int64 chat_id = 1;
+  string text = 2;
+}
+
+message SteerTurnResponse {
+  bool accepted = 1;
+}
+
+message GetCodexUsageRequest {}
+
+message UsageWindow {
+  double used_percent = 1;
+  int32 window_minutes = 2;
+  optional google.protobuf.Timestamp resets_at = 3;
+}
+
+// Sidecar may not expose `account/rateLimits/read` — in that case all fields
+// stay unset and client treats it as "no data".
+message CodexUsage {
+  optional string plan_type = 1;
+  optional UsageWindow primary = 2;
+  optional UsageWindow secondary = 3;
+}
+
 service ChatService {
   rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
   rpc GetChat(GetChatRequest) returns (Chat);
@@ -109,4 +142,6 @@ service ChatService {
   rpc DeleteChat(DeleteChatRequest) returns (Empty);
   rpc RunTurn(RunTurnRequest) returns (stream ChatEvent);
   rpc InterruptTurn(InterruptTurnRequest) returns (InterruptTurnResponse);
+  rpc SteerTurn(SteerTurnRequest) returns (SteerTurnResponse);
+  rpc GetCodexUsage(GetCodexUsageRequest) returns (CodexUsage);
 }

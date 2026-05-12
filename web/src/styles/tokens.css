@@ -9,6 +9,8 @@
 }
 
 :root {
+  --font-sans: Inter, "Noto Sans", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Cascadia Code", "SFMono-Regular", "Roboto Mono", "Segoe UI Mono", ui-monospace, Menlo, Consolas, monospace;
   --color-bg: oklch(16% 0.012 250);
   --color-surface: oklch(20% 0.014 250);
   --color-surface-2: oklch(24% 0.018 250);

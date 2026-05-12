@@ -21,6 +21,9 @@ class AuthService(Protocol):
     async def login(self, request: codex_dot_v1_dot_auth__pb2.LoginRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    async def refresh(self, request: codex_dot_v1_dot_auth__pb2.RefreshRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
 
 class AuthServiceASGIApplication(ConnectASGIApplication[AuthService]):
     def __init__(self, service: AuthService | AsyncGenerator[AuthService], *, interceptors: Iterable[Interceptor]=(), read_max_bytes: int | None = None, compressions: Iterable[Compression] | None = None, codecs: Iterable[Codec] | None = None) -> None:
@@ -36,6 +39,16 @@ class AuthServiceASGIApplication(ConnectASGIApplication[AuthService]):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=svc.login,
+                ),
+                "/codex.v1.AuthService/Refresh": Endpoint.unary(
+                    method=MethodInfo(
+                        name="Refresh",
+                        service_name="codex.v1.AuthService",
+                        input=codex_dot_v1_dot_auth__pb2.RefreshRequest,
+                        output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.refresh,
                 ),
             },
             interceptors=interceptors,
@@ -71,12 +84,34 @@ class AuthServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    async def refresh(
+        self,
+        request: codex_dot_v1_dot_auth__pb2.RefreshRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="Refresh",
+                service_name="codex.v1.AuthService",
+                input=codex_dot_v1_dot_auth__pb2.RefreshRequest,
+                output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
 
 
 
 
 class AuthServiceSync(Protocol):
     def login(self, request: codex_dot_v1_dot_auth__pb2.LoginRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def refresh(self, request: codex_dot_v1_dot_auth__pb2.RefreshRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
@@ -93,6 +128,16 @@ class AuthServiceWSGIApplication(ConnectWSGIApplication):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=service.login,
+                ),
+                "/codex.v1.AuthService/Refresh": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="Refresh",
+                        service_name="codex.v1.AuthService",
+                        input=codex_dot_v1_dot_auth__pb2.RefreshRequest,
+                        output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.refresh,
                 ),
             },
             interceptors=interceptors,
@@ -121,6 +166,26 @@ class AuthServiceClientSync(ConnectClientSync):
                 name="Login",
                 service_name="codex.v1.AuthService",
                 input=codex_dot_v1_dot_auth__pb2.LoginRequest,
+                output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def refresh(
+        self,
+        request: codex_dot_v1_dot_auth__pb2.RefreshRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="Refresh",
+                service_name="codex.v1.AuthService",
+                input=codex_dot_v1_dot_auth__pb2.RefreshRequest,
                 output=codex_dot_v1_dot_auth__pb2.LoginResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 import structlog
 from aiobotocore.session import get_session
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import settings
 from app.services.storage.base import StorageError
@@ -51,24 +52,28 @@ class S3Storage:
         log.info("s3_uploaded", bucket=self._bucket, key=key, size=source.stat().st_size)
         return f"s3://{self._bucket}/{key}"
 
-    async def presigned_url(self, key: str, expires_s: int = 3600) -> str:
+    async def presigned_url(self, key: str, expires_s: int = 3600, *, public: bool = True) -> str:
         async with self._client() as s3:
             url = await s3.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self._bucket, "Key": key},
                 ExpiresIn=expires_s,
             )
-        # Browser-reachable host: rewrite internal endpoint (docker DNS)
-        # to public one if differ. Підпис S3 v4 валідний бо включає тільки
-        # шлях/час/сігнатуру, не хост у канонічному запиті.
-        public = settings.S3_PUBLIC_ENDPOINT
-        if public and public != self._endpoint:
-            url = url.replace(self._endpoint, public, 1)
+        # Підпис S3 v4 не включає хост у канонічному запиті, тож swap безпечний.
+        public_host = settings.S3_PUBLIC_ENDPOINT
+        if public and public_host and public_host != self._endpoint:
+            url = url.replace(self._endpoint, public_host, 1)
         return url
+
+    async def download_bytes(self, key: str) -> bytes:
+        async with self._client() as s3:
+            obj = await s3.get_object(Bucket=self._bucket, Key=key)
+            async with obj["Body"] as body:
+                return await body.read()
 
     async def delete(self, key: str) -> None:
         async with self._client() as s3:
             try:
                 await s3.delete_object(Bucket=self._bucket, Key=key)
-            except Exception as exc:  # noqa: BLE001
+            except (BotoCoreError, ClientError) as exc:
                 raise StorageError(f"S3 delete failed for {key}: {exc}") from exc

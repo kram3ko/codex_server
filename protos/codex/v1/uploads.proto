@@ -20,21 +20,14 @@ message Upload {
   google.protobuf.Timestamp created_at = 8;
 }
 
-// Client-streaming chunk frame. Перший frame має `init`, наступні — `data`,
-// останній — `data` з порожнім bytes (signal end). Server тримає state per
-// stream (Connect-RPC stream context).
-message UploadChunk {
-  oneof payload {
-    UploadInit init = 1;
-    bytes data = 2;
-  }
-}
-
-message UploadInit {
+// Single-request upload — Connect-Web не підтримує client-streaming, тож
+// шлемо весь blob у одному unary запиті. Для типових pasted screenshots
+// (~kB-MB) це нормально; великі файли резерв'ємо через S3 direct upload.
+message UploadOnceRequest {
   optional int64 chat_id = 1;
   string filename = 2;
   string mime = 3;
-  int32 expected_size = 4;  // hint для valid'ації; 0 → unknown
+  bytes data = 4;
 }
 
 message UploadResponse {
@@ -43,12 +36,11 @@ message UploadResponse {
   int32 presigned_ttl_seconds = 3;
 }
 
-// Видати presigned URL для існуючого Upload (наприклад, для рендеру
-// `Attachment` у web — клієнт знає `source` з ChatEvent'а, шле сюди).
+// Видати presigned URL для існуючого Upload — клієнт знає upload_id з
+// `meta.upload_ids` чи `Attachment.upload_id` і шле сюди.
 message GetPresignedRequest {
   oneof target {
     int64 upload_id = 1;
-    string source = 2;  // S3 key чи повний URL з ChatEvent.Attachment.source
   }
   int32 ttl_seconds = 3;  // 0 → default 3600
 }
@@ -71,9 +63,21 @@ message DeleteUploadRequest {
   int64 upload_id = 1;
 }
 
+// Run STT over an audio/video upload that already lives in object storage.
+// Lets the web composer turn a mic recording into editable text before send,
+// while keeping the original blob for history replay.
+message TranscribeUploadRequest {
+  int64 upload_id = 1;
+}
+
+message TranscribeUploadResponse {
+  string text = 1;
+}
+
 service UploadsService {
-  rpc Upload(stream UploadChunk) returns (UploadResponse);
+  rpc UploadOnce(UploadOnceRequest) returns (UploadResponse);
   rpc GetPresigned(GetPresignedRequest) returns (GetPresignedResponse);
   rpc ListUploads(ListUploadsRequest) returns (ListUploadsResponse);
   rpc DeleteUpload(DeleteUploadRequest) returns (Empty);
+  rpc TranscribeUpload(TranscribeUploadRequest) returns (TranscribeUploadResponse);
 }

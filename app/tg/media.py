@@ -2,83 +2,114 @@
 
 Supports text, photos, image documents, voice/audio transcription, and
 video notes (кружечки) — їх аудіодоріжка транскрибується як voice.
+
+Media bytes — і зображення, і голос — стрімяться в пам'яті без disk-buffer:
+з aiogram у `BytesIO`, далі паралельно у MinIO (для історії) та у відповідний
+канал (codex `data:` URI / STT). У БД зберігаємо тільки `upload_id`.
 """
 
-import contextlib
+import base64
 import mimetypes
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import structlog
 from aiogram.types import Message
 
-from app.config import settings
+from app.db.base import SessionLocal
 from app.services.stt.base import STTBackend
+from app.services.uploads.default import upload_service
 
 log = structlog.get_logger(__name__)
-
-TG_UPLOADS_DIR = Path(settings.CODEX_CWD) / "tg_uploads"
 
 
 @dataclass(slots=True)
 class PreparedTurn:
     text: str
-    attachments: tuple[str, ...]
-    cleanup_paths: tuple[str, ...]
+    attachments: tuple[str, ...]  # data: URIs forwarded to codex (images only)
+    upload_ids: tuple[int, ...]  # MinIO refs persisted in message.meta
     had_voice_input: bool = False
 
 
-async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTurn:
+async def prepare_turn(
+    message: Message,
+    transcriber: STTBackend,
+    *,
+    db_user_id: int,
+    db_chat_id: int,
+) -> PreparedTurn:
     if message.chat is None:
-        return PreparedTurn(text="", attachments=(), cleanup_paths=())
-
-    TG_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+        return PreparedTurn(text="", attachments=(), upload_ids=())
 
     text = (message.caption or message.text or "").strip()
     attachments: list[str] = []
-    cleanup_paths: list[str] = []
+    upload_ids: list[int] = []
     had_voice_input = message.voice is not None or message.video_note is not None
 
-    try:
-        if message.photo:
-            image_path = await _download_media(message, message.photo[-1], ".jpg")
-            attachments.append(str(image_path))
-            cleanup_paths.append(str(image_path))
+    if message.photo:
+        data_url, upload_id = await _save_image(
+            message, message.photo[-1], "image/jpeg", db_user_id, db_chat_id
+        )
+        attachments.append(data_url)
+        upload_ids.append(upload_id)
 
-        document = message.document
-        if document is not None:
-            doc_text, doc_attachment = await _prepare_document(message, document, transcriber)
-            text = _merge_text(text, doc_text)
-            if doc_attachment is not None:
-                attachments.append(str(doc_attachment))
-                cleanup_paths.append(str(doc_attachment))
+    document = message.document
+    if document is not None:
+        doc_text, doc_attachment, doc_upload_id = await _prepare_document(
+            message, document, transcriber, db_user_id, db_chat_id
+        )
+        text = _merge_text(text, doc_text)
+        if doc_attachment is not None:
+            attachments.append(doc_attachment)
+        if doc_upload_id is not None:
+            upload_ids.append(doc_upload_id)
 
-        if message.voice:
-            voice_text = await _transcribe_media(message, message.voice, transcriber, ".ogg")
-            text = _merge_text(text, voice_text, label="Voice transcript")
+    if message.voice:
+        voice_text, upload_id = await _transcribe_and_persist(
+            message,
+            message.voice,
+            transcriber,
+            "audio/ogg",
+            "voice.ogg",
+            db_user_id,
+            db_chat_id,
+        )
+        text = _merge_text(text, voice_text, label="Voice transcript")
+        if upload_id is not None:
+            upload_ids.append(upload_id)
 
-        if message.video_note:
-            note_text = await _transcribe_media(
-                message,
-                message.video_note,
-                transcriber,
-                ".mp4",
-            )
-            text = _merge_text(text, note_text, label="Voice transcript")
+    if message.video_note:
+        note_text, upload_id = await _transcribe_and_persist(
+            message,
+            message.video_note,
+            transcriber,
+            "video/mp4",
+            "video_note.mp4",
+            db_user_id,
+            db_chat_id,
+        )
+        text = _merge_text(text, note_text, label="Voice transcript")
+        if upload_id is not None:
+            upload_ids.append(upload_id)
 
-        if message.audio:
-            audio_text = await _transcribe_media(
-                message,
-                message.audio,
-                transcriber,
-                _guess_ext(message.audio.mime_type, message.audio.file_name, ".mp3"),
-            )
-            text = _merge_text(text, audio_text, label="Audio transcript")
-    except Exception:
-        await cleanup_attachments(tuple(cleanup_paths))
-        raise
+    if message.audio:
+        mime = message.audio.mime_type or "audio/mpeg"
+        ext = _guess_ext(mime, message.audio.file_name, ".mp3")
+        audio_text, upload_id = await _transcribe_and_persist(
+            message,
+            message.audio,
+            transcriber,
+            mime,
+            f"audio{ext}",
+            db_user_id,
+            db_chat_id,
+        )
+        text = _merge_text(text, audio_text, label="Audio transcript")
+        if upload_id is not None:
+            upload_ids.append(upload_id)
 
     if attachments and not text:
         text = "Опиши зображення і виділи ключові деталі."
@@ -86,62 +117,125 @@ async def prepare_turn(message: Message, transcriber: STTBackend) -> PreparedTur
     return PreparedTurn(
         text=text,
         attachments=tuple(attachments),
-        cleanup_paths=tuple(cleanup_paths),
+        upload_ids=tuple(upload_ids),
         had_voice_input=had_voice_input,
     )
 
 
-async def cleanup_attachments(attachments: tuple[str, ...]) -> None:
-    for attachment in attachments:
-        path = Path(attachment)
-        with contextlib.suppress(FileNotFoundError):
-            path.unlink()
-        with contextlib.suppress(OSError):
-            path.parent.rmdir()
+async def _save_image(
+    message: Message,
+    media: Any,
+    mime: str,
+    user_id: int,
+    chat_id: int,
+) -> tuple[str, int]:
+    """Download → upload to MinIO + return (data URI, upload_id)."""
+    buf = await _download_to_buf(message, media)
+    upload_id = await _persist_buf(
+        buf,
+        filename=_default_filename(mime),
+        mime=mime,
+        user_id=user_id,
+        chat_id=chat_id,
+    )
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:{mime};base64,{b64}", upload_id
+
+
+async def _transcribe_and_persist(
+    message: Message,
+    media: Any,
+    transcriber: STTBackend,
+    mime: str,
+    filename: str,
+    user_id: int,
+    chat_id: int,
+) -> tuple[str, int | None]:
+    """Download → upload to MinIO + transcribe; both from the same BytesIO.
+
+    Returns (transcript, upload_id). `upload_id` may be None if MinIO push fails —
+    we still want the transcript even if persistence flopped."""
+    buf = await _download_to_buf(message, media)
+    try:
+        upload_id = await _persist_buf(
+            buf, filename=filename, mime=mime, user_id=user_id, chat_id=chat_id
+        )
+    except Exception as exc:  # noqa: BLE001 — log + continue, transcript still useful
+        log.warning("tg_media_persist_failed", filename=filename, error=str(exc))
+        upload_id = None
+    transcript = await transcriber.transcribe(buf, filename)
+    return transcript, upload_id
 
 
 async def _prepare_document(
     message: Message,
     document: Any,
     transcriber: STTBackend,
-) -> tuple[str, Path | None]:
+    user_id: int,
+    chat_id: int,
+) -> tuple[str, str | None, int | None]:
     mime_type = getattr(document, "mime_type", None)
     file_name = getattr(document, "file_name", None)
     if is_image_document(mime_type, file_name):
-        path = await _download_media(message, document, _guess_ext(mime_type, file_name, ".jpg"))
-        return "", path
+        mime = mime_type or (mimetypes.guess_type(file_name or "")[0] or "image/jpeg")
+        data_url, upload_id = await _save_image(message, document, mime, user_id, chat_id)
+        return "", data_url, upload_id
     if is_audio_document(mime_type, file_name):
-        text = await _transcribe_media(
+        mime = mime_type or (mimetypes.guess_type(file_name or "")[0] or "audio/mpeg")
+        text, upload_id = await _transcribe_and_persist(
             message,
             document,
             transcriber,
-            _guess_ext(mime_type, file_name, ".mp3"),
+            mime,
+            file_name or f"document{_guess_ext(mime, None, '.mp3')}",
+            user_id,
+            chat_id,
         )
-        return text, None
-    return "", None
+        return text, None, upload_id
+    return "", None, None
 
 
-async def _transcribe_media(
-    message: Message,
-    media: Any,
-    transcriber: STTBackend,
-    ext: str,
-) -> str:
-    path = await _download_media(message, media, ext)
-    try:
-        return await transcriber.transcribe(path)
-    finally:
-        with contextlib.suppress(Exception):
-            path.unlink()
-
-
-async def _download_media(message: Message, media: Any, ext: str) -> Path:
+async def _download_to_buf(message: Message, media: Any) -> BytesIO:
     bot = message.bot
     if bot is None:
         raise RuntimeError("aiogram Message without bot context")
-    path = TG_UPLOADS_DIR / f"tg_{message.chat.id}_{message.message_id}_{uuid4().hex}{ext}"
-    await bot.download(media, destination=path)
-    return path
+    buf = BytesIO()
+    await bot.download(media, destination=buf)
+    buf.seek(0)
+    return buf
+
+
+async def _persist_buf(
+    buf: BytesIO,
+    *,
+    filename: str,
+    mime: str,
+    user_id: int,
+    chat_id: int,
+) -> int:
+    """Push BytesIO to MinIO via upload_service; returns Upload.id."""
+    data = buf.getvalue()
+
+    async def _one_chunk() -> AsyncIterator[bytes]:
+        yield data
+
+    async with SessionLocal() as db:
+        upload = await upload_service.persist_chunks(
+            db,
+            user_id=user_id,
+            chat_id=chat_id,
+            filename=filename,
+            mime=mime,
+            chunks=_one_chunk(),
+        )
+        await db.commit()
+        await db.refresh(upload)
+    return upload.id
+
+
+def _default_filename(mime: str) -> str:
+    ext = mimetypes.guess_extension(mime) or ".bin"
+    return f"tg_media{ext}"
 
 
 def _merge_text(existing: str, incoming: str, *, label: str | None = None) -> str:

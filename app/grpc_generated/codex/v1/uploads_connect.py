@@ -19,7 +19,7 @@ import codex.v1.uploads_pb2 as codex_dot_v1_dot_uploads__pb2
 
 
 class UploadsService(Protocol):
-    async def upload(self, request: AsyncIterator[codex_dot_v1_dot_uploads__pb2.UploadChunk], ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
+    async def upload_once(self, request: codex_dot_v1_dot_uploads__pb2.UploadOnceRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
     async def get_presigned(self, request: codex_dot_v1_dot_uploads__pb2.GetPresignedRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.GetPresignedResponse:
@@ -31,21 +31,24 @@ class UploadsService(Protocol):
     async def delete_upload(self, request: codex_dot_v1_dot_uploads__pb2.DeleteUploadRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    async def transcribe_upload(self, request: codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
 
 class UploadsServiceASGIApplication(ConnectASGIApplication[UploadsService]):
     def __init__(self, service: UploadsService | AsyncGenerator[UploadsService], *, interceptors: Iterable[Interceptor]=(), read_max_bytes: int | None = None, compressions: Iterable[Compression] | None = None, codecs: Iterable[Codec] | None = None) -> None:
         super().__init__(
             service=service,
             endpoints=lambda svc: {
-                "/codex.v1.UploadsService/Upload": Endpoint.client_stream(
+                "/codex.v1.UploadsService/UploadOnce": Endpoint.unary(
                     method=MethodInfo(
-                        name="Upload",
+                        name="UploadOnce",
                         service_name="codex.v1.UploadsService",
-                        input=codex_dot_v1_dot_uploads__pb2.UploadChunk,
+                        input=codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
                         output=codex_dot_v1_dot_uploads__pb2.UploadResponse,
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
-                    function=svc.upload,
+                    function=svc.upload_once,
                 ),
                 "/codex.v1.UploadsService/GetPresigned": Endpoint.unary(
                     method=MethodInfo(
@@ -77,6 +80,16 @@ class UploadsServiceASGIApplication(ConnectASGIApplication[UploadsService]):
                     ),
                     function=svc.delete_upload,
                 ),
+                "/codex.v1.UploadsService/TranscribeUpload": Endpoint.unary(
+                    method=MethodInfo(
+                        name="TranscribeUpload",
+                        service_name="codex.v1.UploadsService",
+                        input=codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+                        output=codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.transcribe_upload,
+                ),
             },
             interceptors=interceptors,
             read_max_bytes=read_max_bytes,
@@ -91,19 +104,19 @@ class UploadsServiceASGIApplication(ConnectASGIApplication[UploadsService]):
 
 
 class UploadsServiceClient(ConnectClient):
-    async def upload(
+    async def upload_once(
         self,
-        request: AsyncIterator[codex_dot_v1_dot_uploads__pb2.UploadChunk],
+        request: codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
         *,
         headers: Headers | Mapping[str, str] | None = None,
         timeout_ms: int | None = None,
     ) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
-        return await self.execute_client_stream(
+        return await self.execute_unary(
             request=request,
             method=MethodInfo(
-                name="Upload",
+                name="UploadOnce",
                 service_name="codex.v1.UploadsService",
-                input=codex_dot_v1_dot_uploads__pb2.UploadChunk,
+                input=codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
                 output=codex_dot_v1_dot_uploads__pb2.UploadResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
@@ -171,12 +184,32 @@ class UploadsServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    async def transcribe_upload(
+        self,
+        request: codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="TranscribeUpload",
+                service_name="codex.v1.UploadsService",
+                input=codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+                output=codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
 
 
 
 
 class UploadsServiceSync(Protocol):
-    def upload(self, request: Iterator[codex_dot_v1_dot_uploads__pb2.UploadChunk], ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
+    def upload_once(self, request: codex_dot_v1_dot_uploads__pb2.UploadOnceRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def get_presigned(self, request: codex_dot_v1_dot_uploads__pb2.GetPresignedRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.GetPresignedResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
@@ -184,21 +217,23 @@ class UploadsServiceSync(Protocol):
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def delete_upload(self, request: codex_dot_v1_dot_uploads__pb2.DeleteUploadRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def transcribe_upload(self, request: codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest, ctx: RequestContext) -> codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
 class UploadsServiceWSGIApplication(ConnectWSGIApplication):
     def __init__(self, service: UploadsServiceSync, interceptors: Iterable[InterceptorSync]=(), read_max_bytes: int | None = None, compressions: Iterable[Compression] | None = None, codecs: Iterable[Codec] | None = None) -> None:
         super().__init__(
             endpoints={
-                "/codex.v1.UploadsService/Upload": EndpointSync.client_stream(
+                "/codex.v1.UploadsService/UploadOnce": EndpointSync.unary(
                     method=MethodInfo(
-                        name="Upload",
+                        name="UploadOnce",
                         service_name="codex.v1.UploadsService",
-                        input=codex_dot_v1_dot_uploads__pb2.UploadChunk,
+                        input=codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
                         output=codex_dot_v1_dot_uploads__pb2.UploadResponse,
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
-                    function=service.upload,
+                    function=service.upload_once,
                 ),
                 "/codex.v1.UploadsService/GetPresigned": EndpointSync.unary(
                     method=MethodInfo(
@@ -230,6 +265,16 @@ class UploadsServiceWSGIApplication(ConnectWSGIApplication):
                     ),
                     function=service.delete_upload,
                 ),
+                "/codex.v1.UploadsService/TranscribeUpload": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="TranscribeUpload",
+                        service_name="codex.v1.UploadsService",
+                        input=codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+                        output=codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.transcribe_upload,
+                ),
             },
             interceptors=interceptors,
             read_max_bytes=read_max_bytes,
@@ -244,19 +289,19 @@ class UploadsServiceWSGIApplication(ConnectWSGIApplication):
 
 
 class UploadsServiceClientSync(ConnectClientSync):
-    def upload(
+    def upload_once(
         self,
-        request: Iterator[codex_dot_v1_dot_uploads__pb2.UploadChunk],
+        request: codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
         *,
         headers: Headers | Mapping[str, str] | None = None,
         timeout_ms: int | None = None,
     ) -> codex_dot_v1_dot_uploads__pb2.UploadResponse:
-        return self.execute_client_stream(
+        return self.execute_unary(
             request=request,
             method=MethodInfo(
-                name="Upload",
+                name="UploadOnce",
                 service_name="codex.v1.UploadsService",
-                input=codex_dot_v1_dot_uploads__pb2.UploadChunk,
+                input=codex_dot_v1_dot_uploads__pb2.UploadOnceRequest,
                 output=codex_dot_v1_dot_uploads__pb2.UploadResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
@@ -318,6 +363,26 @@ class UploadsServiceClientSync(ConnectClientSync):
                 service_name="codex.v1.UploadsService",
                 input=codex_dot_v1_dot_uploads__pb2.DeleteUploadRequest,
                 output=codex_dot_v1_dot_common__pb2.Empty,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def transcribe_upload(
+        self,
+        request: codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="TranscribeUpload",
+                service_name="codex.v1.UploadsService",
+                input=codex_dot_v1_dot_uploads__pb2.TranscribeUploadRequest,
+                output=codex_dot_v1_dot_uploads__pb2.TranscribeUploadResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,

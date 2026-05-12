@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x63odex/v1/auth.proto\x12\x08\x63odex.v1\"\x1d\n\x0cLoginRequest\x12\r\n\x05token\x18\x01 \x01(\t\"M\n\rLoginResponse\x12\x14\n\x0c\x61\x63\x63\x65ss_token\x18\x01 \x01(\t\x12\x12\n\ntoken_type\x18\x02 \x01(\t\x12\x12\n\nexpires_in\x18\x03 \x01(\x03\x32G\n\x0b\x41uthService\x12\x38\n\x05Login\x12\x16.codex.v1.LoginRequest\x1a\x17.codex.v1.LoginResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x63odex/v1/auth.proto\x12\x08\x63odex.v1\"/\n\x0cLoginRequest\x12\r\n\x05\x65mail\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\"M\n\rLoginResponse\x12\x14\n\x0c\x61\x63\x63\x65ss_token\x18\x01 \x01(\t\x12\x12\n\ntoken_type\x18\x02 \x01(\t\x12\x12\n\nexpires_in\x18\x03 \x01(\x03\"\x10\n\x0eRefreshRequest2\x85\x01\n\x0b\x41uthService\x12\x38\n\x05Login\x12\x16.codex.v1.LoginRequest\x1a\x17.codex.v1.LoginResponse\x12<\n\x07Refresh\x12\x18.codex.v1.RefreshRequest\x1a\x17.codex.v1.LoginResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,9 +32,11 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'codex.v1.auth_pb2', _global
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_LOGINREQUEST']._serialized_start=33
-  _globals['_LOGINREQUEST']._serialized_end=62
-  _globals['_LOGINRESPONSE']._serialized_start=64
-  _globals['_LOGINRESPONSE']._serialized_end=141
-  _globals['_AUTHSERVICE']._serialized_start=143
-  _globals['_AUTHSERVICE']._serialized_end=214
+  _globals['_LOGINREQUEST']._serialized_end=80
+  _globals['_LOGINRESPONSE']._serialized_start=82
+  _globals['_LOGINRESPONSE']._serialized_end=159
+  _globals['_REFRESHREQUEST']._serialized_start=161
+  _globals['_REFRESHREQUEST']._serialized_end=177
+  _globals['_AUTHSERVICE']._serialized_start=180
+  _globals['_AUTHSERVICE']._serialized_end=313
 # @@protoc_insertion_point(module_scope)

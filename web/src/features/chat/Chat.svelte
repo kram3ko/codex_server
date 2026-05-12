@@ -7,8 +7,11 @@
   import MessageList from "./MessageList.svelte";
   import { createTypewriter } from "./typewriter.svelte";
   import type { ToolEvent } from "./ToolCall.svelte";
+  import { create } from "@bufbuild/protobuf";
+
   import type { Attachment as ChatAttachment, Chat } from "../../gen/codex/v1/chat_pb";
-  import { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
+  import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
+  import { MessageSchema } from "../../gen/codex/v1/message_pb";
   import Spinner from "../../shared/components/Spinner.svelte";
   import { chatClient, messageClient } from "../../shared/lib/clients";
 
@@ -25,7 +28,7 @@
   let activeTurnId = $state(0);
 
   const typer = createTypewriter();
-  const liveDraft = $derived(draft ? new ChatMessage({ ...draft, text: typer.displayed }) : null);
+  const liveDraft = $derived(draft ? create(MessageSchema, { ...draft, text: typer.displayed }) : null);
 
   async function loadChats() {
     loading = true;
@@ -70,7 +73,29 @@
     await loadChatMessages(chat);
   }
 
-  async function send(text: string) {
+  async function send(text: string, imageIds: bigint[] = [], audioIds: bigint[] = []) {
+    const uploadIds = [...imageIds, ...audioIds];
+    // Steer the running turn instead of interrupting+restarting. Codex
+    // appends `text` to the in-flight prompt; uploads still require a fresh
+    // turn (sidecar's steer API only accepts text), so fall through if any.
+    if (busy && selected && uploadIds.length === 0) {
+      const resp = await chatClient
+        .steerTurn({ chatId: selected.id, text })
+        .catch(() => null);
+      if (resp?.accepted) {
+        const userMessage = create(MessageSchema, {
+          id: BigInt(Date.now()),
+          chatId: selected.id,
+          role: 1,
+          text
+        });
+        messages = [...messages, userMessage];
+        return;
+      }
+    }
+    if (busy && selected) {
+      await chatClient.interruptTurn({ chatId: selected.id }).catch(() => undefined);
+    }
     const turnId = activeTurnId + 1;
     activeTurnId = turnId;
     busy = true;
@@ -79,14 +104,18 @@
     attachments = [];
     typer.reset();
     draftStartedAt = Date.now();
-    const userMessage = new ChatMessage({
+    const metaJson: { upload_ids?: number[]; audio_upload_ids?: number[] } = {};
+    if (imageIds.length) metaJson.upload_ids = imageIds.map((id) => Number(id));
+    if (audioIds.length) metaJson.audio_upload_ids = audioIds.map((id) => Number(id));
+    const userMessage = create(MessageSchema, {
       id: BigInt(Date.now()),
       chatId: selected?.id ?? 0n,
       role: 1,
-      text
+      text,
+      meta: Object.keys(metaJson).length ? metaJson : undefined
     });
     messages = [...messages, userMessage];
-    draft = new ChatMessage({
+    draft = create(MessageSchema, {
       id: BigInt(Date.now() + 1),
       chatId: selected?.id ?? 0n,
       role: 2,
@@ -96,7 +125,8 @@
     try {
       const stream = chatClient.runTurn({
         chatId: selected?.id,
-        text
+        text,
+        uploadIds
       });
       for await (const event of stream) {
         if (turnId !== activeTurnId) {
@@ -112,7 +142,7 @@
               {
                 id: `${Date.now()}:${tools.length}`,
                 name: event.kind.value.name,
-                args: event.kind.value.args?.toJson(),
+                args: event.kind.value.args,
                 status: "running"
               }
             ];
@@ -159,7 +189,7 @@
             }
             await typer.drained();
             if (draft) {
-              messages = [...messages, new ChatMessage({ ...draft, text: typer.displayed })];
+              messages = [...messages, create(MessageSchema, { ...draft, text: typer.displayed })];
             }
             draft = null;
             draftStartedAt = undefined;
@@ -167,10 +197,11 @@
             await loadChats();
             if (done.chatId) {
               const current = chats.find((chat) => chat.id === done.chatId);
-              // Auto-refresh after server persists turn — keep tools/attachments
-              // until history reloads; then historical upload_ids own rendering.
+              // Auto-refresh after server persists turn — drop transient
+              // tool/attachment state; historical upload_ids own rendering.
               if (current) {
                 await loadChatMessages(current);
+                tools = [];
                 attachments = [];
               }
             }
@@ -203,6 +234,13 @@
       return;
     }
     activeTurnId += 1;
+    // Snapshot whatever the model already streamed so the user sees the
+    // partial reply instead of an empty hole. Server-side persistence is
+    // a separate concern (TURN_INTERRUPTED is logged, partial text isn't
+    // saved yet).
+    if (draft && typer.displayed) {
+      messages = [...messages, create(MessageSchema, { ...draft, text: typer.displayed })];
+    }
     typer.reset();
     draft = null;
     draftStartedAt = undefined;

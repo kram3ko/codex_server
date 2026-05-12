@@ -9,6 +9,12 @@ from app.db.base import Base
 class Upload(Base):
     __tablename__ = "uploads"
 
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     chat_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("chats.id", ondelete="SET NULL"),
