@@ -27,21 +27,21 @@ from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__
 from codex.v1 import common_pb2 as codex_dot_v1_dot_common__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x63odex/v1/message.proto\x12\x08\x63odex.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x15\x63odex/v1/common.proto\"\xbe\x01\n\x07Message\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x0f\n\x07\x63hat_id\x18\x02 \x01(\x03\x12#\n\x04role\x18\x03 \x01(\x0e\x32\x15.codex.v1.MessageRole\x12\x0c\n\x04text\x18\x04 \x01(\t\x12*\n\x04meta\x18\x05 \x01(\x0b\x32\x17.google.protobuf.StructH\x00\x88\x01\x01\x12.\n\ncreated_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x07\n\x05_meta\"P\n\x13ListMessagesRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\x12(\n\npagination\x18\x02 \x01(\x0b\x32\x14.codex.v1.Pagination\";\n\x14ListMessagesResponse\x12#\n\x08messages\x18\x01 \x03(\x0b\x32\x11.codex.v1.Message*\x8e\x01\n\x0bMessageRole\x12\x1c\n\x18MESSAGE_ROLE_UNSPECIFIED\x10\x00\x12\x15\n\x11MESSAGE_ROLE_USER\x10\x01\x12\x1a\n\x16MESSAGE_ROLE_ASSISTANT\x10\x02\x12\x15\n\x11MESSAGE_ROLE_TOOL\x10\x03\x12\x17\n\x13MESSAGE_ROLE_SYSTEM\x10\x04\x32_\n\x0eMessageService\x12M\n\x0cListMessages\x12\x1d.codex.v1.ListMessagesRequest\x1a\x1e.codex.v1.ListMessagesResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x63odex/v1/message.proto\x12\x08\x63odex.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x15\x63odex/v1/common.proto\"\xbe\x01\n\x07Message\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x0f\n\x07\x63hat_id\x18\x02 \x01(\x03\x12#\n\x04role\x18\x03 \x01(\x0e\x32\x15.codex.v1.MessageRole\x12\x0c\n\x04text\x18\x04 \x01(\t\x12*\n\x04meta\x18\x05 \x01(\x0b\x32\x17.google.protobuf.StructH\x00\x88\x01\x01\x12.\n\ncreated_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x07\n\x05_meta\"v\n\x13ListMessagesRequest\x12\x0f\n\x07\x63hat_id\x18\x01 \x01(\x03\x12(\n\npagination\x18\x02 \x01(\x0b\x32\x14.codex.v1.Pagination\x12\x16\n\tbefore_id\x18\x03 \x01(\x03H\x00\x88\x01\x01\x42\x0c\n\n_before_id\";\n\x14ListMessagesResponse\x12#\n\x08messages\x18\x01 \x03(\x0b\x32\x11.codex.v1.Message*\x8e\x01\n\x0bMessageRole\x12\x1c\n\x18MESSAGE_ROLE_UNSPECIFIED\x10\x00\x12\x15\n\x11MESSAGE_ROLE_USER\x10\x01\x12\x1a\n\x16MESSAGE_ROLE_ASSISTANT\x10\x02\x12\x15\n\x11MESSAGE_ROLE_TOOL\x10\x03\x12\x17\n\x13MESSAGE_ROLE_SYSTEM\x10\x04\x32_\n\x0eMessageService\x12M\n\x0cListMessages\x12\x1d.codex.v1.ListMessagesRequest\x1a\x1e.codex.v1.ListMessagesResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'codex.v1.message_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_MESSAGEROLE']._serialized_start=459
-  _globals['_MESSAGEROLE']._serialized_end=601
+  _globals['_MESSAGEROLE']._serialized_start=497
+  _globals['_MESSAGEROLE']._serialized_end=639
   _globals['_MESSAGE']._serialized_start=123
   _globals['_MESSAGE']._serialized_end=313
   _globals['_LISTMESSAGESREQUEST']._serialized_start=315
-  _globals['_LISTMESSAGESREQUEST']._serialized_end=395
-  _globals['_LISTMESSAGESRESPONSE']._serialized_start=397
-  _globals['_LISTMESSAGESRESPONSE']._serialized_end=456
-  _globals['_MESSAGESERVICE']._serialized_start=603
-  _globals['_MESSAGESERVICE']._serialized_end=698
+  _globals['_LISTMESSAGESREQUEST']._serialized_end=433
+  _globals['_LISTMESSAGESRESPONSE']._serialized_start=435
+  _globals['_LISTMESSAGESRESPONSE']._serialized_end=494
+  _globals['_MESSAGESERVICE']._serialized_start=641
+  _globals['_MESSAGESERVICE']._serialized_end=736
 # @@protoc_insertion_point(module_scope)

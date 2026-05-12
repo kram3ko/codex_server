@@ -12,6 +12,7 @@ fail → відкриває новий thread + повідомляє через 
 кеш оновився.
 """
 
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from enum import StrEnum
 from typing import Any
@@ -30,7 +31,7 @@ from app.services.codex.events import (
 from app.services.codex.events import (
     translate_notification as _translate,
 )
-from app.services.codex.transport import AppServerClient, AppServerError
+from app.services.codex.transport import AppServerClient, AppServerError, Notification
 
 log = structlog.get_logger(__name__)
 
@@ -50,6 +51,86 @@ class _Method(StrEnum):
 
 
 type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
+
+
+class _TurnDiagnostics:
+    """Small in-memory state for explaining idle timeouts after the fact."""
+
+    def __init__(self, *, thread_id: str | None, turn_id: str) -> None:
+        now = time.monotonic()
+        self.thread_id = thread_id
+        self.turn_id = turn_id
+        self.started_at = now
+        self.last_raw_at: float | None = None
+        self.last_chat_event_at: float | None = None
+        self.raw_count = 0
+        self.chat_event_count = 0
+        self.completed_items = 0
+        self.last_raw_method = "none"
+        self.last_raw_turn_id: str | None = None
+        self.last_item_type: str | None = None
+        self.last_tool: str | None = None
+        self.last_chat_event_type = "none"
+        self.turn_completed_seen = False
+        self.active_item_type: str | None = None
+        self.active_tool: str | None = None
+        self.active_item_started_at: float | None = None
+
+    def absorb_raw(self, note: Notification) -> None:
+        now = time.monotonic()
+        self.raw_count += 1
+        self.last_raw_at = now
+        self.last_raw_method = note.method
+        self.last_raw_turn_id = note.turn_id
+        if note.method == "turn/completed":
+            self.turn_completed_seen = True
+
+        item = note.params.get("item")
+        if not isinstance(item, dict):
+            return
+        item_type = item.get("type")
+        tool = _item_label(item)
+        self.last_item_type = item_type if isinstance(item_type, str) else None
+        self.last_tool = tool
+        if note.method == "item/started":
+            self.active_item_type = self.last_item_type
+            self.active_tool = tool
+            self.active_item_started_at = now
+        elif note.method == "item/completed":
+            self.completed_items += 1
+            if self.active_item_type == self.last_item_type and self.active_tool == tool:
+                self.active_item_type = None
+                self.active_tool = None
+                self.active_item_started_at = None
+
+    def absorb_chat_event(self, event: ChatEvent) -> None:
+        self.chat_event_count += 1
+        self.last_chat_event_at = time.monotonic()
+        self.last_chat_event_type = type(event).__name__
+
+    def snapshot(self, transport: AppServerClient) -> dict[str, Any]:
+        now = time.monotonic()
+        data: dict[str, Any] = {
+            "thread_id": self.thread_id,
+            "turn_id": self.turn_id,
+            "turn_age_s": round(now - self.started_at, 3),
+            "raw_count": self.raw_count,
+            "chat_event_count": self.chat_event_count,
+            "completed_items": self.completed_items,
+            "last_raw_method": self.last_raw_method,
+            "last_raw_turn_id": self.last_raw_turn_id,
+            "last_raw_age_s": _age(now, self.last_raw_at),
+            "last_item_type": self.last_item_type,
+            "last_tool": self.last_tool,
+            "last_chat_event_type": self.last_chat_event_type,
+            "last_chat_event_age_s": _age(now, self.last_chat_event_at),
+            "turn_completed_seen": self.turn_completed_seen,
+            "active_item_type": self.active_item_type,
+            "active_tool": self.active_tool,
+            "active_item_age_s": _age(now, self.active_item_started_at),
+        }
+        data.update(transport.diagnostic_snapshot())
+        return data
 
 
 class CodexClient:
@@ -76,6 +157,7 @@ class CodexClient:
         self._thread_id: str | None = initial_thread_id
         self._thread_resumed_or_started = False
         self._current_turn_id: str | None = None
+        self._turn_diagnostics: _TurnDiagnostics | None = None
         self._on_thread_change = on_thread_change
 
     @property
@@ -85,6 +167,17 @@ class CodexClient:
     @property
     def current_turn_id(self) -> str | None:
         return self._current_turn_id
+
+    def turn_diagnostics(self) -> dict[str, Any]:
+        if self._turn_diagnostics is None:
+            data: dict[str, Any] = {
+                "thread_id": self._thread_id,
+                "turn_id": self._current_turn_id,
+                "diagnostics": "not_started",
+            }
+            data.update(self._transport.diagnostic_snapshot())
+            return data
+        return self._turn_diagnostics.snapshot(self._transport)
 
     async def connect(self) -> None:
         await self._transport.connect()
@@ -160,23 +253,31 @@ class CodexClient:
             return
 
         self._current_turn_id = _extract_turn_id(result)
-        if on_started is not None and self._thread_id is not None:
-            await on_started(self._current_turn_id, self._thread_id)
-        accumulated = ""
+        self._turn_diagnostics = _TurnDiagnostics(
+            thread_id=self._thread_id,
+            turn_id=self._current_turn_id,
+        )
+        try:
+            if on_started is not None and self._thread_id is not None:
+                await on_started(self._current_turn_id, self._thread_id)
+            accumulated = ""
 
-        notes = self._transport.notifications()
-        if idle_s is not None:
-            notes = iterate_with_idle_timeout(notes, idle_s, on_idle=on_idle)
-        async for note in notes:
-            event = _translate(note, accumulated)
-            if event is None:
-                continue
-            if isinstance(event, TokenEvent):
-                accumulated += event.delta
-            yield event
-            if isinstance(event, DoneEvent):
-                self._current_turn_id = None
-                return
+            notes = self._transport.notifications()
+            if idle_s is not None:
+                notes = iterate_with_idle_timeout(notes, idle_s, on_idle=on_idle)
+            async for note in notes:
+                self._record_raw_note(note)
+                event = _translate(note, accumulated)
+                if event is None:
+                    continue
+                self._turn_diagnostics.absorb_chat_event(event)
+                if isinstance(event, TokenEvent):
+                    accumulated += event.delta
+                yield event
+                if isinstance(event, DoneEvent):
+                    return
+        finally:
+            self._current_turn_id = None
 
     async def interrupt(self, turn_id: str | None = None) -> None:
         """Send turn/interrupt. `turn_id` override дозволяє іншому воркеру
@@ -253,6 +354,37 @@ class CodexClient:
 
     async def close(self) -> None:
         await self._transport.close()
+
+    def _record_raw_note(self, note: Notification) -> None:
+        if self._turn_diagnostics is None:
+            return
+        prev_active = (self._turn_diagnostics.active_item_type, self._turn_diagnostics.active_tool)
+        self._turn_diagnostics.absorb_raw(note)
+        match note.method:
+            case "item/started":
+                log.info(
+                    "codex_item_started",
+                    **self._turn_diagnostics.snapshot(self._transport),
+                )
+            case "item/completed":
+                log.info(
+                    "codex_item_completed",
+                    **self._turn_diagnostics.snapshot(self._transport),
+                )
+            case "turn/completed":
+                log.info(
+                    "codex_turn_completed_raw",
+                    **self._turn_diagnostics.snapshot(self._transport),
+                )
+            case _:
+                if prev_active != (
+                    self._turn_diagnostics.active_item_type,
+                    self._turn_diagnostics.active_tool,
+                ):
+                    log.info(
+                        "codex_active_item_changed",
+                        **self._turn_diagnostics.snapshot(self._transport),
+                    )
 
     async def _begin_turn_with_retry(
         self,
@@ -337,3 +469,30 @@ def _is_thread_not_found(exc: AppServerError) -> bool:
 
 def _extract_turn_id(result: dict[str, Any]) -> str:
     return result["turn"]["id"]
+
+
+def _age(now: float, at: float | None) -> float | None:
+    return None if at is None else round(now - at, 3)
+
+
+def _item_label(item: dict[str, Any]) -> str | None:
+    for key in ("toolName", "tool", "name"):
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
+    item_type = item.get("type")
+    if isinstance(item_type, str):
+        match item_type:
+            case "commandExecution":
+                return "shell"
+            case "fileChange":
+                return "file_change"
+            case "webSearch":
+                return "web_search"
+            case "imageGeneration":
+                return "image_generation"
+            case "imageView":
+                return "image_view"
+            case _:
+                return item_type
+    return None

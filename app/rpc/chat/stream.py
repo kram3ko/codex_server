@@ -69,12 +69,14 @@ async def stream_turn(
     last_event_type = "none"
 
     async def _on_idle() -> None:
+        diagnostics = client.turn_diagnostics()
         log.error(
             "web_rpc_codex_idle_timeout",
             db_chat_id=persisted_chat_id,
             idle_timeout_s=settings.WEB_TURN_TIMEOUT_SECONDS,
             events_count=events_count,
             last_event_type=last_event_type,
+            **diagnostics,
         )
         with contextlib.suppress(Exception):
             await client.interrupt()
@@ -110,6 +112,7 @@ async def stream_turn(
     except TimeoutError:
         # Idle-timeout — best-effort interrupt sidecar + quarantine thread,
         # інакше наступний run_turn пробує resume тої самої мертвої thread.
+        diagnostics = client.turn_diagnostics()
         with contextlib.suppress(Exception):
             await client.interrupt()
         await quarantine_thread(client.current_thread_id)
@@ -119,15 +122,15 @@ async def stream_turn(
             persisted_chat_id,
             user_pk,
             EventKind.TURN_FAILED,
-            {"code": CodexErrorCode.TURN_TIMEOUT, "detail": detail},
+            {"code": CodexErrorCode.TURN_TIMEOUT, "detail": detail, "diagnostics": diagnostics},
         )
         return
     except asyncio.CancelledError:
-        # Persist partial assistant text + tool calls so chat reload показує
-        # interrupted bubble замість дірки; mirrors TG `handle_dropped_stream`.
-        # Не yield-ити після CancelledError — async-gen транспорт уже закривається,
-        # client бачить stream як cancelled, не як error frame.
-        if collector.buffer or collector.tool_calls or collector.attachments:
+        # Persist якщо турн встиг стартувати на sidecar (turn_id отримано) АБО
+        # вже накопичено будь-який видимий контент. Інакше cancel прилетів
+        # до `turn/start` — у БД пустий placeholder не пишемо.
+        turn_started = client.turn_diagnostics().get("turn_id") is not None
+        if turn_started or collector.buffer or collector.tool_calls or collector.attachments:
             await _persist_assistant_turn(
                 persisted_chat_id,
                 user_pk,
@@ -135,6 +138,7 @@ async def stream_turn(
                 collector.tool_calls,
                 collector.attachments,
                 partial=True,
+                client_id=client_id,
             )
         await _emit_event(
             persisted_chat_id,

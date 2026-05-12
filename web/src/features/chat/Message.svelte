@@ -27,6 +27,8 @@
   // protobuf-es v2 — google.protobuf.Struct рендериться як plain JsonObject, не клас.
   const metaJson = $derived(message.meta as Record<string, unknown> | undefined);
   const isSteered = $derived(metaJson?.steered === true);
+  const isPartial = $derived(metaJson?.partial === true);
+  const isInterruptedEmpty = $derived(isPartial && !message.text);
   const uploadIds = $derived.by((): number[] => idsFromMeta(metaJson?.upload_ids));
   const audioUploadIds = $derived.by((): number[] =>
     idsFromMeta(metaJson?.audio_upload_ids)
@@ -140,6 +142,10 @@
         <span class="size-2 rounded-full bg-[var(--color-accent)] animate-thinking" style="animation-delay:0ms"></span>
         <span class="size-2 rounded-full bg-[var(--color-accent)] animate-thinking" style="animation-delay:160ms"></span>
         <span class="size-2 rounded-full bg-[var(--color-accent)] animate-thinking" style="animation-delay:320ms"></span>
+      </div>
+    {:else if isInterruptedEmpty}
+      <div class="py-2 text-[12px] italic text-[var(--color-text-muted)]">
+        Codex was thinking — turn interrupted before any output.
       </div>
     {:else}
       <div class="markdown text-[1rem] leading-[1.7]">

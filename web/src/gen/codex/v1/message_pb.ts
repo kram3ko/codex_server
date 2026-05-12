@@ -14,7 +14,7 @@ import type { JsonObject, Message as Message$1 } from "@bufbuild/protobuf";
  * Describes the file codex/v1/message.proto.
  */
 export const file_codex_v1_message: GenFile = /*@__PURE__*/
-  fileDesc("ChZjb2RleC92MS9tZXNzYWdlLnByb3RvEghjb2RleC52MSK+AQoHTWVzc2FnZRIKCgJpZBgBIAEoAxIPCgdjaGF0X2lkGAIgASgDEiMKBHJvbGUYAyABKA4yFS5jb2RleC52MS5NZXNzYWdlUm9sZRIMCgR0ZXh0GAQgASgJEioKBG1ldGEYBSABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0SACIAQESLgoKY3JlYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBwoFX21ldGEiUAoTTGlzdE1lc3NhZ2VzUmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDEigKCnBhZ2luYXRpb24YAiABKAsyFC5jb2RleC52MS5QYWdpbmF0aW9uIjsKFExpc3RNZXNzYWdlc1Jlc3BvbnNlEiMKCG1lc3NhZ2VzGAEgAygLMhEuY29kZXgudjEuTWVzc2FnZSqOAQoLTWVzc2FnZVJvbGUSHAoYTUVTU0FHRV9ST0xFX1VOU1BFQ0lGSUVEEAASFQoRTUVTU0FHRV9ST0xFX1VTRVIQARIaChZNRVNTQUdFX1JPTEVfQVNTSVNUQU5UEAISFQoRTUVTU0FHRV9ST0xFX1RPT0wQAxIXChNNRVNTQUdFX1JPTEVfU1lTVEVNEAQyXwoOTWVzc2FnZVNlcnZpY2USTQoMTGlzdE1lc3NhZ2VzEh0uY29kZXgudjEuTGlzdE1lc3NhZ2VzUmVxdWVzdBoeLmNvZGV4LnYxLkxpc3RNZXNzYWdlc1Jlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_codex_v1_common]);
+  fileDesc("ChZjb2RleC92MS9tZXNzYWdlLnByb3RvEghjb2RleC52MSK+AQoHTWVzc2FnZRIKCgJpZBgBIAEoAxIPCgdjaGF0X2lkGAIgASgDEiMKBHJvbGUYAyABKA4yFS5jb2RleC52MS5NZXNzYWdlUm9sZRIMCgR0ZXh0GAQgASgJEioKBG1ldGEYBSABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0SACIAQESLgoKY3JlYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBwoFX21ldGEidgoTTGlzdE1lc3NhZ2VzUmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDEigKCnBhZ2luYXRpb24YAiABKAsyFC5jb2RleC52MS5QYWdpbmF0aW9uEhYKCWJlZm9yZV9pZBgDIAEoA0gAiAEBQgwKCl9iZWZvcmVfaWQiOwoUTGlzdE1lc3NhZ2VzUmVzcG9uc2USIwoIbWVzc2FnZXMYASADKAsyES5jb2RleC52MS5NZXNzYWdlKo4BCgtNZXNzYWdlUm9sZRIcChhNRVNTQUdFX1JPTEVfVU5TUEVDSUZJRUQQABIVChFNRVNTQUdFX1JPTEVfVVNFUhABEhoKFk1FU1NBR0VfUk9MRV9BU1NJU1RBTlQQAhIVChFNRVNTQUdFX1JPTEVfVE9PTBADEhcKE01FU1NBR0VfUk9MRV9TWVNURU0QBDJfCg5NZXNzYWdlU2VydmljZRJNCgxMaXN0TWVzc2FnZXMSHS5jb2RleC52MS5MaXN0TWVzc2FnZXNSZXF1ZXN0Gh4uY29kZXgudjEuTGlzdE1lc3NhZ2VzUmVzcG9uc2ViBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_codex_v1_common]);
 
 /**
  * @generated from message codex.v1.Message
@@ -71,6 +71,16 @@ export type ListMessagesRequest = Message$1<"codex.v1.ListMessagesRequest"> & {
    * @generated from field: codex.v1.Pagination pagination = 2;
    */
   pagination?: Pagination | undefined;
+
+  /**
+   * Cursor for infinite scroll back: return messages with id < before_id.
+   * Unset on first page; set to oldest currently-displayed id on subsequent
+   * requests. Robust against new messages arriving between pages (offset
+   * would shift).
+   *
+   * @generated from field: optional int64 before_id = 3;
+   */
+  beforeId?: bigint | undefined;
 };
 
 /**

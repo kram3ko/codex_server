@@ -27,11 +27,14 @@ class MessageRPC(MessageProtocol):
     ) -> message_pb2.ListMessagesResponse:
         user = await require_user(ctx)
         limit = _resolve_limit(request.pagination)
+        before_id = request.before_id if request.HasField("before_id") else None
         async with SessionLocal() as db:
             chat = await chat_service.get(db, request.chat_id)
             if chat is None or chat.user_id != user.id:
                 raise ConnectError(Code.NOT_FOUND, f"chat {request.chat_id} not found")
-            messages = await message_service.list(db, request.chat_id, limit=limit)
+            messages = await message_service.list(
+                db, request.chat_id, limit=limit, before_id=before_id
+            )
         return message_pb2.ListMessagesResponse(messages=[message_to_pb(m) for m in messages])
 
 

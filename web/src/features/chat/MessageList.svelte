@@ -13,13 +13,19 @@
     streamingClientId,
     tools,
     attachments,
-    draftStartedAt
+    draftStartedAt,
+    loadingOlder = false,
+    hasMoreOlder = false,
+    onloadolder
   }: {
     messages: ChatMessage[];
     streamingClientId: string | null;
     tools: ToolEvent[];
     attachments: ChatAttachment[];
     draftStartedAt?: number;
+    loadingOlder?: boolean;
+    hasMoreOlder?: boolean;
+    onloadolder?: () => void;
   } = $props();
 
   function clientIdOf(message: ChatMessage): string | undefined {
@@ -46,6 +52,7 @@
   // воно нічого не ламає.
   let lastScrollTop = 0;
   let lastMessagesLen = 0;
+  let lastFirstMessageId: bigint | null = null;
 
   function onscroll() {
     if (!container) return;
@@ -55,16 +62,23 @@
     } else if (scrollHeight - scrollTop - clientHeight < 50) {
       stickToBottom = true;
     }
+    if (scrollTop < 100 && hasMoreOlder && !loadingOlder) {
+      onloadolder?.();
+    }
     lastScrollTop = scrollTop;
   }
 
-  // Нове повідомлення в історії (юзер натиснув Send або turn finalize'нувся) —
-  // форс-stickToBottom, навіть якщо юзер до того скролив угору.
+  // Append (новий send / done) → стик-вниз. Prepend (load-older) → НЕ стикаємо.
+  // Scroll-position при prepend утримує сам браузер через `overflow-anchor: auto`
+  // (default для будь-якого scrollable container'а у сучасних браузерах).
   $effect(() => {
-    if (messages.length > lastMessagesLen) {
+    const firstId = messages[0]?.id ?? null;
+    const prepended = lastFirstMessageId !== null && firstId !== lastFirstMessageId;
+    if (messages.length > lastMessagesLen && !prepended) {
       stickToBottom = true;
     }
     lastMessagesLen = messages.length;
+    lastFirstMessageId = firstId;
   });
 
   // Snap to bottom on any list/tool/attachment change while sticking.
@@ -85,6 +99,11 @@
   class="min-h-0 flex-1 overflow-y-auto scroll-smooth px-5 py-4"
 >
   <div class="mx-auto flex max-w-5xl flex-col gap-4">
+    {#if loadingOlder}
+      <div class="grid place-items-center py-2 text-[11px] text-[var(--color-text-muted)]">
+        loading older…
+      </div>
+    {/if}
     {#each messages as message (messageKey(message))}
       {@const streaming = clientIdOf(message) === streamingClientId}
       <Message

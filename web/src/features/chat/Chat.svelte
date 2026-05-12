@@ -7,11 +7,21 @@
   import MessageList from "./MessageList.svelte";
   import { createTypewriter } from "./typewriter.svelte";
   import type { ToolEvent } from "./ToolCall.svelte";
+  import { turnSignal } from "./turnSignal.svelte";
   import { create } from "@bufbuild/protobuf";
+  import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 
   import type { Attachment as ChatAttachment, Chat } from "../../gen/codex/v1/chat_pb";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import { MessageSchema } from "../../gen/codex/v1/message_pb";
+
+  function nowTimestamp() {
+    const ms = Date.now();
+    return create(TimestampSchema, {
+      seconds: BigInt(Math.floor(ms / 1000)),
+      nanos: (ms % 1000) * 1_000_000
+    });
+  }
   import Spinner from "../../shared/components/Spinner.svelte";
   import { chatClient, messageClient } from "../../shared/lib/clients";
 
@@ -72,14 +82,36 @@
     }
   }
 
+  const PAGE_SIZE = 10;
+  let loadingOlder = $state(false);
+  let hasMoreOlder = $state(false);
+
   async function loadChatMessages(chat: Chat) {
     selected = chat;
     streamingClientId = null;
     const response = await messageClient.listMessages({
       chatId: chat.id,
-      pagination: { limit: 250 }
+      pagination: { limit: PAGE_SIZE }
     });
     messages = [...response.messages];
+    hasMoreOlder = response.messages.length >= PAGE_SIZE;
+  }
+
+  async function loadOlderMessages() {
+    if (loadingOlder || !hasMoreOlder || !selected || messages.length === 0) return;
+    loadingOlder = true;
+    try {
+      const oldestId = messages[0].id;
+      const response = await messageClient.listMessages({
+        chatId: selected.id,
+        pagination: { limit: PAGE_SIZE },
+        beforeId: oldestId
+      });
+      messages = [...response.messages, ...messages];
+      hasMoreOlder = response.messages.length >= PAGE_SIZE;
+    } finally {
+      loadingOlder = false;
+    }
   }
 
   async function selectChat(chat: Chat) {
@@ -115,7 +147,8 @@
           chatId: selected.id,
           role: 1,
           text,
-          meta: { steered: true }
+          meta: { steered: true },
+          createdAt: nowTimestamp()
         });
         // Steered user message went INTO the running response — insert it
         // ABOVE the streaming assistant bubble so the visual order matches
@@ -150,7 +183,8 @@
       chatId: selected?.id ?? 0n,
       role: 1,
       text,
-      meta: Object.keys(userMetaJson).length ? userMetaJson : undefined
+      meta: Object.keys(userMetaJson).length ? userMetaJson : undefined,
+      createdAt: nowTimestamp()
     });
     const clientId = crypto.randomUUID();
     streamingClientId = clientId;
@@ -159,7 +193,8 @@
       chatId: selected?.id ?? 0n,
       role: 2,
       text: "",
-      meta: { client_id: clientId }
+      meta: { client_id: clientId },
+      createdAt: nowTimestamp()
     });
     messages = [...messages, userMessage, streamingPlaceholder];
 
@@ -250,6 +285,7 @@
             tools = [];
             attachments = [];
             void loadChats(true);
+            turnSignal.doneCount += 1;
             break;
           }
           case "error":
@@ -327,7 +363,7 @@
         <Spinner />
       </div>
     {:else}
-      <MessageList messages={displayMessages} streamingClientId={streamingClientId} {tools} {attachments} {draftStartedAt} />
+      <MessageList messages={displayMessages} streamingClientId={streamingClientId} {tools} {attachments} {draftStartedAt} {loadingOlder} {hasMoreOlder} onloadolder={loadOlderMessages} />
       <Composer {busy} onsend={send} oninterrupt={interrupt} />
     {/if}
   </section>

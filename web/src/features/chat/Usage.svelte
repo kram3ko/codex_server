@@ -4,6 +4,7 @@
 
   import type { CodexUsage, UsageWindow } from "../../gen/codex/v1/chat_pb";
   import { chatClient } from "../../shared/lib/clients";
+  import { turnSignal } from "./turnSignal.svelte";
 
   let usage = $state<CodexUsage | null>(null);
   let loading = $state(false);
@@ -24,6 +25,14 @@
   }
 
   onMount(load);
+
+  // Auto-refresh после кожного завершеного turn'а — Codex плата за turn'и,
+  // тож rate-limit вікно змінюється саме у моменти done.
+  $effect(() => {
+    if (turnSignal.doneCount > 0) {
+      void load();
+    }
+  });
 
   function formatReset(w: UsageWindow): string {
     if (!w.resetsAt) return "—";

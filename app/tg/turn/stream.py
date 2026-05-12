@@ -58,6 +58,7 @@ async def stream_turn(
     last_event_type = "none"
 
     async def _on_idle() -> None:
+        diagnostics = client.turn_diagnostics()
         log.error(
             "tg_codex_idle_timeout",
             chat_id=message.chat.id if message.chat else None,
@@ -65,6 +66,7 @@ async def stream_turn(
             idle_timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
             events_count=events_count,
             last_event_type=last_event_type,
+            **diagnostics,
         )
 
     stream = client.run_turn(
