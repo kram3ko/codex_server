@@ -175,7 +175,6 @@ class AppServerClient:
         ws = self._ws
         if ws is None:
             raise RuntimeError("AppServerClient is not connected")
-        # Codex sidecar приймає тільки text-frame'и.
         await ws.send(orjson.dumps(payload).decode())
 
     async def _read_loop(self) -> None:

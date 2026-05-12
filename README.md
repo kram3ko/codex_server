@@ -121,6 +121,7 @@ Google озвучує без зірочок/backtick'ів.
 - **Self-restart:** `/restart` у боті → `DockerControlService.restart_container`
   через `/var/run/docker.sock` (без `docker` CLI в образі). Admin-only.
 - **Тести:** `uv run --group test pytest -q` (76 тестів).
+- **Web turn-registry у Redis** — `app/services/codex/turn_registry.py` тримає `{thread_id, turn_id}` живих турнів. Будь-який gunicorn worker'у бачить інший і шле `turn/interrupt|steer` через one-shot WS. `GUNICORN_WORKERS=2+` works.
 - **Bugsink порт `:8089`** має власний BUGSINK_AUTH_TOKEN на UI + DSN-auth на ingest. Не виставляти прямо на public-net без nginx + rate-limiting; tailnet/VPN OK для соло.
 - **Lint/types:** `uv run --group lint ruff check app/ tests/` + `pyright app/`.
 - **Гарячий редеплой коду:** edit → save → `docker exec codex-server gunicornc -c reload`

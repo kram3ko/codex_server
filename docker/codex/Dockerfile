@@ -3,7 +3,7 @@
 # щоб модель могла вільно користуватися shell_tool / unified_exec у workspace.
 FROM alpine:3.20
 
-ARG CODEX_VERSION=0.129.0
+ARG CODEX_VERSION=0.130.0
 ARG TARGETARCH
 
 RUN apk add --no-cache \

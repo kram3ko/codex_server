@@ -1,8 +1,8 @@
 """Pipeline кодекс-event'ів для одного TG turn'у.
 
-Споживає `session.client.run_turn`, маршалить події у progress / handlers.
-Каузу idle-timeout / error / cancel розрулює caller (`runner._run_locked`),
-а тут лише: idle watchdog, match-by-type, виклик outcomes.
+Споживає `client.run_turn`, маршалить події у progress / handlers. Caller
+(`runner._run_locked`) розрулює idle-timeout / cancel / unexpected; тут лише
+idle watchdog, match-by-type, виклик outcomes.
 """
 
 import structlog
@@ -10,6 +10,8 @@ from aiogram.types import Message
 
 from app.config import settings
 from app.services.bus.default import event_bus
+from app.services.codex import turn_registry
+from app.services.codex.client import CodexClient
 from app.services.codex.collector import StreamCollector
 from app.services.codex.events import (
     DoneEvent,
@@ -30,13 +32,25 @@ log = structlog.get_logger(__name__)
 
 
 async def stream_turn(
+    client: CodexClient,
     session: ChatSession,
     message: Message,
     prepared: PreparedTurn,
     progress: TurnProgressReporter,
 ) -> None:
     collector = StreamCollector()
-    stream = session.client.run_turn(prepared.text, attachments=prepared.attachments)
+
+    async def _on_started(turn_id: str, thread_id: str) -> None:
+        await turn_registry.register(
+            session.db_chat_id,
+            turn_registry.ActiveTurn(
+                thread_id=thread_id, turn_id=turn_id, is_admin=session.is_admin
+            ),
+        )
+
+    stream = client.run_turn(
+        prepared.text, attachments=prepared.attachments, on_started=_on_started
+    )
     events_count = 0
     last_event_type = "none"
 

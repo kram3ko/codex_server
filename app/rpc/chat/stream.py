@@ -22,6 +22,8 @@ from app.rpc.chat.mappers import (
 )
 from app.rpc.chat.tts import attach_tts_to_message
 from app.services.bus.default import event_bus
+from app.services.codex import turn_registry
+from app.services.codex.client import CodexClient
 from app.services.codex.collector import StreamCollector
 from app.services.codex.events import (
     Attachment,
@@ -30,16 +32,16 @@ from app.services.codex.events import (
     ToolCallRecord,
     iterate_with_idle_timeout,
 )
+from app.services.codex.runner import quarantine_thread
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
-from app.services.sessions.store import ChatSession
 from app.services.uploads.default import upload_service
 
 log = structlog.get_logger(__name__)
 
 
 async def stream_turn(
-    session: ChatSession,
+    client: CodexClient,
     text: str,
     persisted_chat_id: int,
     user_pk: int,
@@ -48,7 +50,14 @@ async def stream_turn(
     voice_reply: bool = False,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     collector = StreamCollector()
-    stream = session.client.run_turn(text, attachments=image_urls)
+
+    async def _on_started(turn_id: str, thread_id: str) -> None:
+        await turn_registry.register(
+            persisted_chat_id,
+            turn_registry.ActiveTurn(thread_id=thread_id, turn_id=turn_id, is_admin=True),
+        )
+
+    stream = client.run_turn(text, attachments=image_urls, on_started=_on_started)
     events_count = 0
     last_event_type = "none"
 
@@ -61,7 +70,7 @@ async def stream_turn(
             last_event_type=last_event_type,
         )
         with contextlib.suppress(Exception):
-            await session.client.interrupt()
+            await client.interrupt()
 
     try:
         async for ev in iterate_with_idle_timeout(
@@ -88,6 +97,11 @@ async def stream_turn(
                 case _:
                     yield chat_event_to_pb(ev)
     except TimeoutError:
+        # Idle-timeout — best-effort interrupt sidecar + quarantine thread,
+        # інакше наступний run_turn пробує resume тої самої мертвої thread.
+        with contextlib.suppress(Exception):
+            await client.interrupt()
+        await quarantine_thread(client.current_thread_id)
         detail = f"idle>{settings.WEB_TURN_TIMEOUT_SECONDS}s"
         yield error_event("turn_timeout", detail)
         await _emit_event(

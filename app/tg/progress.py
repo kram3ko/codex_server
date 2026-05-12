@@ -22,7 +22,6 @@ log = structlog.get_logger(__name__)
 
 CB_TURN_STOP = "turn:stop"
 CB_TURN_NEW = "turn:new"
-CB_TURN_STEER = "turn:steer"
 
 
 _ToolStatus = Literal["running", "done", "error"]
@@ -54,12 +53,11 @@ class _ToolEntry:
 
 
 def _turn_controls() -> InlineKeyboardMarkup:
+    # Steer-кнопку прибрано: достатньо просто написати наступне повідомлення —
+    # `runner._try_auto_steer` сам прив'яже його до running turn'а.
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="⏸ Зупинити", callback_data=CB_TURN_STOP),
-                InlineKeyboardButton(text="💬 Дописати", callback_data=CB_TURN_STEER),
-            ],
+            [InlineKeyboardButton(text="⏸ Зупинити", callback_data=CB_TURN_STOP)],
             [InlineKeyboardButton(text="🆕 Новий thread", callback_data=CB_TURN_NEW)],
         ]
     )

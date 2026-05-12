@@ -1,12 +1,13 @@
-"""TurnRunner — тонка orchestration-точка для TG-handler'а.
+"""TurnRunner — orchestration-точка для TG-handler'а.
 
-Відповідає тільки за: user/chat bootstrap, prepare_turn, lock'инг + lifecycle
-прогресу, виклик stream_turn. Streaming, persistence, outcome — у сусідніх
-модулях.
+Кожен turn = fresh Codex WebSocket (`open_codex_turn`). Це і дає auto-steer:
+поки `active.get(tg_chat_id)` повертає running handle — наступне повідомлення
+вирушає у `client.steer(...)` замість нового turn'у. Юзер не натискає кнопку
+«continue» — просто пише далі. Якщо steer не accept'нувся (turn вже завершився)
+— fall through до нового turn'а.
 """
 
 import asyncio
-import contextlib
 
 import structlog
 from aiogram.types import Message
@@ -14,6 +15,8 @@ from aiogram.types import Message
 from app.config import settings
 from app.db.base import SessionLocal
 from app.services.chats.default import chat_service
+from app.services.codex import turn_registry
+from app.services.codex.runner import open_codex_turn
 from app.services.sessions.store import ChatSession
 from app.services.stt.base import STTBackend
 from app.services.users.default import user_service
@@ -21,7 +24,7 @@ from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn, prepare_turn
 from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSessionStore
-from app.tg.turn.control import auto_reset_thread, emit_failure, try_steer
+from app.tg.turn.control import auto_reset_thread, emit_failure
 from app.tg.turn.persistence import persist_user_turn
 from app.tg.turn.stream import stream_turn
 
@@ -71,10 +74,12 @@ class TurnRunner:
             display_name=display_name,
         )
 
-        if session.consume_steer():
-            steered = await try_steer(session, message, prepared)
-            if steered:
-                return
+        # Auto-steer: якщо у цьому чаті прямо зараз стрімиться turn —
+        # дописуємо текст у running turn замість нового. Codex steer reject'не
+        # якщо turn вже завершився між нашою перевіркою і викликом — fall
+        # through до нового turn'а.
+        if prepared.text and await _try_auto_steer(session, prepared):
+            return
 
         await persist_user_turn(session, prepared)
 
@@ -93,11 +98,14 @@ class TurnRunner:
         progress: TurnProgressReporter,
     ) -> None:
         async with session.turn_lock:
-            await ChatSessionStore.seed_history_if_fresh_thread(session)
             current = asyncio.current_task()
             session.current_turn_task = current
             try:
-                await stream_turn(session, message, prepared, progress)
+                async with open_codex_turn(session.db_chat_id, is_admin=session.is_admin) as client:
+                    try:
+                        await stream_turn(client, session, message, prepared, progress)
+                    finally:
+                        await turn_registry.drop(session.db_chat_id)
             except TimeoutError:
                 await self._on_timeout(session, message, progress)
             except asyncio.CancelledError:
@@ -121,8 +129,6 @@ class TurnRunner:
             chat_id=message.chat.id if message.chat else None,
             idle_timeout_s=settings.TG_TURN_TIMEOUT_SECONDS,
         )
-        with contextlib.suppress(Exception):
-            await session.client.interrupt()
         await emit_failure(
             session,
             code="turn_timeout",
@@ -153,3 +159,18 @@ class TurnRunner:
         )
         await message.answer(tg_markdown.escape(f"Помилка: {exc}"))
         await emit_failure(session, exc_type=type(exc).__name__, detail=str(exc))
+
+
+async def _try_auto_steer(session: ChatSession, prepared: PreparedTurn) -> bool:
+    record = await turn_registry.get(session.db_chat_id)
+    if record is None:
+        return False
+    try:
+        accepted = await turn_registry.send_steer(record, prepared.text)
+    except Exception as exc:  # noqa: BLE001 — steer RPC не повинен впасти юзера
+        log.warning("tg_auto_steer_failed", error=str(exc))
+        return False
+    if not accepted:
+        return False
+    await persist_user_turn(session, prepared)
+    return True

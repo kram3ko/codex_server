@@ -1,11 +1,13 @@
 """ChatRPC — тонкі handler'и для ChatService.
 
-CRUD'и пагінуються через `guards.resolve_limit`. `run_turn` делегує streaming-
-pipeline у `stream.stream_turn`, тут лише: auth, lock, persist user message,
-emit TURN_STARTED.
+Per-turn lifecycle: кожен `run_turn` відкриває fresh Codex WebSocket → handshake
+→ resume/start thread → стрім → close. Між RPC викликами state'у in-process нема.
+
+Interrupt/Steer працюють cross-worker через Redis `turn_registry`: будь-який
+воркер бачить активний turn'а і шле `turn/interrupt|steer` у sidecar одноразовою
+WS. Сумісно з `gunicorn -w N`.
 """
 
-import asyncio
 from collections.abc import AsyncIterator
 from typing import Any, override
 
@@ -25,12 +27,16 @@ from app.rpc.chat.mappers import codex_usage_to_pb, error_event
 from app.rpc.chat.stream import stream_turn
 from app.rpc.chat.uploads import resolve_uploads
 from app.services.chats.default import chat_service
+from app.services.codex import turn_registry
+from app.services.codex.runner import open_codex_turn
 from app.services.codex_usage.default import codex_usage_service
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
-from app.services.sessions.web import web_sessions
+from app.services.users.default import user_service
 
 log = structlog.get_logger(__name__)
+
+_WEB_USER_EMAIL = "web@codex.local"
 
 
 class ChatRPC(ChatProtocol):
@@ -91,18 +97,16 @@ class ChatRPC(ChatProtocol):
         request: chat_pb2.RunTurnRequest,
         ctx: RequestContext,
     ) -> AsyncIterator[chat_pb2.ChatEvent]:
-        user = await require_user(ctx)
+        await require_user(ctx)
         text = request.text.strip()
         if not text:
             yield error_event("empty_text", "text is required")
             return
 
-        session = await web_sessions.get_or_open(user.id)
-        if request.HasField("chat_id") and request.chat_id != session.db_chat_id:
+        persisted_chat_id, user_pk = await _ensure_web_chat()
+        if request.HasField("chat_id") and request.chat_id != persisted_chat_id:
             raise ConnectError(Code.NOT_FOUND, f"chat {request.chat_id} not found")
 
-        persisted_chat_id = session.db_chat_id
-        user_pk = session.db_user_id
         data_urls, image_ids, audio_ids = await resolve_uploads(
             list(request.upload_ids), user_id=user_pk
         )
@@ -125,13 +129,10 @@ class ChatRPC(ChatProtocol):
             )
             await db.commit()
 
-        async with session.turn_lock:
-            await web_sessions.seed_history_if_fresh_thread(session)
-            current = asyncio.current_task()
-            session.current_turn_task = current
+        async with open_codex_turn(persisted_chat_id, is_admin=True) as client:
             try:
                 async for event in stream_turn(
-                    session,
+                    client,
                     text,
                     persisted_chat_id,
                     user_pk,
@@ -140,8 +141,7 @@ class ChatRPC(ChatProtocol):
                 ):
                     yield event
             finally:
-                if session.current_turn_task is current:
-                    session.current_turn_task = None
+                await turn_registry.drop(persisted_chat_id)
 
     @override
     async def interrupt_turn(
@@ -152,9 +152,18 @@ class ChatRPC(ChatProtocol):
         user = await require_user(ctx)
         async with SessionLocal() as db:
             chat = await load_chat_owned(db, request.chat_id, user.id)
-        session = await web_sessions.get(user.id)
-        if session is not None and session.db_chat_id == chat.id:
-            await web_sessions.cancel_session_turn(session)
+        record = await turn_registry.get(chat.id)
+        if record is None:
+            return chat_pb2.InterruptTurnResponse()
+        try:
+            await turn_registry.send_interrupt(record)
+        except Exception as exc:  # noqa: BLE001 — interrupt best-effort
+            log.warning(
+                "web_interrupt_rpc_failed",
+                chat_id=chat.id,
+                user_id=user.id,
+                error=str(exc),
+            )
         return chat_pb2.InterruptTurnResponse()
 
     @override
@@ -163,17 +172,19 @@ class ChatRPC(ChatProtocol):
         request: chat_pb2.SteerTurnRequest,
         ctx: RequestContext,
     ) -> chat_pb2.SteerTurnResponse:
-        user = await require_user(ctx)
+        await require_user(ctx)
         text = request.text.strip()
         if not text:
             return chat_pb2.SteerTurnResponse(accepted=False)
-        session = await web_sessions.get(user.id)
-        if session is None or session.db_chat_id != request.chat_id:
+        record = await turn_registry.get(request.chat_id)
+        if record is None:
             return chat_pb2.SteerTurnResponse(accepted=False)
-        accepted = await session.client.steer(text)
+        accepted = await turn_registry.send_steer(record, text)
         if accepted:
             async with SessionLocal() as db:
-                await message_service.append(db, session.db_chat_id, MessageRole.USER, text)
+                await message_service.append(
+                    db, request.chat_id, MessageRole.USER, text
+                )
                 await db.commit()
         return chat_pb2.SteerTurnResponse(accepted=accepted)
 
@@ -183,9 +194,20 @@ class ChatRPC(ChatProtocol):
         request: chat_pb2.GetCodexUsageRequest,
         ctx: RequestContext,
     ) -> chat_pb2.CodexUsage:
-        user = await require_user(ctx)
-        session = await web_sessions.get_or_open(user.id)
-        usage = await codex_usage_service.latest(session.client)
+        del request
+        await require_user(ctx)
+        # Open fresh client just to read rate-limits; cheap (handshake only).
+        persisted_chat_id, _ = await _ensure_web_chat()
+        async with open_codex_turn(persisted_chat_id, is_admin=True, seed_history=False) as client:
+            usage = await codex_usage_service.latest(client)
         if usage is None:
             return chat_pb2.CodexUsage()
         return codex_usage_to_pb(usage)
+
+
+async def _ensure_web_chat() -> tuple[int, int]:
+    async with SessionLocal() as db:
+        web_user = await user_service.get_or_create_by_email(db, _WEB_USER_EMAIL)
+        chat = await chat_service.get_or_create_for_web(db, web_user.id)
+        await db.commit()
+        return chat.id, web_user.id
