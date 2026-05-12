@@ -45,7 +45,7 @@ class HealthRPC(HealthProtocol):
                 rd = tg.create_task(_probe_redis())
                 cx = tg.create_task(_probe_codex_sidecar())
             results = {"postgres": pg.result(), "redis": rd.result(), "codex": cx.result()}
-        except* Exception as eg:  # noqa: BLE001
+        except* Exception as eg:  # noqa: BLE001 — TaskGroup ExceptionGroup, лог + NOT_SERVING
             for exc in eg.exceptions:
                 log.warning("healthcheck_probe_failed", error=str(exc))
 

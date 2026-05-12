@@ -12,7 +12,7 @@ from typing import Literal
 
 import structlog
 from aiogram.enums import ChatAction
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.config import settings
@@ -169,7 +169,7 @@ class TurnProgressReporter:
             try:
                 for piece in tg_markdown.render_html(visible):
                     await self._message.answer(piece)
-            except Exception as exc:  # noqa: BLE001
+            except TelegramAPIError as exc:
                 log.warning("tg_stream_chunk_failed", error=str(exc))
                 return
             self._committed_text += raw_chunk
@@ -220,7 +220,7 @@ class TurnProgressReporter:
                 self._status_paused_until = time.monotonic() + exc.retry_after
                 log.warning("tg_status_flood", retry_after=exc.retry_after)
                 return
-            except Exception as exc:  # noqa: BLE001
+            except TelegramAPIError as exc:
                 log.warning("tg_status_failed", error=str(exc))
                 return
         self._last_status_text = text
@@ -258,7 +258,7 @@ class TurnProgressReporter:
                     draft_id=self._draft_id,
                     text=text[-_DRAFT_TEXT_MAX:],
                 )
-            except Exception as exc:  # noqa: BLE001
+            except TelegramAPIError as exc:
                 log.warning("tg_draft_failed", error=str(exc))
                 return
         self._last_draft_text = text

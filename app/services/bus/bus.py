@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 import structlog
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
+from redis.exceptions import RedisError
 
 from app.services.codex.events import ChatEvent, bytes_to_event, event_to_bytes
 
@@ -32,7 +33,7 @@ class EventBus:
         """Best-effort fan-out. Bus failures must not poison the turn."""
         try:
             await self._redis.publish(self.channel_for(chat_id), event_to_bytes(event))
-        except Exception as exc:  # noqa: BLE001
+        except RedisError as exc:
             log.warning("bus_publish_failed", chat_id=chat_id, error=str(exc))
 
     @asynccontextmanager
@@ -66,5 +67,5 @@ class EventBus:
 async def _suppress_redis_errors():
     try:
         yield
-    except Exception as exc:  # noqa: BLE001
+    except RedisError as exc:
         log.warning("bus_unsubscribe_failed", error=str(exc))

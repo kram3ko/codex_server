@@ -18,8 +18,10 @@ Personal AI playground: FastAPI backend з Codex CLI app-server, Telegram bot
    Cloud) → `bot.send_voice`. Multi-bubble streaming з throttle, inline
    controls (Stop / Steer / New thread), native image generation через
    Codex CLI v2 `ThreadItem` + MCP `show_image` для re-delivery без regen.
-3. **Web chat** — Svelte 5 + Vite + Tailwind 4 + connect-es. (TODO — фаза F,
-   див. `estimates/INTEGRATION.md`.)
+3. **Web chat** — Svelte 5 + Vite + Tailwind 4 + connect-es. Streaming тurns
+   через ConnectRPC `runTurn`, typewriter-render, інтеррапт/стір, voice in/out,
+   image attach. Tool-calls (live і historical) — згорнутий «N completed»
+   дропдаун (`CompletedTools.svelte`).
 
 ## Сховища
 
@@ -118,7 +120,7 @@ Google озвучує без зірочок/backtick'ів.
   (User.role enum).
 - **Self-restart:** `/restart` у боті → `DockerControlService.restart_container`
   через `/var/run/docker.sock` (без `docker` CLI в образі). Admin-only.
-- **Тести:** `uv run --group test pytest -q` (37 тестів).
+- **Тести:** `uv run --group test pytest -q` (72 тести).
 - **Lint/types:** `uv run --group lint ruff check app/ tests/` + `pyright app/`.
 - **Гарячий редеплой коду:** edit → save → `docker exec codex-server gunicornc -c reload`
   (workspace mount = source of truth, alembic зробить pending міграції).
@@ -136,8 +138,15 @@ codex_server/
 │   │   ├── errors.py
 │   │   └── tools/              show_image (re-deliver image without regen)
 │   ├── rpc/                    Connect-RPC handlers
-│   │   ├── auth.py, health.py, user.py, chat.py, message.py, event.py
+│   │   ├── auth.py, health.py, user.py, message.py, event.py
 │   │   ├── notes.py, uploads.py
+│   │   ├── chat/               package — split kitchen-sink:
+│   │   │   ├── service.py      ChatRPC (thin handlers)
+│   │   │   ├── stream.py       codex events → pb pipeline (idle, errors, persist)
+│   │   │   ├── mappers.py      ChatEvent ↔ pb + redaction + usage
+│   │   │   ├── uploads.py      resolve upload_ids → codex-input
+│   │   │   ├── tts.py          async post-turn TTS attach
+│   │   │   └── guards.py       pagination + ownership check
 │   │   ├── _mappers.py         ORM ↔ pb conversions (single source of truth)
 │   │   └── router.py           ConnectRouter ASGI mount
 │   ├── ws/chat.py              /chat/ws bidi-token-стрім
@@ -145,7 +154,12 @@ codex_server/
 │   │   ├── service.py          bot lifecycle
 │   │   ├── handlers.py         /new /stop /reset /restart + callbacks
 │   │   ├── sessions.py         per-chat CodexClient store + admin/guest routing
-│   │   ├── turn.py             TurnRunner (persist + stream + emit events)
+│   │   ├── turn/               package — split kitchen-sink:
+│   │   │   ├── runner.py       TurnRunner (orchestration entry)
+│   │   │   ├── stream.py       codex event loop
+│   │   │   ├── outcomes.py     handle_done / empty / dropped + send_response
+│   │   │   ├── persistence.py  user/assistant message + journal
+│   │   │   └── control.py      cancel / auto-reset / steer / emit_failure
 │   │   ├── progress.py         status bubble + multi-bubble streaming
 │   │   ├── output.py           send_text / send_voice_reply / send_attachment
 │   │   ├── media.py            STT + attachment pipeline для inbound
@@ -154,9 +168,15 @@ codex_server/
 │   │                           Upload, Note + StrEnum kinds; UserRole)
 │   ├── services/               <resource>/{service.py, default.py, __init__.py}
 │   │   ├── auth/               JWT issue/verify
-│   │   ├── codex/              CodexClient + transport (JSON-RPC over WS)
-│   │   │                       + events.py (typed pydantic ChatEvent +
-│   │   │                       ToolCallRecord TypedDict)
+│   │   ├── codex/              Codex CLI app-server клієнт:
+│   │   │   ├── transport.py    JSON-RPC over WS + notification handler hook
+│   │   │   ├── routing.py      TurnRouter — per-turn-id fan-out (фіксить
+│   │   │   │                   leak'и нот з минулого турну в наступний)
+│   │   │   ├── client.py       CodexClient (handshake, threads, run_turn)
+│   │   │   ├── collector.py    StreamCollector — shared state mutator
+│   │   │   │                   (web/tg pipelines не дублюють absorb-logic)
+│   │   │   ├── events/         types.py + translate.py + idle.py
+│   │   │   └── history.py
 │   │   ├── chats/, users/, messages/, events/, uploads/, notes/
 │   │   ├── bus/                Redis pub/sub fan-out
 │   │   ├── cache/              Redis client singleton
@@ -170,9 +190,10 @@ codex_server/
 ├── protos/codex/v1/            *.proto (auth, chat, common, event, message,
 │                               user, notes, uploads)
 ├── migrations/versions/        alembic (init_schema, add_user_role)
-├── tests/                      pytest (chat_session, chat_ws, codex_client,
-│                               messages_service, tg_markdown, tg_progress,
-│                               tg_turn, user_service)
+├── tests/                      pytest (auth, chat_rpc, chat_session,
+│                               codex_collector, codex_routing, codex_streaming,
+│                               codex_translate, messages_service, tg_markdown,
+│                               tg_progress, tg_turn, user_service)
 ├── docker/codex/               Dockerfile + entrypoint + AGENTS-guest.md
 ├── docker/server/              entrypoint.sh
 ├── docker-compose.yml          codex-server + codex-cli +

@@ -84,7 +84,7 @@ class SpeechmaticsSTT:
                         log.info("speechmatics_no_speech", reason=str(exc)[:120])
                         return ""
                     raise AudioTranscriptionError(f"Speechmatics job failed: {exc}") from exc
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — SDK багатоликий, wrap in domain error
                     raise AudioTranscriptionError(
                         f"Speechmatics transcription failed: {exc}"
                     ) from exc

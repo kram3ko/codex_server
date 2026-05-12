@@ -1,9 +1,10 @@
 <script lang="ts">
   import { Check, Copy, Sparkles, UserRound } from "lucide-svelte";
 
+  import CompletedTools from "./CompletedTools.svelte";
   import HistoricalAudio from "./HistoricalAudio.svelte";
   import HistoricalImage from "./HistoricalImage.svelte";
-  import ToolCall, { type ToolEvent } from "./ToolCall.svelte";
+  import { type ToolEvent } from "./ToolCall.svelte";
   import { renderMarkdown } from "./markdown";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import { formatTime } from "../../shared/lib/time";
@@ -139,10 +140,8 @@
       </div>
 
       {#if historicalCalls.length}
-        <div class="mt-3 space-y-2">
-          {#each historicalCalls as call (call.id)}
-            <ToolCall event={call} />
-          {/each}
+        <div class="mt-3">
+          <CompletedTools tools={historicalCalls} label="tool calls" />
         </div>
       {/if}
 

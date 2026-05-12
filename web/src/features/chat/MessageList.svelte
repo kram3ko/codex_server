@@ -4,6 +4,7 @@
   import type { Attachment as ChatAttachment } from "../../gen/codex/v1/chat_pb";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import Attachment from "./Attachment.svelte";
+  import CompletedTools from "./CompletedTools.svelte";
   import Message from "./Message.svelte";
   import ToolCall, { type ToolEvent } from "./ToolCall.svelte";
 
@@ -23,11 +24,12 @@
 
   let container = $state<HTMLDivElement | null>(null);
   let stickToBottom = $state(true);
-  let showCompleted = $state(false);
 
   const runningTools = $derived(tools.filter((t) => t.status === "running"));
   const completedTools = $derived(tools.filter((t) => t.status !== "running"));
   const currentToolName = $derived(runningTools[0]?.name);
+
+
 
   // Напрямок скролу — найнадійніший signal: user-up → unstick; back-to-bottom
   // → re-stick. Programmatic `scrollTop = scrollHeight` завжди йде ВНИЗ, тож
@@ -83,21 +85,7 @@
         {#each runningTools as tool (tool.id)}
           <ToolCall event={tool} />
         {/each}
-        {#if completedTools.length}
-          <button
-            type="button"
-            class="flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-left text-xs text-[var(--color-text-muted)] transition hover:bg-[oklch(96%_0.01_100/0.04)]"
-            onclick={() => (showCompleted = !showCompleted)}
-          >
-            <span>{showCompleted ? "▼" : "▶"}</span>
-            <span>{completedTools.length} completed</span>
-          </button>
-          {#if showCompleted}
-            {#each completedTools as tool (tool.id)}
-              <ToolCall event={tool} />
-            {/each}
-          {/if}
-        {/if}
+        <CompletedTools tools={completedTools} />
       </div>
     {/if}
 
