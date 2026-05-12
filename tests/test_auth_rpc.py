@@ -43,10 +43,13 @@ class _Ctx:
     def request_headers(self) -> dict[str, str]:
         return self._headers
 
+    def client_address(self) -> str | None:
+        return None
+
 
 def _make_auth_service() -> AuthService:
     cfg = Settings(
-        JWT_SECRET="test-secret-do-not-use-in-prod",
+        JWT_SECRET="test-secret-do-not-use-in-prod-32+chars",
         JWT_ALGORITHM="HS256",
         JWT_TTL_HOURS=1,
     )

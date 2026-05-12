@@ -29,6 +29,10 @@ log = structlog.get_logger(__name__)
 # Розмір буфера на один turn. Codex стрімить десятки delta + кілька item-нот,
 # 256 з запасом. QueueFull маркує сигнал що caller не встигає.
 _BUFFER_MAX: Final[int] = 256
+# Hard cap на кількість одночасно живих буферів. Захищає від orphan-leak'у
+# коли турн крашиться без DoneEvent і ніхто не дзвонить subscribe_turn для
+# нового id. При перевищенні — evict найстаршого (insertion-order dict).
+_MAX_BUFFERED_TURNS: Final[int] = 8
 
 
 class TurnRouter:
@@ -42,6 +46,7 @@ class TurnRouter:
     def __init__(self, transport: AppServerClient) -> None:
         self._transport = transport
         self._buffers: dict[str, asyncio.Queue[Notification | None]] = {}
+        self._subscribed: set[str] = set()
         transport.set_notification_handler(self._on_notification)
         transport.set_close_handler(self._on_close)
 
@@ -57,14 +62,21 @@ class TurnRouter:
         Yields: async iterator, що завершується коли transport закривається
         або context exit'ить. Caller відповідає за завершення на DoneEvent.
         """
+        if turn_id in self._subscribed:
+            raise RuntimeError(
+                f"duplicate subscribe_turn({turn_id!r}) — contract violation; "
+                "single turn per thread per sidecar"
+            )
         self._evict_stale(keep=turn_id)
         queue = self._buffers.get(turn_id)
         if queue is None:
             queue = asyncio.Queue(maxsize=_BUFFER_MAX)
             self._buffers[turn_id] = queue
+        self._subscribed.add(turn_id)
         try:
             yield self._consume(queue)
         finally:
+            self._subscribed.discard(turn_id)
             self._buffers.pop(turn_id, None)
 
     def _on_notification(self, note: Notification) -> None:
@@ -74,6 +86,8 @@ class TurnRouter:
             return
         queue = self._buffers.get(note.turn_id)
         if queue is None:
+            if len(self._buffers) >= _MAX_BUFFERED_TURNS:
+                self._evict_oldest_unsubscribed()
             queue = asyncio.Queue(maxsize=_BUFFER_MAX)
             self._buffers[note.turn_id] = queue
         try:
@@ -85,6 +99,16 @@ class TurnRouter:
                 method=note.method,
                 size=queue.qsize(),
             )
+
+    def _evict_oldest_unsubscribed(self) -> None:
+        """Drop oldest буфер що не має активного subscriber'а (insertion order)."""
+        for tid in list(self._buffers):
+            if tid in self._subscribed:
+                continue
+            queue = self._buffers.pop(tid)
+            log.info("codex_evicted_orphan_turn", turn_id=tid, dropped=queue.qsize())
+            self._signal_end(queue)
+            return
 
     def _on_close(self) -> None:
         for queue in self._buffers.values():

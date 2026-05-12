@@ -1,4 +1,4 @@
-"""AuthService — argon2id hashing + JWT issue/validate."""
+"""AuthService — argon2id hashing + JWT issue/validate + Settings validator."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -7,6 +7,16 @@ import pytest
 
 from app.config import Settings
 from app.services.auth.service import AuthService, InvalidToken
+
+
+def test_settings_rejects_short_jwt_secret() -> None:
+    with pytest.raises(ValueError, match="JWT_SECRET must be ≥32 chars"):
+        Settings(JWT_SECRET="too-short")  # type: ignore[arg-type]
+
+
+def test_settings_rejects_empty_jwt_secret() -> None:
+    with pytest.raises(ValueError, match="JWT_SECRET must be ≥32 chars"):
+        Settings(JWT_SECRET="   ")  # type: ignore[arg-type]
 
 
 def _service(**overrides: object) -> AuthService:

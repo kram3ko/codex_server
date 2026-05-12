@@ -120,7 +120,8 @@ Google озвучує без зірочок/backtick'ів.
   (User.role enum).
 - **Self-restart:** `/restart` у боті → `DockerControlService.restart_container`
   через `/var/run/docker.sock` (без `docker` CLI в образі). Admin-only.
-- **Тести:** `uv run --group test pytest -q` (72 тести).
+- **Тести:** `uv run --group test pytest -q` (76 тестів).
+- **Bugsink порт `:8089`** має власний BUGSINK_AUTH_TOKEN на UI + DSN-auth на ingest. Не виставляти прямо на public-net без nginx + rate-limiting; tailnet/VPN OK для соло.
 - **Lint/types:** `uv run --group lint ruff check app/ tests/` + `pyright app/`.
 - **Гарячий редеплой коду:** edit → save → `docker exec codex-server gunicornc -c reload`
   (workspace mount = source of truth, alembic зробить pending міграції).

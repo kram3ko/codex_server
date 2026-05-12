@@ -109,6 +109,34 @@ async def test_close_signals_open_subscriptions() -> None:
 
 
 @pytest.mark.asyncio
+async def test_duplicate_subscribe_same_turn_raises() -> None:
+    # Контракт: один турн на сесію. Дві concurrent підписки на той самий
+    # turn_id мовчки розщепили би ноти між consumer'ами — explicit error.
+    transport = FakeTransport()
+    router = TurnRouter(transport)  # type: ignore[arg-type]
+
+    async with router.subscribe_turn("turn-A"):
+        with pytest.raises(RuntimeError, match="duplicate subscribe_turn"):
+            async with router.subscribe_turn("turn-A"):
+                pass
+
+
+@pytest.mark.asyncio
+async def test_orphan_buffers_capped_by_max() -> None:
+    # Турни крашаться без DoneEvent → їх буфери лишаються живі. Cap у 8 захищає
+    # від unbounded leak'у; найстарший unsubscribed evict'иться першим.
+    transport = FakeTransport()
+    router = TurnRouter(transport)  # type: ignore[arg-type]
+
+    # 9 турнів без жодного subscribe_turn → 1-й має evict'нутись
+    for i in range(9):
+        transport.emit(_note(f"turn-{i}"))
+
+    assert "turn-0" not in router._buffers  # noqa: SLF001
+    assert len(router._buffers) == 8  # noqa: SLF001
+
+
+@pytest.mark.asyncio
 async def test_notes_arriving_before_subscribe_are_buffered() -> None:
     # Race: turn/start response повертається з turn_id, але ноти для цього
     # turn'а sidecar може встигнути надіслати до того як run_turn дійде до

@@ -77,12 +77,21 @@ async def get_error(
         raise ToolError(f"no_events_for_issue: {issue_id}")
 
     detail = await bugsink_client.get_event(results[0]["id"])
+    data = detail.get("data") or {}
+    # Whitelist: stacktrace + minimal context. Raw `data` несе request body,
+    # headers, breadcrumbs з user-prompt'ами — LLM не повинен це бачити.
     return {
         "issue_id": issue_id,
         "event_id": detail["id"],
         "timestamp": detail.get("timestamp"),
         "stacktrace": detail.get("stacktrace_md", ""),
-        "data": detail.get("data"),
+        "platform": data.get("platform"),
+        "level": data.get("level"),
+        "logger": data.get("logger"),
+        "environment": data.get("environment"),
+        "release": data.get("release"),
+        "transaction": data.get("transaction"),
+        "tags": data.get("tags"),
     }
 
 

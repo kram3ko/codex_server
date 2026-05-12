@@ -8,7 +8,7 @@ import { createClient } from "@connectrpc/connect";
 
 import { AuthService } from "../../gen/codex/v1/auth_pb";
 import { clearToken, getToken, setToken } from "../../shared/lib/token";
-import { transport } from "../../shared/lib/transport";
+import { registerRefresh, transport } from "../../shared/lib/transport";
 
 const REFRESH_LEAD_SECONDS = 60;
 const LOGOUT_EVENT = "auth:logout";
@@ -32,6 +32,7 @@ function isLive(token: string | null): token is string {
 
 let token: string | null = getToken();
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let refreshInFlight: Promise<boolean> | null = null;
 const client = createClient(AuthService, transport);
 
 function cancelTimer(): void {
@@ -70,15 +71,24 @@ export const auth = {
     apply(response.accessToken);
   },
 
+  // Single-flight: одночасні 401 від N RPC викликають refresh один раз.
   async refresh(): Promise<boolean> {
     if (!token) return false;
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = (async () => {
+      try {
+        const response = await client.refresh({});
+        apply(response.accessToken);
+        return true;
+      } catch {
+        auth.logout();
+        return false;
+      }
+    })();
     try {
-      const response = await client.refresh({});
-      apply(response.accessToken);
-      return true;
-    } catch {
-      auth.logout();
-      return false;
+      return await refreshInFlight;
+    } finally {
+      refreshInFlight = null;
     }
   },
 
@@ -100,3 +110,6 @@ if (token && !isLive(token)) {
 } else if (token) {
   scheduleRefresh();
 }
+
+// Експонуємо refresh для transport-interceptor'у (reactive 401 → refresh → retry).
+registerRefresh(() => auth.refresh());

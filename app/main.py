@@ -19,6 +19,7 @@ from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from app.api.health import router as health_router
 from app.config import settings
+from app.services.errors.scrub import scrub_event
 
 # Init at import time so boot-time errors (alembic, lifespan) are captured.
 # Empty DSN → SDK no-op, zero overhead.
@@ -28,6 +29,7 @@ if settings.SENTRY_DSN:
         release=settings.SENTRY_RELEASE or None,
         traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
         send_default_pii=False,
+        before_send=scrub_event,
         integrations=[
             StarletteIntegration(),
             FastApiIntegration(),

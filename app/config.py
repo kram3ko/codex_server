@@ -1,5 +1,8 @@
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 32 bytes = HMAC-SHA256 block size, RFC 7518 §3.2 рекомендований мінімум.
+_JWT_SECRET_MIN_LEN = 32
 
 
 class Settings(BaseSettings):
@@ -75,7 +78,7 @@ class Settings(BaseSettings):
     # ключ для підпису access-токена.
     ADMIN_EMAIL: str = ""
     ADMIN_PASSWORD: str = ""
-    JWT_SECRET: str = "change-me-please"
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_TTL_HOURS: int = 24
 
@@ -106,6 +109,17 @@ class Settings(BaseSettings):
         if not stripped:
             return set()
         return {int(part) for part in stripped.split(",") if part.strip()}
+
+    @model_validator(mode="after")
+    def _validate_jwt_secret(self) -> Settings:
+        # Fail-fast щоб порожнє/коротке значення з .env не підписувало токени
+        # weak ключем. Generate via: secrets.token_urlsafe(64).
+        if len(self.JWT_SECRET.strip()) < _JWT_SECRET_MIN_LEN:
+            raise ValueError(
+                f"JWT_SECRET must be ≥{_JWT_SECRET_MIN_LEN} chars (was "
+                f"{len(self.JWT_SECRET.strip())}); set in .env"
+            )
+        return self
 
 
 settings = Settings()

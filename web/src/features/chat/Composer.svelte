@@ -1,5 +1,6 @@
 <script lang="ts">
   import { File as FileIcon, Mic, Paperclip, Send, Square, X } from "lucide-svelte";
+  import { onDestroy } from "svelte";
 
   import Spinner from "../../shared/components/Spinner.svelte";
   import { uploadsClient } from "../../shared/lib/clients";
@@ -26,11 +27,22 @@
   let text = $state("");
   let pending = $state<Pending[]>([]);
   let recorder = $state<MediaRecorder | null>(null);
+  let activeStream: MediaStream | null = null;
   let recording = $state(false);
   let transcribing = $state(false);
   let audioUploadIds = $state<bigint[]>([]);
   let recordingStartedAt = $state<number | null>(null);
   let recordingElapsed = $state(0);
+
+  // Якщо компонент знесли під час запису — стрім лишається активним і
+  // browser mic-індикатор горить. Закриваємо явно.
+  onDestroy(() => {
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    }
+    activeStream?.getTracks().forEach((t) => t.stop());
+    activeStream = null;
+  });
 
   $effect(() => {
     if (!recording || !recordingStartedAt) {
@@ -178,6 +190,7 @@
     } catch {
       return;
     }
+    activeStream = stream;
     const mr = new MediaRecorder(stream);
     const chunks: Blob[] = [];
     mr.ondataavailable = (e) => {
@@ -185,6 +198,7 @@
     };
     mr.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
+      activeStream = null;
       recording = false;
       recorder = null;
       recordingStartedAt = null;

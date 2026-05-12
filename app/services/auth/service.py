@@ -36,7 +36,7 @@ class AuthService:
         try:
             self._hasher.verify(stored_hash, plain)
             return True
-        except VerifyMismatchError, InvalidHashError:
+        except (VerifyMismatchError, InvalidHashError):
             return False
 
     def needs_rehash(self, stored_hash: str | None) -> bool:

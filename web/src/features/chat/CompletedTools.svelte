@@ -1,11 +1,8 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight } from "lucide-svelte";
-
   import ToolCall, { type ToolEvent } from "./ToolCall.svelte";
 
-  // Shared collapse-блок для пачки tool-events. Використовується:
-  // - MessageList:    completed-pile активного турну
-  // - Message:        historical message.meta.calls
+  // Shared collapse-блок для пачки tool-events. <details>/<summary> дає
+  // accessibility (aria-expanded, keyboard) безкоштовно, без manual $state.
   let {
     tools,
     label = "completed"
@@ -13,28 +10,27 @@
     tools: ToolEvent[];
     label?: string;
   } = $props();
-
-  let open = $state(false);
 </script>
 
 {#if tools.length}
-  <div class="space-y-2">
-    <button
-      type="button"
-      class="flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-left text-xs text-[var(--color-text-muted)] transition hover:bg-[oklch(96%_0.01_100/0.04)]"
-      onclick={() => (open = !open)}
+  <details class="space-y-2 [&[open]>summary>svg]:rotate-90">
+    <summary
+      class="flex w-full cursor-pointer list-none items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-xs text-[var(--color-text-muted)] transition hover:bg-[oklch(96%_0.01_100/0.04)]"
     >
-      {#if open}
-        <ChevronDown size={13} />
-      {:else}
-        <ChevronRight size={13} />
-      {/if}
+      <svg
+        class="size-3 transition-transform"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        stroke-width="2.5"
+        aria-hidden="true"
+      >
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+      </svg>
       <span>{tools.length} {label}</span>
-    </button>
-    {#if open}
-      {#each tools as tool (tool.id)}
-        <ToolCall event={tool} />
-      {/each}
-    {/if}
-  </div>
+    </summary>
+    {#each tools as tool (tool.id)}
+      <ToolCall event={tool} />
+    {/each}
+  </details>
 {/if}
