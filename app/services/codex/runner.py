@@ -16,6 +16,7 @@ import contextlib
 from collections.abc import AsyncIterator
 
 import structlog
+from redis.exceptions import RedisError
 
 from app.config import settings
 from app.db.base import SessionLocal
@@ -84,7 +85,10 @@ async def quarantine_thread(thread_id: str | None) -> None:
     """Mark thread broken — наступне `open_codex_turn` пропустить resume."""
     if not thread_id:
         return
-    await cache.set(quarantine_key(thread_id), "broken", ex=86400)
+    try:
+        await cache.set(quarantine_key(thread_id), "broken", ex=86400)
+    except RedisError as exc:
+        log.warning("codex_quarantine_failed", thread_id=thread_id, error=str(exc))
 
 
 async def _load_stored_thread_id(db_chat_id: int) -> str | None:

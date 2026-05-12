@@ -86,3 +86,45 @@ async def test_get_drops_record_missing_required_fields(fake_cache: FakeRedis) -
 
     assert await turn_registry.get(6) is None
     assert "codex:active:6" not in fake_cache.store
+
+
+@pytest.mark.asyncio
+async def test_register_pending_writes_record_without_turn_id(fake_cache: FakeRedis) -> None:
+    await turn_registry.register_pending(10, "t-x", is_admin=True)
+
+    record = await turn_registry.get(10)
+    assert record is not None
+    assert record.turn_id is None
+    assert record.thread_id == "t-x"
+
+
+@pytest.mark.asyncio
+async def test_promote_sets_turn_id_on_pending(fake_cache: FakeRedis) -> None:
+    await turn_registry.register_pending(11, "t-y", is_admin=False)
+
+    promoted = await turn_registry.promote(11, "actual-turn")
+
+    assert promoted is True
+    record = await turn_registry.get(11)
+    assert record is not None
+    assert record.turn_id == "actual-turn"
+
+
+@pytest.mark.asyncio
+async def test_promote_returns_false_when_record_dropped(fake_cache: FakeRedis) -> None:
+    # Race: interrupt RPC дропнув pending між register_pending і promote.
+    await turn_registry.register_pending(12, "t", is_admin=True)
+    await turn_registry.drop(12)  # імітуємо interrupt RPC
+
+    promoted = await turn_registry.promote(12, "any")
+
+    assert promoted is False
+    assert await turn_registry.get(12) is None
+
+
+@pytest.mark.asyncio
+async def test_send_interrupt_skips_pending_turn(fake_cache: FakeRedis) -> None:
+    # send_interrupt не повинен робити RPC якщо turn_id ще не promote'нутий.
+    pending = turn_registry.ActiveTurn(thread_id="t", turn_id=None, is_admin=True)
+
+    await turn_registry.send_interrupt(pending)  # просто не падає

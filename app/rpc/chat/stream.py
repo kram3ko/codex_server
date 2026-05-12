@@ -51,11 +51,17 @@ async def stream_turn(
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     collector = StreamCollector()
 
-    async def _on_started(turn_id: str, thread_id: str) -> None:
-        await turn_registry.register(
-            persisted_chat_id,
-            turn_registry.ActiveTurn(thread_id=thread_id, turn_id=turn_id, is_admin=True),
+    if client.current_thread_id:
+        await turn_registry.register_pending(
+            persisted_chat_id, client.current_thread_id, is_admin=True
         )
+
+    async def _on_started(turn_id: str, thread_id: str) -> None:
+        promoted = await turn_registry.promote(persisted_chat_id, turn_id)
+        if not promoted:
+            with contextlib.suppress(Exception):
+                await client.interrupt(turn_id=turn_id)
+            raise asyncio.CancelledError
 
     events_count = 0
     last_event_type = "none"

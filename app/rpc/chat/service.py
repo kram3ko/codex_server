@@ -156,6 +156,10 @@ class ChatRPC(ChatProtocol):
         record = await turn_registry.get(chat.id)
         if record is None:
             return chat_pb2.InterruptTurnResponse()
+        if record.turn_id is None:
+            # Pending — `drop` сигналізує worker'у-власнику турна у `promote`.
+            await turn_registry.drop(chat.id)
+            return chat_pb2.InterruptTurnResponse()
         try:
             await turn_registry.send_interrupt(record)
         except Exception as exc:  # noqa: BLE001 — interrupt best-effort
@@ -180,7 +184,11 @@ class ChatRPC(ChatProtocol):
         record = await turn_registry.get(request.chat_id)
         if record is None:
             return chat_pb2.SteerTurnResponse(accepted=False)
-        accepted = await turn_registry.send_steer(record, text)
+        try:
+            accepted = await turn_registry.send_steer(record, text)
+        except Exception as exc:  # noqa: BLE001 — steer best-effort, лог + accepted=False
+            log.warning("web_steer_rpc_failed", chat_id=request.chat_id, error=str(exc))
+            return chat_pb2.SteerTurnResponse(accepted=False)
         if accepted:
             async with SessionLocal() as db:
                 await message_service.append(

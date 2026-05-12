@@ -1,6 +1,6 @@
 <script lang="ts">
   import { AlertTriangle } from "lucide-svelte";
-  import { onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
 
   import ChatList from "./ChatList.svelte";
   import Composer from "./Composer.svelte";
@@ -34,6 +34,10 @@
     if (infoTimer) clearTimeout(infoTimer);
     infoTimer = setTimeout(() => { info = ""; infoTimer = null; }, 3000);
   }
+
+  onDestroy(() => {
+    if (infoTimer) clearTimeout(infoTimer);
+  });
 
   const typer = createTypewriter();
   const liveDraft = $derived(draft ? create(MessageSchema, { ...draft, text: typer.displayed }) : null);

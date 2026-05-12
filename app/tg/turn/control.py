@@ -24,7 +24,9 @@ log = structlog.get_logger(__name__)
 async def cancel_turn(session: ChatSession) -> bool:
     """Stop button — interrupt running Codex turn + cancel local task."""
     record = await turn_registry.get(session.db_chat_id)
-    if record is not None:
+    if record is not None and record.turn_id is None:
+        await turn_registry.drop(session.db_chat_id)
+    elif record is not None:
         with contextlib.suppress(Exception):
             await turn_registry.send_interrupt(record)
     if not await cancel_session_turn(session):
