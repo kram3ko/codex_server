@@ -135,7 +135,6 @@ class TGBotService:
                 await self._bot.session.close()
             self._bot = None
         self._dispatcher = None
-        await self._sessions.close_all()
         await self._release_polling_lock()
 
     def _build_dispatcher(self) -> Dispatcher:

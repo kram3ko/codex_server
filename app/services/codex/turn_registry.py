@@ -54,10 +54,17 @@ async def get(chat_id: int) -> ActiveTurn | None:
         return None
     if not raw:
         return None
-    data = orjson.loads(raw)
-    return ActiveTurn(
-        thread_id=data["thread_id"], turn_id=data["turn_id"], is_admin=data["is_admin"]
-    )
+    try:
+        data = orjson.loads(raw)
+        return ActiveTurn(
+            thread_id=data["thread_id"], turn_id=data["turn_id"], is_admin=data["is_admin"]
+        )
+    except (orjson.JSONDecodeError, KeyError, TypeError) as exc:
+        # Bitrot або старий формат — ключ дропаємо, повертаємо None щоб
+        # caller трактував як "немає активного turn'а".
+        log.warning("turn_registry_corrupted_record", chat_id=chat_id, error=str(exc))
+        await drop(chat_id)
+        return None
 
 
 async def drop(chat_id: int) -> None:

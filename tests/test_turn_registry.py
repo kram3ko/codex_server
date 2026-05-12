@@ -68,3 +68,21 @@ async def test_register_preserves_is_admin_flag(fake_cache: FakeRedis) -> None:
 
     assert record is not None
     assert record.is_admin is False
+
+
+@pytest.mark.asyncio
+async def test_get_drops_corrupted_record(fake_cache: FakeRedis) -> None:
+    # Bitrot / old payload format — `get` має повернути None і прибрати ключ,
+    # щоб подальші виклики не stuck'нулись на тому ж зіпсованому records.
+    fake_cache.store["codex:active:5"] = b"{not json"
+
+    assert await turn_registry.get(5) is None
+    assert "codex:active:5" not in fake_cache.store
+
+
+@pytest.mark.asyncio
+async def test_get_drops_record_missing_required_fields(fake_cache: FakeRedis) -> None:
+    fake_cache.store["codex:active:6"] = b'{"thread_id": "t"}'  # missing turn_id/is_admin
+
+    assert await turn_registry.get(6) is None
+    assert "codex:active:6" not in fake_cache.store

@@ -24,8 +24,16 @@
   let loading = $state(false);
   let busy = $state(false);
   let error = $state("");
+  let info = $state("");
   let draftStartedAt = $state<number | undefined>(undefined);
   let activeTurnId = $state(0);
+
+  let infoTimer: ReturnType<typeof setTimeout> | null = null;
+  function flashInfo(message: string): void {
+    info = message;
+    if (infoTimer) clearTimeout(infoTimer);
+    infoTimer = setTimeout(() => { info = ""; infoTimer = null; }, 3000);
+  }
 
   const typer = createTypewriter();
   const liveDraft = $derived(draft ? create(MessageSchema, { ...draft, text: typer.displayed }) : null);
@@ -93,6 +101,7 @@
         messages = [...messages, userMessage];
         return;
       }
+      flashInfo("Turn finished — message sent as new turn");
     } else if (busy && selected) {
       await chatClient.interruptTurn({ chatId: selected.id }).catch(() => undefined);
     }
@@ -261,6 +270,11 @@
       <div class="flex items-center gap-2 border-b border-[#e7c9c1] bg-[#fff5f2] px-4 py-2 text-sm text-[#a33a2b]">
         <AlertTriangle size={16} />
         {error}
+      </div>
+    {/if}
+    {#if info}
+      <div class="border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-xs text-[var(--color-text-muted)]">
+        {info}
       </div>
     {/if}
 
