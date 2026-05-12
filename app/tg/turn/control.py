@@ -1,29 +1,34 @@
-"""Control-plane операції турну: cancel, auto-reset thread, emit failure, steer.
+"""Control-plane операції турну: cancel, auto-reset thread, emit_failure.
 
-Окремо від `runner.py` — щоб TurnRunner лишався тонкою orchestration-точкою,
-без логіки відновлення/перерви/трасування помилок.
+Per-turn CodexClient живе у `runner._run_locked` як context-manager; для
+interrupt ззовні runner'а — Redis-registry lookup + one-shot WS до sidecar.
 """
 
+import contextlib
+
 import structlog
-from aiogram.types import Message
 
 from app.db.base import SessionLocal
 from app.models import EventKind
-from app.services.cache.default import cache
+from app.services.codex import turn_registry
+from app.services.codex.runner import quarantine_thread
 from app.services.events.default import event_service
 from app.services.sessions.store import (
     ChatSession,
     cancel_session_turn,
-    quarantine_key,
 )
-from app.tg.markdown import tg_markdown
-from app.tg.media import PreparedTurn
-from app.tg.turn.persistence import persist_user_turn
 
 log = structlog.get_logger(__name__)
 
 
 async def cancel_turn(session: ChatSession) -> bool:
+    """Stop button — interrupt running Codex turn + cancel local task."""
+    record = await turn_registry.get(session.db_chat_id)
+    if record is not None and record.turn_id is None:
+        await turn_registry.drop(session.db_chat_id)
+    elif record is not None:
+        with contextlib.suppress(Exception):
+            await turn_registry.send_interrupt(record)
     if not await cancel_session_turn(session):
         return False
     async with SessionLocal() as db:
@@ -37,27 +42,12 @@ async def cancel_turn(session: ChatSession) -> bool:
     return True
 
 
-async def try_steer(session: ChatSession, message: Message, prepared: PreparedTurn) -> bool:
-    """Append text у працюючий turn. True — caller skip'ає новий turn.
-    False → fall through до нормального запуску."""
-    if session.current_turn_task is None or not prepared.text:
-        return False
-    ok = await session.client.steer(prepared.text)
-    if not ok:
-        await message.answer(tg_markdown.escape("Не вдалось додати — turn уже завершився"))
-        return False
-    await persist_user_turn(session, prepared)
-    return True
-
-
 async def auto_reset_thread(session: ChatSession) -> None:
-    """Idle-timeout → quarantine current thread + open fresh one. Sidecar JSONL
-    може мати orphan tool_call після обриву; resume такого thread'a віснув би
-    наступний turn (codex#14824)."""
-    broken_id = session.client.current_thread_id
-    if broken_id:
-        await cache.set(quarantine_key(broken_id), "broken", ex=86400)
-    await session.client.start_new_thread()
+    """Idle-timeout → quarantine current thread. Наступний turn натомість
+    відкриє свіжий thread (orphan tool_call resume вішає sidecar, codex#14824)."""
+    record = await turn_registry.get(session.db_chat_id)
+    broken_id = record.thread_id if record else None
+    await quarantine_thread(broken_id)
     async with SessionLocal() as db:
         await event_service.emit(
             db,

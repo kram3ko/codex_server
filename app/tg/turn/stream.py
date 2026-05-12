@@ -1,15 +1,20 @@
 """Pipeline кодекс-event'ів для одного TG turn'у.
 
-Споживає `session.client.run_turn`, маршалить події у progress / handlers.
-Каузу idle-timeout / error / cancel розрулює caller (`runner._run_locked`),
-а тут лише: idle watchdog, match-by-type, виклик outcomes.
+Споживає `client.run_turn`, маршалить події у progress / handlers. Caller
+(`runner._run_locked`) розрулює idle-timeout / cancel / unexpected; тут лише
+idle watchdog, match-by-type, виклик outcomes.
 """
+
+import asyncio
+import contextlib
 
 import structlog
 from aiogram.types import Message
 
 from app.config import settings
 from app.services.bus.default import event_bus
+from app.services.codex import turn_registry
+from app.services.codex.client import CodexClient
 from app.services.codex.collector import StreamCollector
 from app.services.codex.events import (
     DoneEvent,
@@ -17,7 +22,6 @@ from app.services.codex.events import (
     TokenEvent,
     ToolCallEvent,
     ToolResultEvent,
-    iterate_with_idle_timeout,
 )
 from app.services.sessions.store import ChatSession
 from app.tg.markdown import tg_markdown
@@ -30,13 +34,26 @@ log = structlog.get_logger(__name__)
 
 
 async def stream_turn(
+    client: CodexClient,
     session: ChatSession,
     message: Message,
     prepared: PreparedTurn,
     progress: TurnProgressReporter,
 ) -> None:
     collector = StreamCollector()
-    stream = session.client.run_turn(prepared.text, attachments=prepared.attachments)
+
+    if client.current_thread_id:
+        await turn_registry.register_pending(
+            session.db_chat_id, client.current_thread_id, is_admin=session.is_admin
+        )
+
+    async def _on_started(turn_id: str, thread_id: str) -> None:
+        promoted = await turn_registry.promote(session.db_chat_id, turn_id)
+        if not promoted:
+            with contextlib.suppress(Exception):
+                await client.interrupt(turn_id=turn_id)
+            raise asyncio.CancelledError
+
     events_count = 0
     last_event_type = "none"
 
@@ -50,11 +67,15 @@ async def stream_turn(
             last_event_type=last_event_type,
         )
 
-    async for ev in iterate_with_idle_timeout(
-        stream,
-        settings.TG_TURN_TIMEOUT_SECONDS,
+    stream = client.run_turn(
+        prepared.text,
+        attachments=prepared.attachments,
+        on_started=_on_started,
+        idle_s=settings.TG_TURN_TIMEOUT_SECONDS,
         on_idle=_on_idle,
-    ):
+    )
+
+    async for ev in stream:
         events_count += 1
         last_event_type = type(ev).__name__
         await event_bus.publish(session.db_chat_id, ev)

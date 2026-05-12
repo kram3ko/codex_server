@@ -3,6 +3,7 @@
 import structlog
 from aiogram.types import Message
 
+from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import Attachment, ToolCallRecord
 from app.services.sessions.store import ChatSession
 from app.tg.markdown import tg_markdown
@@ -51,7 +52,7 @@ async def handle_empty_response(
             "Codex returned empty response. Try adding a caption or send the image again.",
         ),
     )
-    await emit_failure(session, code="empty_response", detail="no final text")
+    await emit_failure(session, code=CodexErrorCode.EMPTY_RESPONSE, detail="no final text")
 
 
 async def handle_dropped_stream(
@@ -75,7 +76,7 @@ async def handle_dropped_stream(
                 "⚠ Codex обірвав turn до відповіді. Контекст збережено — продовжуй розмову.",
             )
         )
-        await emit_failure(session, code="stream_dropped", detail="no buffer")
+        await emit_failure(session, code=CodexErrorCode.STREAM_DROPPED, detail="no buffer")
         return
     await send_response(
         message,

@@ -22,24 +22,26 @@ from app.rpc.chat.mappers import (
 )
 from app.rpc.chat.tts import attach_tts_to_message
 from app.services.bus.default import event_bus
+from app.services.codex import turn_registry
+from app.services.codex.client import CodexClient
 from app.services.codex.collector import StreamCollector
+from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
     Attachment,
     DoneEvent,
     ErrorEvent,
     ToolCallRecord,
-    iterate_with_idle_timeout,
 )
+from app.services.codex.runner import quarantine_thread
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
-from app.services.sessions.store import ChatSession
 from app.services.uploads.default import upload_service
 
 log = structlog.get_logger(__name__)
 
 
 async def stream_turn(
-    session: ChatSession,
+    client: CodexClient,
     text: str,
     persisted_chat_id: int,
     user_pk: int,
@@ -48,7 +50,19 @@ async def stream_turn(
     voice_reply: bool = False,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     collector = StreamCollector()
-    stream = session.client.run_turn(text, attachments=image_urls)
+
+    if client.current_thread_id:
+        await turn_registry.register_pending(
+            persisted_chat_id, client.current_thread_id, is_admin=True
+        )
+
+    async def _on_started(turn_id: str, thread_id: str) -> None:
+        promoted = await turn_registry.promote(persisted_chat_id, turn_id)
+        if not promoted:
+            with contextlib.suppress(Exception):
+                await client.interrupt(turn_id=turn_id)
+            raise asyncio.CancelledError
+
     events_count = 0
     last_event_type = "none"
 
@@ -61,14 +75,18 @@ async def stream_turn(
             last_event_type=last_event_type,
         )
         with contextlib.suppress(Exception):
-            await session.client.interrupt()
+            await client.interrupt()
+
+    stream = client.run_turn(
+        text,
+        attachments=image_urls,
+        on_started=_on_started,
+        idle_s=settings.WEB_TURN_TIMEOUT_SECONDS,
+        on_idle=_on_idle,
+    )
 
     try:
-        async for ev in iterate_with_idle_timeout(
-            stream,
-            settings.WEB_TURN_TIMEOUT_SECONDS,
-            on_idle=_on_idle,
-        ):
+        async for ev in stream:
             events_count += 1
             last_event_type = type(ev).__name__
             await event_bus.publish(persisted_chat_id, ev)
@@ -88,13 +106,18 @@ async def stream_turn(
                 case _:
                     yield chat_event_to_pb(ev)
     except TimeoutError:
+        # Idle-timeout — best-effort interrupt sidecar + quarantine thread,
+        # інакше наступний run_turn пробує resume тої самої мертвої thread.
+        with contextlib.suppress(Exception):
+            await client.interrupt()
+        await quarantine_thread(client.current_thread_id)
         detail = f"idle>{settings.WEB_TURN_TIMEOUT_SECONDS}s"
-        yield error_event("turn_timeout", detail)
+        yield error_event(CodexErrorCode.TURN_TIMEOUT, detail)
         await _emit_event(
             persisted_chat_id,
             user_pk,
             EventKind.TURN_FAILED,
-            {"code": "turn_timeout", "detail": detail},
+            {"code": CodexErrorCode.TURN_TIMEOUT, "detail": detail},
         )
         return
     except asyncio.CancelledError:
@@ -119,8 +142,8 @@ async def stream_turn(
         )
         raise
     except Exception as exc:  # noqa: BLE001 — backstop для RPC stream'у, lift у ErrorEvent
-        log.error("web_rpc_codex_run_turn_failed", exc_type=type(exc).__name__, error=str(exc))
-        yield error_event("codex_error", str(exc))
+        log.exception("web_rpc_codex_run_turn_failed")
+        yield error_event(CodexErrorCode.CODEX_ERROR, str(exc))
         await _emit_event(
             persisted_chat_id,
             user_pk,
@@ -130,12 +153,12 @@ async def stream_turn(
         return
 
     if not collector.done_seen:
-        yield error_event("stream_dropped", "Codex stream ended without completion")
+        yield error_event(CodexErrorCode.STREAM_DROPPED, "Codex stream ended without completion")
         await _emit_event(
             persisted_chat_id,
             user_pk,
             EventKind.TURN_FAILED,
-            {"reason": "stream_dropped"},
+            {"reason": CodexErrorCode.STREAM_DROPPED},
         )
         return
 
@@ -205,7 +228,7 @@ async def _persist_assistant_turn(
             "uploads": len(upload_ids),
         }
         if partial:
-            payload["reason"] = "stream_dropped"
+            payload["reason"] = CodexErrorCode.STREAM_DROPPED
         await event_service.emit(
             db,
             EventKind.TURN_FAILED if partial else EventKind.TURN_COMPLETED,

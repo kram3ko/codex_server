@@ -23,16 +23,16 @@ class UserService:
         existing = (
             await session.execute(select(User).where(User.tg_user_id == tg_user_id))
         ).scalar_one_or_none()
-        if existing is not None:
-            if display_name and existing.display_name != display_name:
-                existing.display_name = display_name
-                await session.flush()
-            return existing
-        role = UserRole.ADMIN if tg_user_id in settings.TG_ADMIN_USER_IDS else UserRole.USER
-        user = User(tg_user_id=tg_user_id, display_name=display_name, role=role)
-        session.add(user)
-        await session.flush()
-        return user
+        if existing is None:
+            role = UserRole.ADMIN if tg_user_id in settings.TG_ADMIN_USER_IDS else UserRole.USER
+            user = User(tg_user_id=tg_user_id, display_name=display_name, role=role)
+            session.add(user)
+            await session.flush()
+            return user
+        if display_name and existing.display_name != display_name:
+            existing.display_name = display_name
+            await session.flush()
+        return existing
 
     async def get_by_email(self, session: AsyncSession, email: str) -> User | None:
         return (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()

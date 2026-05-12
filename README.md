@@ -120,7 +120,9 @@ Google озвучує без зірочок/backtick'ів.
   (User.role enum).
 - **Self-restart:** `/restart` у боті → `DockerControlService.restart_container`
   через `/var/run/docker.sock` (без `docker` CLI в образі). Admin-only.
-- **Тести:** `uv run --group test pytest -q` (76 тестів).
+- **Тести:** `uv run --group test pytest -q` (81 тест).
+- **Web turn-registry у Redis** — `turn_registry.py` тримає `{thread_id, turn_id | None}` живих турнів. `register_pending` пише запис з `turn_id=None` до `turn/start`; `promote` дописує turn_id після. Interrupt RPC у race-window бачить pending → `drop` → worker'у-власнику `promote()` returns False → cancel turn. Cross-worker через one-shot WS. `GUNICORN_WORKERS=2+` works.
+- **TZ logs** — `utc=False` у `log_config`; timestamps з offset (`+03:00`). Якщо ship'ити логи у aggregator що очікує Z-suffix — перевір парсер.
 - **Bugsink порт `:8089`** має власний BUGSINK_AUTH_TOKEN на UI + DSN-auth на ingest. Не виставляти прямо на public-net без nginx + rate-limiting; tailnet/VPN OK для соло.
 - **Lint/types:** `uv run --group lint ruff check app/ tests/` + `pyright app/`.
 - **Гарячий редеплой коду:** edit → save → `docker exec codex-server gunicornc -c reload`

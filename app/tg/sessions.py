@@ -46,13 +46,11 @@ class ChatSessionStore(BaseChatSessionStore[int, TGSessionBootstrap]):
                 bootstrap_arg.display_name,
             )
             chat = await chat_service.get_or_create_for_tg(db, user.id, key)
-            stored_thread_id = chat.codex_thread_id
             is_admin = user.role == UserRole.ADMIN
             await db.commit()
             return SessionBootstrap(
                 db_user_id=user.id,
                 db_chat_id=chat.id,
-                stored_thread_id=stored_thread_id,
                 is_admin=is_admin,
             )
 

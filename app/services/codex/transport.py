@@ -1,18 +1,17 @@
 """Тонкий JSON-RPC 2.0 клієнт поверх `codex app-server` WebSocket.
 
 Реалізує мінімум для chat-турну: initialize → thread/start → turn/start →
-notifications stream → close. Pending requests track'аться по id; notifications
-доставляються `NotificationHandler`-callback'у (зазвичай — `TurnRouter`),
-який маршрутизує їх по turn_id. Transport нічого не знає про турни.
+notifications stream → close. Pending requests track'аться по id;
+notifications кладуться у `asyncio.Queue`, consumer iterує `notifications()`.
 
 Lifecycle: `connect()` ідемпотентний; `close()` final, reconnect після нього
-заборонений. Якщо WS падає сам по собі — `is_connected=False`, пендінги
-дофейлюються, `on_close` callback кличеться.
+заборонений. Якщо WS падає сам по собі — `is_connected=False`, pending
+дофейлюються, queue-sentinel будить consumer.
 """
 
 import asyncio
 import contextlib
-from collections.abc import Callable
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,6 +23,7 @@ log = structlog.get_logger(__name__)
 
 _JSONRPC_VERSION = "2.0"
 _DEFAULT_REQUEST_TIMEOUT = 60.0
+_NOTIFICATION_QUEUE_MAX = 1000
 # Sidecar може transient'но не resolv'итись (DNS прогрів) одразу після свого старту.
 _CONNECT_RETRIES = 3
 _CONNECT_BACKOFF_S = 1.5
@@ -43,7 +43,7 @@ class Notification:
     """Server-initiated notification (no id, no response expected).
 
     `turn_id` витягається з `params.turnId` для турн-скоупних нот; для
-    session-level (`initialized` тощо) лишається None — router їх дропає.
+    session-level (`initialized` тощо) лишається None.
     """
 
     method: str
@@ -51,16 +51,12 @@ class Notification:
     turn_id: str | None
 
 
-NotificationHandler = Callable[[Notification], None]
-CloseHandler = Callable[[], None]
-
-
 class AppServerClient:
     """Володіє одним WS до Codex app-server + JSON-RPC loop'ом.
 
-    Не тримає буферу notifications — кожна доставляється у `notification_handler`
-    синхронно з read-loop. Composition: `TurnRouter` підписується через
-    `set_notification_handler` і фановтить ноти по turn_id.
+    Notifications кладуться у `asyncio.Queue`; consumer ітерує через
+    `notifications()` async-iterator. Per-turn lifecycle (один CodexClient =
+    один turn) гарантує що cross-turn leak неможливий by design.
     """
 
     def __init__(
@@ -74,26 +70,19 @@ class AppServerClient:
         self._request_timeout = request_timeout
         self._next_id = 1
         self._pending: dict[int, asyncio.Future[Any]] = {}
+        # None — close-sentinel; кладеться у `close()` щоб `notifications()`
+        # консьюмер прокинувся без polling-таймауту.
+        self._notifications: asyncio.Queue[Notification | None] = asyncio.Queue(
+            maxsize=_NOTIFICATION_QUEUE_MAX,
+        )
         self._ws: websockets.ClientConnection | None = None
         self._reader_task: asyncio.Task | None = None
         self._explicit_close = False
         self._connect_lock = asyncio.Lock()
-        self._notification_handler: NotificationHandler | None = None
-        self._close_handler: CloseHandler | None = None
 
     @property
     def is_connected(self) -> bool:
         return self._ws is not None and not self._explicit_close
-
-    def set_notification_handler(self, handler: NotificationHandler) -> None:
-        """Reg один handler. Викликається синхронно з read-loop на кожну ноту."""
-        self._notification_handler = handler
-
-    def set_close_handler(self, handler: CloseHandler) -> None:
-        """Reg один handler. Викликається коли transport остаточно або тимчасово
-        втратив зв'язок (WS закритий/reader умер). Дозволяє router'у розбудити
-        підписників."""
-        self._close_handler = handler
 
     async def connect(self) -> None:
         """Ідемпотентний — no-op якщо WS уже піднятий."""
@@ -155,6 +144,14 @@ class AppServerClient:
         }
         await self._send(payload)
 
+    async def notifications(self) -> AsyncIterator[Notification]:
+        """Iterate received notifications until close. None у черзі = sentinel."""
+        while True:
+            note = await self._notifications.get()
+            if note is None:
+                return
+            yield note
+
     async def close(self) -> None:
         """Final teardown. Після цього reconnect неможливий."""
         if self._explicit_close:
@@ -162,7 +159,7 @@ class AppServerClient:
         log.info("app_server_closing", pending=len(self._pending))
         self._explicit_close = True
         await self._teardown_transport()
-        self._notify_close()
+        self._wake_notifications()
         self._fail_pending(RuntimeError("AppServerClient closed"))
 
     def _ensure_open(self) -> None:
@@ -175,7 +172,6 @@ class AppServerClient:
         ws = self._ws
         if ws is None:
             raise RuntimeError("AppServerClient is not connected")
-        # Codex sidecar приймає тільки text-frame'и.
         await ws.send(orjson.dumps(payload).decode())
 
     async def _read_loop(self) -> None:
@@ -189,15 +185,15 @@ class AppServerClient:
             raise
         except websockets.ConnectionClosed:
             log.info("app_server_ws_closed")
-        except Exception as exc:  # noqa: BLE001 — backstop для read-loop, must never crash silently
-            log.error("app_server_reader_error", error=str(exc))
+        except Exception:  # noqa: BLE001 — backstop для read-loop, must never crash silently
+            log.exception("app_server_reader_error")
         finally:
             # Reader умер — транспорт втрачено, але не explicit close;
             # CodexClient побачить is_connected=False і реконектить.
             if self._ws is ws:
                 self._ws = None
                 self._reader_task = None
-            self._notify_close()
+            self._wake_notifications()
             self._fail_pending(RuntimeError("AppServerClient connection lost"))
 
     async def _teardown_transport(self) -> None:
@@ -221,13 +217,13 @@ class AppServerClient:
         if "id" in message and message["id"] is not None:
             self._resolve_response(message)
         elif "method" in message:
-            self._dispatch_notification(message)
+            self._enqueue_notification(message)
         else:
             log.warning("app_server_unknown_message", keys=list(message.keys()))
 
-    def _dispatch_notification(self, message: dict[str, Any]) -> None:
+    def _enqueue_notification(self, message: dict[str, Any]) -> None:
         # JSON-RPC дозволяє params: object | array | absent — нам потрібен object,
-        # інше нормалізуємо у порожній dict (з'явиться у логах, не в логіці).
+        # інше нормалізуємо у порожній dict.
         raw = message.get("params")
         params = raw if isinstance(raw, dict) else {}
         turn_id = params.get("turnId")
@@ -236,14 +232,14 @@ class AppServerClient:
             params=params,
             turn_id=turn_id if isinstance(turn_id, str) else None,
         )
-        handler = self._notification_handler
-        if handler is None:
-            log.warning("app_server_no_notification_handler", method=note.method)
-            return
         try:
-            handler(note)
-        except Exception as exc:  # noqa: BLE001 — handler має sync semantics, лог + continue
-            log.error("app_server_notification_handler_failed", method=note.method, error=str(exc))
+            self._notifications.put_nowait(note)
+        except asyncio.QueueFull:
+            log.warning(
+                "app_server_notification_dropped",
+                method=note.method,
+                queue_size=self._notifications.qsize(),
+            )
 
     def _resolve_response(self, message: dict[str, Any]) -> None:
         req_id = message["id"]
@@ -262,14 +258,13 @@ class AppServerClient:
         else:
             future.set_result(message.get("result"))
 
-    def _notify_close(self) -> None:
-        handler = self._close_handler
-        if handler is None:
-            return
+    def _wake_notifications(self) -> None:
         try:
-            handler()
-        except Exception as exc:  # noqa: BLE001 — user-supplied callback, isolate
-            log.error("app_server_close_handler_failed", error=str(exc))
+            self._notifications.put_nowait(None)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._notifications.get_nowait()
+            self._notifications.put_nowait(None)
 
     def _fail_pending(self, exc: Exception) -> None:
         for future in self._pending.values():

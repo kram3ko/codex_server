@@ -1,62 +1,51 @@
-"""Generic Codex session store for long-lived chat surfaces.
+"""Per-chat state holder для surface'ів що серіалізують турни (TG bot).
 
-Owns a per-key `CodexClient`, persisted thread id wiring, quarantine checks,
-history replay, and in-flight turn cancellation. Surface-specific code only
-bootstraps DB identity and optionally records interrupt events.
+Codex sidecar за відкритим thread'ом більше не тримаємо тут — WS живе тільки
+впродовж одного `run_turn` (див. `services/codex/runner.py`). ChatSession —
+тонкий контейнер для речей що мають жити **між турнами**: per-chat lock,
+посилання на running task (для /stop), steer-flag.
+
+Web не використовує цей store: there's no inter-turn state worth keeping
+in-process — все живе у Postgres / Redis, fresh CodexClient per turn.
 """
 
 import asyncio
 import contextlib
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
 
-from app.config import settings
 from app.db.base import SessionLocal
-from app.models import MessageRole
-from app.services.cache.default import cache
 from app.services.chats.default import chat_service
-from app.services.codex.client import CodexClient
-from app.services.codex.history import messages_to_history_items
-from app.services.messages.default import message_service
 
 log = structlog.get_logger(__name__)
-
-_HISTORY_REPLAY_LIMIT = 10
-_QUARANTINE_KEY_PREFIX = "codex:thread:quarantine:"
 
 
 @dataclass(frozen=True, slots=True)
 class SessionBootstrap:
     db_user_id: int
     db_chat_id: int
-    stored_thread_id: str | None
     is_admin: bool
 
 
 @dataclass(slots=True)
 class ChatSession:
-    client: CodexClient
     db_chat_id: int
     db_user_id: int
+    is_admin: bool
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     current_turn_task: asyncio.Task | None = None
-    # Set by on_callback("turn:steer"); next user message goes to turn/steer
-    # instead of opening a fresh turn. Read-and-clear via `consume_steer()`.
-    steer_pending: bool = False
-
-    def consume_steer(self) -> bool:
-        """Atomic test-and-clear of `steer_pending`."""
-        if not self.steer_pending:
-            return False
-        self.steer_pending = False
-        return True
 
 
 class ChatSessionStore[K, B](ABC):
+    """Per-surface in-process metadata cache.
+
+    Не зберігає WS connection'и (вони per-turn у `services/codex/runner.py`).
+    Тримає лише id маппінг + lock + running-task ref для interrupt button.
+    """
+
     def __init__(self) -> None:
         self._sessions: dict[K, asyncio.Future[ChatSession]] = {}
         self._lock = asyncio.Lock()
@@ -85,20 +74,9 @@ class ChatSessionStore[K, B](ABC):
         session = await self._safe_resolve(future)
         if session is None:
             return False
-        await self._close_one(session)
         await self._clear_persisted_thread(session.db_chat_id)
         log.info("chat_session_reset", key=key)
         return True
-
-    async def close_all(self) -> None:
-        async with self._lock:
-            futures = list(self._sessions.values())
-            self._sessions.clear()
-        if not futures:
-            return
-        async with asyncio.TaskGroup() as tg:
-            for future in futures:
-                tg.create_task(self._close_future(future))
 
     async def interrupt_all_turns(self) -> int:
         """Cleanly cancel any in-flight turns. Returns count of cancelled turns."""
@@ -119,29 +97,7 @@ class ChatSessionStore[K, B](ABC):
         await self._on_turn_interrupted(session)
         return True
 
-    @staticmethod
-    async def seed_history_if_fresh_thread(session: ChatSession) -> None:
-        """If next run opens a new thread, inject recent DB history first."""
-        if session.client.current_thread_id is not None:
-            return
-        async with SessionLocal() as db:
-            recent = await message_service.list_recent(
-                db,
-                session.db_chat_id,
-                limit=_HISTORY_REPLAY_LIMIT,
-            )
-        if recent and recent[-1].role is MessageRole.USER:
-            recent = recent[:-1]
-        items = messages_to_history_items(recent)
-        if not items:
-            return
-        await session.client.ensure_thread()
-        await session.client.inject_history(items)
-
-    async def _claim_slot(
-        self,
-        key: K,
-    ) -> tuple[asyncio.Future[ChatSession], bool]:
+    async def _claim_slot(self, key: K) -> tuple[asyncio.Future[ChatSession], bool]:
         async with self._lock:
             existing = self._sessions.get(key)
             if existing is not None and not _failed_attempt(existing):
@@ -168,42 +124,25 @@ class ChatSessionStore[K, B](ABC):
 
     async def _build_session(self, key: K, bootstrap_arg: B) -> ChatSession:
         boot = await self._bootstrap(key, bootstrap_arg)
-        initial = boot.stored_thread_id if settings.CODEX_THREAD_REUSE_ENABLED else None
-        if initial is not None and await cache.get(f"{_QUARANTINE_KEY_PREFIX}{initial}"):
-            log.warning("thread_quarantined_skipping_resume", thread_id=initial)
-            initial = None
-        client = await self._open_codex_client(boot.db_chat_id, initial, is_admin=boot.is_admin)
         log.info(
             "chat_session_opened",
             key=key,
             db_chat_id=boot.db_chat_id,
             db_user_id=boot.db_user_id,
             is_admin=boot.is_admin,
-            rehydrated_thread=boot.stored_thread_id is not None,
         )
         return ChatSession(
-            client=client,
             db_chat_id=boot.db_chat_id,
             db_user_id=boot.db_user_id,
+            is_admin=boot.is_admin,
         )
 
     @abstractmethod
     async def _bootstrap(self, key: K, bootstrap_arg: B) -> SessionBootstrap:
-        """Resolve surface key into DB user/chat ids and stored thread id."""
+        """Resolve surface key into DB user/chat ids."""
 
     async def _on_turn_interrupted(self, session: ChatSession) -> None:  # noqa: B027
         """Optional hook: surface може записати TURN_INTERRUPTED у свій журнал."""
-
-    @staticmethod
-    async def _close_one(session: ChatSession) -> None:
-        with contextlib.suppress(Exception):
-            await session.client.close()
-
-    @classmethod
-    async def _close_future(cls, future: asyncio.Future[ChatSession]) -> None:
-        session = await cls._safe_resolve(future)
-        if session is not None:
-            await cls._close_one(session)
 
     @staticmethod
     async def _safe_resolve(future: asyncio.Future[ChatSession]) -> ChatSession | None:
@@ -219,55 +158,19 @@ class ChatSessionStore[K, B](ABC):
             await chat_service.set_codex_thread_id(db, db_chat_id, None)
             await db.commit()
 
-    @staticmethod
-    async def _open_codex_client(
-        db_chat_id: int,
-        initial_thread_id: str | None,
-        *,
-        is_admin: bool,
-    ) -> CodexClient:
-        async def _persist_thread(new_thread_id: str | None) -> None:
-            async with SessionLocal() as db:
-                await chat_service.set_codex_thread_id(db, db_chat_id, new_thread_id)
-                await db.commit()
 
-        url = settings.CODEX_CLI_URL if is_admin else settings.CODEX_CLI_GUEST_URL
-        client = CodexClient(
-            url=url,
-            cwd=settings.CODEX_CWD,
-            approval_policy=settings.CODEX_APPROVAL_POLICY,
-            sandbox=settings.CODEX_SANDBOX,
-            request_timeout=settings.CODEX_REQUEST_TIMEOUT_SECONDS,
-            initial_thread_id=initial_thread_id,
-            on_thread_change=_persist_thread,
-            reasoning_effort=settings.CODEX_REASONING_EFFORT,
-        )
-        await client.connect()
-        return client
-
-
-async def cancel_session_turn(
-    session: ChatSession,
-    on_interrupted: Callable[[ChatSession], Awaitable[None]] | None = None,
-) -> bool:
-    """Best-effort cancel current turn. Returns True if anything was cancelled."""
+async def cancel_session_turn(session: ChatSession) -> bool:
+    """Best-effort cancel — task.cancel() + await. CodexClient interrupt робить
+    окремий per-turn runner (бо WS короткоживий)."""
     task = session.current_turn_task
     if task is None:
         return False
-    with contextlib.suppress(Exception):
-        await session.client.interrupt()
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError, Exception):
         await task
     if session.current_turn_task is task:
         session.current_turn_task = None
-    if on_interrupted is not None:
-        await on_interrupted(session)
     return True
-
-
-def quarantine_key(thread_id: str) -> str:
-    return f"{_QUARANTINE_KEY_PREFIX}{thread_id}"
 
 
 def _failed_attempt(future: asyncio.Future[Any]) -> bool:

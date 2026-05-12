@@ -62,7 +62,6 @@ from app.rpc.user import UserRPC
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
 from app.services.errors.default import bugsink_client
-from app.services.sessions.web import web_sessions
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
 
@@ -74,34 +73,41 @@ async def lifespan(_app: FastAPI):
     # FastMCP lifespan стартує StreamableHTTPSessionManager — обов'язково wrap.
     async with mcp_http_app.lifespan(_app):
         log.info("app_startup")
-        async with SessionLocal() as db:
-            promoted = await user_service.ensure_admin_roles(db)
-            admin_email = settings.ADMIN_EMAIL.strip().lower()
-            admin_pw = settings.ADMIN_PASSWORD
-            if admin_email and admin_pw:
-                admin = await user_service.get_or_create_by_email(db, admin_email)
-                if not auth_service.verify_password(admin_pw, admin.password_hash):
-                    await user_service.set_password_hash(
-                        db, admin, auth_service.hash_password(admin_pw)
-                    )
-                    log.info("admin_password_synced", email=admin.email)
-                if admin.role != UserRole.ADMIN:
-                    admin.role = UserRole.ADMIN
-            await db.commit()
-            if promoted:
-                log.info("user_roles_admin_promoted", count=promoted)
+        await _bootstrap_users()
         await tg_bot_service.start()
         yield
         log.info("app_shutdown")
         cancelled = await tg_bot_service.interrupt_active_turns()
-        cancelled += await web_sessions.interrupt_all_turns()
         if cancelled:
             log.info("app_shutdown_turns_interrupted", count=cancelled)
         await tg_bot_service.stop()
-        await web_sessions.close_all()
         await bugsink_client.aclose()
         await cache.aclose()
         await engine.dispose()
+
+
+async def _bootstrap_users() -> None:
+    # Sync admin role + переписати hash якщо .env ADMIN_PASSWORD змінився.
+    async with SessionLocal() as db:
+        promoted = await user_service.ensure_admin_roles(db)
+        await _sync_admin_account(db)
+        await db.commit()
+        if promoted:
+            log.info("user_roles_admin_promoted", count=promoted)
+
+
+async def _sync_admin_account(db) -> None:
+    email = settings.ADMIN_EMAIL.strip().lower()
+    if not email or not settings.ADMIN_PASSWORD:
+        return
+    admin = await user_service.get_or_create_by_email(db, email)
+    if not auth_service.verify_password(settings.ADMIN_PASSWORD, admin.password_hash):
+        await user_service.set_password_hash(
+            db, admin, auth_service.hash_password(settings.ADMIN_PASSWORD)
+        )
+        log.info("admin_password_synced", email=admin.email)
+    if admin.role != UserRole.ADMIN:
+        admin.role = UserRole.ADMIN
 
 
 app = FastAPI(

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { AlertTriangle } from "lucide-svelte";
-  import { onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
 
   import ChatList from "./ChatList.svelte";
   import Composer from "./Composer.svelte";
@@ -24,8 +24,20 @@
   let loading = $state(false);
   let busy = $state(false);
   let error = $state("");
+  let info = $state("");
   let draftStartedAt = $state<number | undefined>(undefined);
   let activeTurnId = $state(0);
+
+  let infoTimer: ReturnType<typeof setTimeout> | null = null;
+  function flashInfo(message: string): void {
+    info = message;
+    if (infoTimer) clearTimeout(infoTimer);
+    infoTimer = setTimeout(() => { info = ""; infoTimer = null; }, 3000);
+  }
+
+  onDestroy(() => {
+    if (infoTimer) clearTimeout(infoTimer);
+  });
 
   const typer = createTypewriter();
   const liveDraft = $derived(draft ? create(MessageSchema, { ...draft, text: typer.displayed }) : null);
@@ -75,9 +87,10 @@
 
   async function send(text: string, imageIds: bigint[] = [], audioIds: bigint[] = []) {
     const uploadIds = [...imageIds, ...audioIds];
-    // Steer the running turn instead of interrupting+restarting. Codex
-    // appends `text` to the in-flight prompt; uploads still require a fresh
-    // turn (sidecar's steer API only accepts text), so fall through if any.
+    // Busy + no uploads → пробуємо steer running turn. Reject = turn закінчився
+    // між нашим busy=true і RPC; просто відкриваємо новий turn без interrupt.
+    // Uploads + busy → юзер свідомо хоче новий turn (steer API не приймає
+    // attachments), тож interrupt'имо явно.
     if (busy && selected && uploadIds.length === 0) {
       const resp = await chatClient
         .steerTurn({ chatId: selected.id, text })
@@ -92,8 +105,8 @@
         messages = [...messages, userMessage];
         return;
       }
-    }
-    if (busy && selected) {
+      flashInfo("Turn finished — message sent as new turn");
+    } else if (busy && selected) {
       await chatClient.interruptTurn({ chatId: selected.id }).catch(() => undefined);
     }
     const turnId = activeTurnId + 1;
@@ -261,6 +274,11 @@
       <div class="flex items-center gap-2 border-b border-[#e7c9c1] bg-[#fff5f2] px-4 py-2 text-sm text-[#a33a2b]">
         <AlertTriangle size={16} />
         {error}
+      </div>
+    {/if}
+    {#if info}
+      <div class="border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-xs text-[var(--color-text-muted)]">
+        {info}
       </div>
     {/if}
 

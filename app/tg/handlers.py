@@ -8,11 +8,13 @@ from aiogram.types import CallbackQuery, Message
 from app.config import settings
 from app.db.base import SessionLocal
 from app.models import EventKind
+from app.services.chats.default import chat_service
+from app.services.codex.runner import open_codex_turn
 from app.services.codex_usage.default import codex_usage_service
 from app.services.codex_usage.service import CodexUsage, UsageWindow
 from app.services.events.default import event_service
 from app.tg.markdown import tg_markdown
-from app.tg.progress import CB_TURN_NEW, CB_TURN_STEER, CB_TURN_STOP
+from app.tg.progress import CB_TURN_NEW, CB_TURN_STOP
 from app.tg.sessions import ChatSessionStore
 from app.tg.turn import TurnRunner, cancel_turn
 
@@ -42,15 +44,15 @@ class TGHandlers:
         )
 
     async def on_new(self, message: Message) -> None:
-        """Start a new Codex thread without tearing down the WS session."""
+        # Очищає DB-кеш thread_id; наступний turn відкриє свіжий thread.
         if message.chat is None:
             return
         session = await self._sessions.get(message.chat.id)
         if session is None:
             await message.answer(tg_markdown.escape("New thread will open with the next message."))
             return
-        await session.client.start_new_thread()
         async with SessionLocal() as db:
+            await chat_service.set_codex_thread_id(db, session.db_chat_id, None)
             await event_service.emit(
                 db,
                 EventKind.THREAD_RESET,
@@ -58,9 +60,10 @@ class TGHandlers:
                 user_id=session.db_user_id,
             )
             await db.commit()
-        await message.answer(tg_markdown.escape("New thread started — context cleared."))
+        await message.answer(tg_markdown.escape("New thread will open with the next message."))
 
     async def on_stop(self, message: Message) -> None:
+        # /stop кнопка/команда — interrupt running codex turn + cancel local task.
         if message.chat is None:
             return
         session = await self._sessions.get(message.chat.id)
@@ -73,22 +76,31 @@ class TGHandlers:
         )
 
     async def on_codex_usage(self, message: Message) -> None:
-        if message.from_user is None or message.from_user.id not in settings.TG_ADMIN_USER_IDS:
-            return
-        if message.chat is None:
+        # Admin-only — відкриває коротко-живу WS, читає rate-limits, закриває.
+        if (
+            message.from_user is None
+            or message.chat is None
+            or message.from_user.id not in settings.TG_ADMIN_USER_IDS
+        ):
             return
         session = await self._sessions.get_or_open(
             tg_user_id=message.from_user.id,
             tg_chat_id=message.chat.id,
             display_name=message.from_user.full_name,
         )
-        usage = await codex_usage_service.latest(session.client)
+        async with open_codex_turn(
+            session.db_chat_id, is_admin=session.is_admin, seed_history=False
+        ) as client:
+            usage = await codex_usage_service.latest(client)
         if usage is None:
             await message.answer(tg_markdown.escape("Sidecar не expose'ить rate-limits RPC."))
             return
         await message.answer(tg_markdown.escape(_format_codex_usage(usage)))
 
     async def on_callback(self, query: CallbackQuery) -> None:
+        # Inline-кнопки: Stop (interrupt) і New (clear thread_id у БД). Steer
+        # кнопка прибрана — auto-steer спрацьовує сам коли юзер пише під час
+        # активного turn'а.
         if query.message is None or query.message.chat is None:
             await query.answer()
             return
@@ -101,8 +113,8 @@ class TGHandlers:
             cancelled = await cancel_turn(session)
             await query.answer("Зупинено" if cancelled else "Нема активного turn'а")
         elif query.data == CB_TURN_NEW:
-            await session.client.start_new_thread()
             async with SessionLocal() as db:
+                await chat_service.set_codex_thread_id(db, session.db_chat_id, None)
                 await event_service.emit(
                     db,
                     EventKind.THREAD_RESET,
@@ -111,17 +123,6 @@ class TGHandlers:
                 )
                 await db.commit()
             await query.answer("Новий thread")
-        elif query.data == CB_TURN_STEER:
-            if session.current_turn_task is None:
-                await query.answer("Нема активного turn'а")
-                return
-            session.steer_pending = True
-            await query.answer("Напиши доповнення наступним повідомленням")
-            await query.message.answer(
-                tg_markdown.escape(
-                    "✏️ Напиши що додати — наступне повідомлення піде у поточний turn",
-                )
-            )
         else:
             await query.answer()
 
@@ -146,16 +147,15 @@ class TGHandlers:
 
 def _format_codex_usage(usage: CodexUsage) -> str:
     plan = usage.plan_type or "unknown"
-    lines = [f"📊 Codex usage · {plan}", ""]
+    sections: list[list[str]] = []
     if usage.primary is not None:
-        lines.extend(_format_window("5h", usage.primary))
+        sections.append(_format_window("5h", usage.primary))
     if usage.secondary is not None:
-        if len(lines) > 2:
-            lines.append("")
-        lines.extend(_format_window("week", usage.secondary))
+        sections.append(_format_window("week", usage.secondary))
+    blocks = [[f"📊 Codex usage · {plan}"], *sections]
     if usage.updated_at is not None:
-        lines.extend(("", f"updated {_format_dt(usage.updated_at)}"))
-    return "\n".join(lines)
+        blocks.append([f"updated {_format_dt(usage.updated_at)}"])
+    return "\n\n".join("\n".join(b) for b in blocks)
 
 
 def _format_window(label: str, window: UsageWindow) -> list[str]:

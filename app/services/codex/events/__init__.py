@@ -6,7 +6,7 @@
 """
 
 from app.services.codex.events.idle import iterate_with_idle_timeout
-from app.services.codex.events.translate import translate_notification
+from app.services.codex.events.translate import CodexItem, CodexNotif, translate_notification
 from app.services.codex.events.types import (
     Attachment,
     AttachmentKind,
@@ -27,6 +27,8 @@ __all__ = [
     "Attachment",
     "AttachmentKind",
     "ChatEvent",
+    "CodexItem",
+    "CodexNotif",
     "DoneEvent",
     "ErrorEvent",
     "TokenEvent",
