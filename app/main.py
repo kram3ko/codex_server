@@ -8,12 +8,33 @@ HTTP/WS routers живуть в `app/api/`; Connect-RPC services тримают�
 
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 import structlog
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from sentry_sdk.integrations.asyncio import AsyncioIntegration
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from app.api.health import router as health_router
 from app.config import settings
+
+# Init at import time so boot-time errors (alembic, lifespan) are captured.
+# Empty DSN → SDK no-op, zero overhead.
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        release=settings.SENTRY_RELEASE or None,
+        traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+        send_default_pii=False,
+        integrations=[
+            StarletteIntegration(),
+            FastApiIntegration(),
+            AsyncioIntegration(),
+            SqlalchemyIntegration(),
+        ],
+    )
 from app.db.base import SessionLocal, engine
 from app.grpc_generated.codex.v1.auth_connect import AuthServiceASGIApplication
 from app.grpc_generated.codex.v1.chat_connect import ChatServiceASGIApplication
@@ -36,6 +57,7 @@ from app.rpc.uploads import UploadsRPC
 from app.rpc.user import UserRPC
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
+from app.services.errors.default import bugsink_client
 from app.services.sessions.web import web_sessions
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
@@ -73,6 +95,7 @@ async def lifespan(_app: FastAPI):
             log.info("app_shutdown_turns_interrupted", count=cancelled)
         await tg_bot_service.stop()
         await web_sessions.close_all()
+        await bugsink_client.aclose()
         await cache.aclose()
         await engine.dispose()
 

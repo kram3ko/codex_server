@@ -51,6 +51,10 @@ services:
     command: sh -c "npm install --no-audit --no-fund && npm run dev"
     ports:
       - "8088:5173"
+    environment:
+      VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+      VITE_SENTRY_RELEASE: ${VITE_SENTRY_RELEASE:-}
+      VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-0}
     volumes:
       - ../web:/web
       - ../protos:/protos:ro

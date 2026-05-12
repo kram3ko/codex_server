@@ -85,17 +85,27 @@ class Settings(BaseSettings):
     # лінія захисту. Empty = MCP routes відкриті, не для prod.
     MCP_CALLBACK_TOKEN: str = ""
 
+    # --- Bugsink (Sentry-SDK-compatible error tracker) ---
+    # Empty SENTRY_DSN → sentry_sdk.init no-op. BUGSINK_AUTH_TOKEN — Bearer
+    # для codex-server → Bugsink REST API (юзають MCP tools `list_errors`/
+    # `get_error`).
+    SENTRY_DSN: str = ""
+    SENTRY_RELEASE: str = ""
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+    BUGSINK_INTERNAL_URL: str = "http://bugsink:8000"
+    BUGSINK_AUTH_TOKEN: str = ""
+
     @field_validator("TG_ADMIN_USER_IDS", mode="before")
     @classmethod
     def _split_user_ids(cls, value: object) -> object:
         if isinstance(value, int):
             return {value}
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return set()
-            return {int(part) for part in stripped.split(",") if part.strip()}
-        return value
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if not stripped:
+            return set()
+        return {int(part) for part in stripped.split(",") if part.strip()}
 
 
 settings = Settings()
