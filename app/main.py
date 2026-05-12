@@ -28,6 +28,8 @@ if settings.SENTRY_DSN:
         release=settings.SENTRY_RELEASE or None,
         traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
         send_default_pii=False,
+        send_client_reports=False,
+        auto_session_tracking=False,
         integrations=[
             StarletteIntegration(),
             FastApiIntegration(),
