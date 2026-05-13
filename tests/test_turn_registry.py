@@ -22,8 +22,9 @@ class FakeRedis:
     async def get(self, key: str) -> bytes | None:
         return self.store.get(key)
 
-    async def delete(self, key: str) -> None:
-        self.store.pop(key, None)
+    async def delete(self, *keys: str) -> None:
+        for key in keys:
+            self.store.pop(key, None)
 
 
 @pytest.fixture

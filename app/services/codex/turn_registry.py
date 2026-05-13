@@ -23,10 +23,19 @@ from app.services.codex.client import CodexClient
 log = structlog.get_logger(__name__)
 
 _KEY_PREFIX = "codex:active:"
+_STEER_KEY_PREFIX = "codex:active-steer:"
 
 
 def _key(chat_id: int) -> str:
     return f"{_KEY_PREFIX}{chat_id}"
+
+
+def _steer_key(chat_id: int) -> str:
+    return f"{_STEER_KEY_PREFIX}{chat_id}"
+
+
+def _ttl_s() -> int:
+    return int(max(settings.WEB_TURN_TIMEOUT_SECONDS, settings.TG_TURN_TIMEOUT_SECONDS)) + 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +50,7 @@ async def register(chat_id: int, turn: ActiveTurn) -> None:
         {"thread_id": turn.thread_id, "turn_id": turn.turn_id, "is_admin": turn.is_admin}
     )
     try:
-        await cache.set(_key(chat_id), payload, ex=int(settings.WEB_TURN_TIMEOUT_SECONDS) + 60)
+        await cache.set(_key(chat_id), payload, ex=_ttl_s())
     except RedisError as exc:
         log.warning("turn_registry_register_failed", chat_id=chat_id, error=str(exc))
 
@@ -86,9 +95,33 @@ async def get(chat_id: int) -> ActiveTurn | None:
 
 async def drop(chat_id: int) -> None:
     try:
-        await cache.delete(_key(chat_id))
+        await cache.delete(_key(chat_id), _steer_key(chat_id))
     except RedisError as exc:
         log.warning("turn_registry_drop_failed", chat_id=chat_id, error=str(exc))
+
+
+async def note_steer(chat_id: int, turn_id: str) -> None:
+    try:
+        await cache.set(_steer_key(chat_id), turn_id, ex=_ttl_s())
+    except RedisError as exc:
+        log.warning("turn_registry_note_steer_failed", chat_id=chat_id, error=str(exc))
+
+
+async def consume_steer(chat_id: int, turn_id: str | None) -> bool:
+    if turn_id is None:
+        return False
+    try:
+        raw = await cache.get(_steer_key(chat_id))
+        if raw is None:
+            return False
+        seen_turn_id = raw.decode() if isinstance(raw, bytes) else raw
+        if seen_turn_id != turn_id:
+            return False
+        await cache.delete(_steer_key(chat_id))
+        return True
+    except RedisError as exc:
+        log.warning("turn_registry_consume_steer_failed", chat_id=chat_id, error=str(exc))
+        return False
 
 
 async def send_interrupt(turn: ActiveTurn) -> None:
@@ -100,13 +133,16 @@ async def send_interrupt(turn: ActiveTurn) -> None:
         await client.interrupt(turn_id=turn.turn_id)
 
 
-async def send_steer(turn: ActiveTurn, text: str) -> bool:
+async def send_steer(chat_id: int, turn: ActiveTurn, text: str) -> bool:
     """Cross-worker steer: appends text у running turn без володіння його WS.
     Pre-condition: `turn.turn_id` is set."""
     if turn.turn_id is None:
         return False
     async with _one_shot_client(turn.is_admin) as client:
-        return await client.steer(text, turn_id=turn.turn_id, thread_id=turn.thread_id)
+        accepted = await client.steer(text, turn_id=turn.turn_id, thread_id=turn.thread_id)
+    if accepted:
+        await note_steer(chat_id, turn.turn_id)
+    return accepted
 
 
 @contextlib.asynccontextmanager

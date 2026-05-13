@@ -215,6 +215,8 @@ class CodexClient:
         self._thread_id: str | None = initial_thread_id
         self._thread_resumed_or_started = False
         self._current_turn_id: str | None = None
+        self._idle_s: float | None = None
+        self._idle_deadline: float | None = None
         self._turn_diagnostics: _TurnDiagnostics | None = None
         self._on_thread_change = on_thread_change
 
@@ -236,6 +238,12 @@ class CodexClient:
             data.update(self._transport.diagnostic_snapshot())
             return data
         return self._turn_diagnostics.snapshot(self._transport)
+
+    def extend_idle_deadline(self) -> bool:
+        if self._idle_s is None:
+            return False
+        self._idle_deadline = time.monotonic() + self._idle_s
+        return True
 
     async def connect(self) -> None:
         await self._transport.connect()
@@ -295,7 +303,7 @@ class CodexClient:
         *,
         on_started: Callable[[str, str], Awaitable[None]] | None = None,
         idle_s: float | None = None,
-        on_idle: Callable[[], Awaitable[None]] | None = None,
+        on_idle: Callable[[], Awaitable[bool | None]] | None = None,
         on_item_boundary: Callable[[str], Awaitable[None]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """Stream ChatEvent'и. `on_started(turn_id, thread_id)` fires як тільки
@@ -339,6 +347,8 @@ class CodexClient:
                 if event is not None and isinstance(event, DoneEvent):
                     return
         finally:
+            self._idle_s = None
+            self._idle_deadline = None
             self._current_turn_id = None
 
     async def interrupt(self, turn_id: str | None = None) -> None:
@@ -381,6 +391,7 @@ class CodexClient:
         except AppServerError as exc:
             log.warning("codex_steer_failed", turn_id=target_turn, code=exc.code, msg=str(exc))
             return False
+        self.extend_idle_deadline()
         log.info("codex_steered", turn_id=target_turn, text_len=len(text))
         return True
 
@@ -420,45 +431,52 @@ class CodexClient:
     async def _current_turn_notifications(
         self,
         idle_s: float | None,
-        on_idle: Callable[[], Awaitable[None]] | None,
+        on_idle: Callable[[], Awaitable[bool | None]] | None,
     ) -> AsyncIterator[Notification]:
         notes = self._transport.notifications()
-        deadline = time.monotonic() + idle_s if idle_s is not None else None
-        while True:
-            try:
-                note = await self._next_notification(notes, deadline, on_idle)
-            except StopAsyncIteration:
-                return
-            if self._is_stale_turn_note(note):
-                self._record_stale_raw_note(note)
-                continue
-            if self._is_session_noise_note(note):
-                self._record_noise_raw_note(note)
-                continue
-            if idle_s is not None:
-                deadline = time.monotonic() + idle_s
-            yield note
+        self._idle_s = idle_s
+        self._idle_deadline = time.monotonic() + idle_s if idle_s is not None else None
+        try:
+            while True:
+                try:
+                    note = await self._next_notification(notes, on_idle)
+                except StopAsyncIteration:
+                    return
+                if self._is_stale_turn_note(note):
+                    self._record_stale_raw_note(note)
+                    continue
+                if self._is_session_noise_note(note):
+                    self._record_noise_raw_note(note)
+                    continue
+                self.extend_idle_deadline()
+                yield note
+        finally:
+            self._idle_s = None
+            self._idle_deadline = None
 
     async def _next_notification(
         self,
         notes: AsyncIterator[Notification],
-        deadline: float | None,
-        on_idle: Callable[[], Awaitable[None]] | None,
+        on_idle: Callable[[], Awaitable[bool | None]] | None,
     ) -> Notification:
-        if deadline is None:
-            return await anext(notes)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            if on_idle is not None:
-                await on_idle()
-            raise TimeoutError
-        try:
-            async with asyncio.timeout(remaining):
+        while True:
+            deadline = self._idle_deadline
+            if deadline is None:
                 return await anext(notes)
-        except TimeoutError:
-            if on_idle is not None:
-                await on_idle()
-            raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if on_idle is not None and await on_idle():
+                    continue
+                raise TimeoutError
+            try:
+                async with asyncio.timeout(remaining):
+                    return await anext(notes)
+            except TimeoutError:
+                if self._idle_deadline is not None and time.monotonic() < self._idle_deadline:
+                    continue
+                if on_idle is not None and await on_idle():
+                    continue
+                raise
 
     def _is_stale_turn_note(self, note: Notification) -> bool:
         return (

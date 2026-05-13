@@ -57,7 +57,9 @@ async def stream_turn(
     events_count = 0
     last_event_type = "none"
 
-    async def _on_idle() -> None:
+    async def _on_idle() -> bool:
+        if await turn_registry.consume_steer(session.db_chat_id, client.current_turn_id):
+            return client.extend_idle_deadline()
         diagnostics = client.turn_diagnostics()
         log.error(
             "tg_codex_idle_timeout",
@@ -68,6 +70,9 @@ async def stream_turn(
             last_event_type=last_event_type,
             **diagnostics,
         )
+        with contextlib.suppress(Exception):
+            await client.interrupt()
+        return False
 
     stream = client.run_turn(
         prepared.text,

@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.22 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /uvx /bin/
 
 # orjson 3.11.x офіційно дозволяє build на free-threaded Python тільки за
 # explicit opt-in (PEP 703 ще experimental у 3.14). Ми свідомо це вмикаємо.

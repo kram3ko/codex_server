@@ -69,7 +69,9 @@ async def stream_turn(
     events_count = 0
     last_event_type = "none"
 
-    async def _on_idle() -> None:
+    async def _on_idle() -> bool:
+        if await turn_registry.consume_steer(persisted_chat_id, client.current_turn_id):
+            return client.extend_idle_deadline()
         diagnostics = client.turn_diagnostics()
         log.error(
             "web_rpc_codex_idle_timeout",
@@ -81,6 +83,7 @@ async def stream_turn(
         )
         with contextlib.suppress(Exception):
             await client.interrupt()
+        return False
 
     # Persist partial state на каждій item/completed-границі (agentMessage paragraph
     # / tool completion). Перший INSERT, далі UPDATE того ж row'а. Якщо crash mid-
@@ -163,6 +166,8 @@ async def stream_turn(
         )
         return
     except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            await client.interrupt()
         # Persist якщо турн встиг стартувати на sidecar (turn_id отримано) АБО
         # вже накопичено будь-який видимий контент. Інакше cancel прилетів
         # до `turn/start` — у БД пустий placeholder не пишемо.

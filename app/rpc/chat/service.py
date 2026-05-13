@@ -183,7 +183,7 @@ class ChatRPC(ChatProtocol):
         if record is None:
             return chat_pb2.SteerTurnResponse(accepted=False)
         try:
-            accepted = await turn_registry.send_steer(record, text)
+            accepted = await turn_registry.send_steer(request.chat_id, record, text)
         except Exception as exc:  # noqa: BLE001 — steer best-effort, лог + accepted=False
             log.warning("web_steer_rpc_failed", chat_id=request.chat_id, error=str(exc))
             return chat_pb2.SteerTurnResponse(accepted=False)

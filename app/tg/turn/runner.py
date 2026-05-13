@@ -167,7 +167,7 @@ async def _try_auto_steer(session: ChatSession, prepared: PreparedTurn) -> bool:
     if record is None:
         return False
     try:
-        accepted = await turn_registry.send_steer(record, prepared.text)
+        accepted = await turn_registry.send_steer(session.db_chat_id, record, prepared.text)
     except Exception as exc:  # noqa: BLE001 — steer RPC не повинен впасти юзера
         log.warning("tg_auto_steer_failed", error=str(exc))
         return False
