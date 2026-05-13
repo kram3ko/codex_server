@@ -29,6 +29,11 @@ message Message {
 message ListMessagesRequest {
   int64 chat_id = 1;
   Pagination pagination = 2;
+  // Cursor for infinite scroll back: return messages with id < before_id.
+  // Unset on first page; set to oldest currently-displayed id on subsequent
+  // requests. Robust against new messages arriving between pages (offset
+  // would shift).
+  optional int64 before_id = 3;
 }
 
 message ListMessagesResponse {

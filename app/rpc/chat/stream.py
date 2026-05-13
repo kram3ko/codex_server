@@ -14,7 +14,8 @@ import structlog
 from app.config import settings
 from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import chat_pb2
-from app.models import EventKind, MessageRole
+from app.models import EventKind, Message, MessageRole
+from app.rpc._mappers import message_to_pb
 from app.rpc.chat.mappers import (
     chat_event_to_pb,
     error_event,
@@ -48,8 +49,10 @@ async def stream_turn(
     *,
     image_urls: tuple[str, ...] = (),
     voice_reply: bool = False,
+    client_id: str | None = None,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     collector = StreamCollector()
+    partial_msg_id: int | None = None
 
     if client.current_thread_id:
         await turn_registry.register_pending(
@@ -66,16 +69,41 @@ async def stream_turn(
     events_count = 0
     last_event_type = "none"
 
-    async def _on_idle() -> None:
+    async def _on_idle() -> bool:
+        if await turn_registry.consume_steer(persisted_chat_id, client.current_turn_id):
+            return client.extend_idle_deadline()
+        diagnostics = client.turn_diagnostics()
         log.error(
             "web_rpc_codex_idle_timeout",
             db_chat_id=persisted_chat_id,
             idle_timeout_s=settings.WEB_TURN_TIMEOUT_SECONDS,
             events_count=events_count,
             last_event_type=last_event_type,
+            **diagnostics,
         )
         with contextlib.suppress(Exception):
             await client.interrupt()
+        return False
+
+    # Persist partial state на каждій item/completed-границі (agentMessage paragraph
+    # / tool completion). Перший INSERT, далі UPDATE того ж row'а. Якщо crash mid-
+    # stream — history до останнього boundary в БД.
+    async def _on_item_boundary(item_type: str) -> None:
+        nonlocal partial_msg_id
+        if not (collector.buffer or collector.tool_calls or collector.attachments):
+            return  # нічого видимого ще не накопичили — пустий placeholder не пишемо
+        msg = await _persist_assistant_turn(
+            persisted_chat_id,
+            user_pk,
+            collector.buffer,
+            collector.tool_calls,
+            [],  # attachments persistимо тільки на finalize
+            partial=True,
+            client_id=client_id,
+            msg_id=partial_msg_id,
+            emit_journal=False,
+        )
+        partial_msg_id = msg.id
 
     stream = client.run_turn(
         text,
@@ -83,6 +111,7 @@ async def stream_turn(
         on_started=_on_started,
         idle_s=settings.WEB_TURN_TIMEOUT_SECONDS,
         on_idle=_on_idle,
+        on_item_boundary=_on_item_boundary,
     )
 
     try:
@@ -108,24 +137,15 @@ async def stream_turn(
     except TimeoutError:
         # Idle-timeout — best-effort interrupt sidecar + quarantine thread,
         # інакше наступний run_turn пробує resume тої самої мертвої thread.
+        diagnostics = client.turn_diagnostics()
         with contextlib.suppress(Exception):
             await client.interrupt()
         await quarantine_thread(client.current_thread_id)
-        detail = f"idle>{settings.WEB_TURN_TIMEOUT_SECONDS}s"
-        yield error_event(CodexErrorCode.TURN_TIMEOUT, detail)
-        await _emit_event(
-            persisted_chat_id,
-            user_pk,
-            EventKind.TURN_FAILED,
-            {"code": CodexErrorCode.TURN_TIMEOUT, "detail": detail},
-        )
-        return
-    except asyncio.CancelledError:
-        # Persist partial assistant text + tool calls so chat reload показує
-        # interrupted bubble замість дірки; mirrors TG `handle_dropped_stream`.
-        # Не yield-ити після CancelledError — async-gen транспорт уже закривається,
-        # client бачить stream як cancelled, не як error frame.
-        if collector.buffer or collector.tool_calls or collector.attachments:
+        # Persist partial так само як на CancelledError — token deltas могли
+        # настрімитись у buffer ДО timeout'а, але boundary callback не встиг
+        # спрацювати (idle прилетів між item/started і item/completed).
+        turn_started = diagnostics.get("turn_id") is not None
+        if turn_started or collector.buffer or collector.tool_calls or collector.attachments:
             await _persist_assistant_turn(
                 persisted_chat_id,
                 user_pk,
@@ -133,6 +153,35 @@ async def stream_turn(
                 collector.tool_calls,
                 collector.attachments,
                 partial=True,
+                client_id=client_id,
+                msg_id=partial_msg_id,
+            )
+        detail = f"idle>{settings.WEB_TURN_TIMEOUT_SECONDS}s"
+        yield error_event(CodexErrorCode.TURN_TIMEOUT, detail)
+        await _emit_event(
+            persisted_chat_id,
+            user_pk,
+            EventKind.TURN_FAILED,
+            {"code": CodexErrorCode.TURN_TIMEOUT, "detail": detail, "diagnostics": diagnostics},
+        )
+        return
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            await client.interrupt()
+        # Persist якщо турн встиг стартувати на sidecar (turn_id отримано) АБО
+        # вже накопичено будь-який видимий контент. Інакше cancel прилетів
+        # до `turn/start` — у БД пустий placeholder не пишемо.
+        turn_started = client.turn_diagnostics().get("turn_id") is not None
+        if turn_started or collector.buffer or collector.tool_calls or collector.attachments:
+            await _persist_assistant_turn(
+                persisted_chat_id,
+                user_pk,
+                collector.buffer,
+                collector.tool_calls,
+                collector.attachments,
+                partial=True,
+                client_id=client_id,
+                msg_id=partial_msg_id,
             )
         await _emit_event(
             persisted_chat_id,
@@ -162,12 +211,14 @@ async def stream_turn(
         )
         return
 
-    assistant_msg_id = await _persist_assistant_turn(
+    assistant_msg = await _persist_assistant_turn(
         persisted_chat_id,
         user_pk,
         collector.final_text,
         collector.tool_calls,
         collector.attachments,
+        client_id=client_id,
+        msg_id=partial_msg_id,
     )
 
     # TTS off the hot path — finalize turn for client first, attach audio коли
@@ -175,7 +226,7 @@ async def stream_turn(
     if voice_reply and collector.final_text.strip():
         asyncio.create_task(
             attach_tts_to_message(
-                assistant_msg_id, collector.final_text, persisted_chat_id, user_pk
+                assistant_msg.id, collector.final_text, persisted_chat_id, user_pk
             )
         )
 
@@ -183,6 +234,7 @@ async def stream_turn(
         done=chat_pb2.DoneEvent(
             chat_id=persisted_chat_id,
             final_text=final_text_for_done_frame(collector.final_text, collector.buffer),
+            message=message_to_pb(assistant_msg),
         )
     )
 
@@ -195,11 +247,16 @@ async def _persist_assistant_turn(
     tool_attachments: list[Attachment],
     *,
     partial: bool = False,
-) -> int:
-    """Persist assistant message + emit journal event.
+    client_id: str | None = None,
+    msg_id: int | None = None,
+    emit_journal: bool = True,
+) -> Message:
+    """Insert (msg_id=None) or update assistant message + emit journal event.
 
-    `partial=True` коли турн обірваний (CancelledError) — meta тегається
-    `partial: True` щоб UI відмалював badge; event — TURN_FAILED + reason.
+    Update-mode use:ється для streaming-persist — на кожному item/completed
+    boundary'і ми UPDATE'имо існуючий row замість INSERT'у. На terminal-вибір
+    (done/cancel/timeout) знов update'имо з фінальним станом.
+    `partial=True` → meta.partial=true для UI badge "interrupted/streaming".
     """
     async with SessionLocal() as db:
         upload_ids = await upload_service.persist_attachments(
@@ -215,13 +272,19 @@ async def _persist_assistant_turn(
             meta["calls"] = tool_calls
         if upload_ids:
             meta["upload_ids"] = upload_ids
-        assistant_msg = await message_service.append(
-            db,
-            persisted_chat_id,
-            MessageRole.ASSISTANT,
-            text,
-            meta=meta or None,
-        )
+        if client_id:
+            meta["client_id"] = client_id
+        if msg_id is None:
+            assistant_msg = await message_service.append(
+                db,
+                persisted_chat_id,
+                MessageRole.ASSISTANT,
+                text,
+                meta=meta or None,
+            )
+        else:
+            await message_service.update_text(db, msg_id, text, meta=meta if meta else None)
+            assistant_msg = await db.get(Message, msg_id)
         payload: dict[str, Any] = {
             "final_text_len": len(text),
             "tool_calls": len(tool_calls),
@@ -229,16 +292,17 @@ async def _persist_assistant_turn(
         }
         if partial:
             payload["reason"] = CodexErrorCode.STREAM_DROPPED
-        await event_service.emit(
-            db,
-            EventKind.TURN_FAILED if partial else EventKind.TURN_COMPLETED,
-            chat_id=persisted_chat_id,
-            user_id=user_pk,
-            payload=payload,
-        )
+        if emit_journal:
+            await event_service.emit(
+                db,
+                EventKind.TURN_FAILED if partial else EventKind.TURN_COMPLETED,
+                chat_id=persisted_chat_id,
+                user_id=user_pk,
+                payload=payload,
+            )
         await db.commit()
         await db.refresh(assistant_msg)
-        return assistant_msg.id
+        return assistant_msg
 
 
 async def _emit_event(

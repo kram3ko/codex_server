@@ -5,6 +5,7 @@ package codex.v1;
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
 import "codex/v1/common.proto";
+import "codex/v1/message.proto";
 
 // Chat = одна розмова (web або telegram). Тримає `codex_thread_id` для
 // rehydrate Codex-сесії після рестарту FastAPI.
@@ -57,6 +58,10 @@ message RunTurnRequest {
   // multimodal input alongside `text`. If any of these is audio/*, server
   // also synthesizes a TTS reply ("voice in → voice out").
   repeated int64 upload_ids = 3;
+  // Client-generated idempotency key. Server persists in assistant message
+  // meta and echoes back in DoneEvent so client can swap temp→real id
+  // without remounting the DOM bubble.
+  string client_id = 4;
 }
 
 message ChatEvent {
@@ -94,6 +99,10 @@ message ToolResultEvent {
 message DoneEvent {
   int64 chat_id = 1;
   string final_text = 2;
+  // Persisted assistant message snapshot. Client uses it to swap temp draft
+  // id → real DB id (via client_id match) and apply final meta (upload_ids,
+  // calls) without round-tripping ListMessages.
+  Message message = 3;
 }
 
 message ErrorEvent {

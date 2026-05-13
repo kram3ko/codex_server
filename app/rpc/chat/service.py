@@ -33,11 +33,8 @@ from app.services.codex.runner import open_codex_turn
 from app.services.codex_usage.default import codex_usage_service
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
-from app.services.users.default import user_service
 
 log = structlog.get_logger(__name__)
-
-_WEB_USER_EMAIL = "web@codex.local"
 
 
 class ChatRPC(ChatProtocol):
@@ -98,13 +95,13 @@ class ChatRPC(ChatProtocol):
         request: chat_pb2.RunTurnRequest,
         ctx: RequestContext,
     ) -> AsyncIterator[chat_pb2.ChatEvent]:
-        await require_user(ctx)
+        user = await require_user(ctx)
         text = request.text.strip()
         if not text:
             yield error_event(CodexErrorCode.EMPTY_TEXT, "text is required")
             return
 
-        persisted_chat_id, user_pk = await _ensure_web_chat()
+        persisted_chat_id, user_pk = await _ensure_web_chat(user.id)
         if request.HasField("chat_id") and request.chat_id != persisted_chat_id:
             raise ConnectError(Code.NOT_FOUND, f"chat {request.chat_id} not found")
 
@@ -139,6 +136,7 @@ class ChatRPC(ChatProtocol):
                     user_pk,
                     image_urls=data_urls,
                     voice_reply=voice_reply,
+                    client_id=request.client_id or None,
                 ):
                     yield event
             finally:
@@ -185,14 +183,14 @@ class ChatRPC(ChatProtocol):
         if record is None:
             return chat_pb2.SteerTurnResponse(accepted=False)
         try:
-            accepted = await turn_registry.send_steer(record, text)
+            accepted = await turn_registry.send_steer(request.chat_id, record, text)
         except Exception as exc:  # noqa: BLE001 — steer best-effort, лог + accepted=False
             log.warning("web_steer_rpc_failed", chat_id=request.chat_id, error=str(exc))
             return chat_pb2.SteerTurnResponse(accepted=False)
         if accepted:
             async with SessionLocal() as db:
                 await message_service.append(
-                    db, request.chat_id, MessageRole.USER, text
+                    db, request.chat_id, MessageRole.USER, text, meta={"steered": True}
                 )
                 await db.commit()
         return chat_pb2.SteerTurnResponse(accepted=accepted)
@@ -204,9 +202,9 @@ class ChatRPC(ChatProtocol):
         ctx: RequestContext,
     ) -> chat_pb2.CodexUsage:
         del request
-        await require_user(ctx)
+        user = await require_user(ctx)
         # Open fresh client just to read rate-limits; cheap (handshake only).
-        persisted_chat_id, _ = await _ensure_web_chat()
+        persisted_chat_id, _ = await _ensure_web_chat(user.id)
         async with open_codex_turn(persisted_chat_id, is_admin=True, seed_history=False) as client:
             usage = await codex_usage_service.latest(client)
         if usage is None:
@@ -214,9 +212,8 @@ class ChatRPC(ChatProtocol):
         return codex_usage_to_pb(usage)
 
 
-async def _ensure_web_chat() -> tuple[int, int]:
+async def _ensure_web_chat(user_id: int) -> tuple[int, int]:
     async with SessionLocal() as db:
-        web_user = await user_service.get_or_create_by_email(db, _WEB_USER_EMAIL)
-        chat = await chat_service.get_or_create_for_web(db, web_user.id)
+        chat = await chat_service.get_or_create_for_web(db, user_id)
         await db.commit()
-        return chat.id, web_user.id
+        return chat.id, user_id

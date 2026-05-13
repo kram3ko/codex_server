@@ -3,6 +3,7 @@ import datetime
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf import struct_pb2 as _struct_pb2
 from codex.v1 import common_pb2 as _common_pb2
+from codex.v1 import message_pb2 as _message_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -74,14 +75,16 @@ class DeleteChatRequest(_message.Message):
     def __init__(self, chat_id: _Optional[int] = ...) -> None: ...
 
 class RunTurnRequest(_message.Message):
-    __slots__ = ("chat_id", "text", "upload_ids")
+    __slots__ = ("chat_id", "text", "upload_ids", "client_id")
     CHAT_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
     UPLOAD_IDS_FIELD_NUMBER: _ClassVar[int]
+    CLIENT_ID_FIELD_NUMBER: _ClassVar[int]
     chat_id: int
     text: str
     upload_ids: _containers.RepeatedScalarFieldContainer[int]
-    def __init__(self, chat_id: _Optional[int] = ..., text: _Optional[str] = ..., upload_ids: _Optional[_Iterable[int]] = ...) -> None: ...
+    client_id: str
+    def __init__(self, chat_id: _Optional[int] = ..., text: _Optional[str] = ..., upload_ids: _Optional[_Iterable[int]] = ..., client_id: _Optional[str] = ...) -> None: ...
 
 class ChatEvent(_message.Message):
     __slots__ = ("token", "tool_call", "tool_result", "done", "error")
@@ -134,12 +137,14 @@ class ToolResultEvent(_message.Message):
     def __init__(self, name: _Optional[str] = ..., text: _Optional[str] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., error: _Optional[str] = ...) -> None: ...
 
 class DoneEvent(_message.Message):
-    __slots__ = ("chat_id", "final_text")
+    __slots__ = ("chat_id", "final_text", "message")
     CHAT_ID_FIELD_NUMBER: _ClassVar[int]
     FINAL_TEXT_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
     chat_id: int
     final_text: str
-    def __init__(self, chat_id: _Optional[int] = ..., final_text: _Optional[str] = ...) -> None: ...
+    message: _message_pb2.Message
+    def __init__(self, chat_id: _Optional[int] = ..., final_text: _Optional[str] = ..., message: _Optional[_Union[_message_pb2.Message, _Mapping]] = ...) -> None: ...
 
 class ErrorEvent(_message.Message):
     __slots__ = ("code", "detail")

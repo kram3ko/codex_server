@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     # events/chunks → interrupt() і звільняємо turn_lock.
     TG_TURN_TIMEOUT_SECONDS: float = 300.0
     WEB_TURN_TIMEOUT_SECONDS: float = 300.0
-    TG_POLLING_LOCK_TTL_SECONDS: int = 60
+    TG_WEBHOOK_URL: str = ""
+    TG_WEBHOOK_SECRET: str = ""
 
     # --- Auth (email + password → JWT) ---
     # ADMIN_EMAIL/ADMIN_PASSWORD — bootstrap акаунт: на startup створюється

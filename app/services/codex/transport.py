@@ -84,6 +84,16 @@ class AppServerClient:
     def is_connected(self) -> bool:
         return self._ws is not None and not self._explicit_close
 
+    def diagnostic_snapshot(self) -> dict[str, Any]:
+        reader = self._reader_task
+        return {
+            "ws_connected": self.is_connected,
+            "explicit_close": self._explicit_close,
+            "pending_requests": len(self._pending),
+            "notification_queue_size": self._notifications.qsize(),
+            "reader_alive": reader is not None and not reader.done(),
+        }
+
     async def connect(self) -> None:
         """Ідемпотентний — no-op якщо WS уже піднятий."""
         if self._explicit_close:

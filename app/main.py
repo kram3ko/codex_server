@@ -18,6 +18,7 @@ from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from app.api.health import router as health_router
+from app.api.tg_webhook import router as tg_webhook_router
 from app.config import settings
 from app.services.errors.scrub import scrub_event
 
@@ -142,3 +143,4 @@ app.mount(
 app.mount("/mcp", mcp_http_app)
 
 app.include_router(health_router)
+app.include_router(tg_webhook_router)

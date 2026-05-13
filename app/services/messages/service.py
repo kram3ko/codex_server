@@ -24,19 +24,37 @@ class MessageService:
         await session.flush()
         return message
 
+    async def update_text(
+        self,
+        session: AsyncSession,
+        message_id: int,
+        text: str,
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        msg = await session.get(Message, message_id)
+        if msg is None:
+            return
+        msg.text = text
+        msg.meta = meta  # always assign — allow clearing stale partial flag
+        await session.flush()
+
     async def list(
         self,
         session: AsyncSession,
         chat_id: int,
         limit: int = 50,
+        before_id: int | None = None,
     ) -> list[Message]:
+        # Cursor-based infinite scroll: DESC query + reverse so caller always
+        # gets ascending order. `before_id` стабільний до конкурентних insert'ів,
+        # offset зрушиться, cursor — ні.
+        stmt = select(Message).where(Message.chat_id == chat_id)
+        if before_id is not None:
+            stmt = stmt.where(Message.id < before_id)
         rows = await session.execute(
-            select(Message)
-            .where(Message.chat_id == chat_id)
-            .order_by(Message.id.asc())
-            .limit(limit),
+            stmt.order_by(Message.id.desc()).limit(limit),
         )
-        return list(rows.scalars())
+        return list(reversed(rows.scalars().all()))
 
     async def list_recent(
         self,

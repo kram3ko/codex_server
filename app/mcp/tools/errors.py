@@ -25,7 +25,7 @@ from app.services.errors.default import bugsink_client
 async def list_errors(
     project_slug: Annotated[
         str | None,
-        Field(description="Project slug (e.g. 'codex-backend'). Empty → first project."),
+        Field(description="Project slug (e.g. 'codex-server'). Empty → first project."),
     ] = None,
     limit: Annotated[int, Field(ge=1, le=100, description="Max issues to return.")] = 20,
 ) -> dict[str, Any]:

@@ -6,6 +6,8 @@
   --color-user: oklch(64% 0.16 230);
   --color-user-soft: oklch(64% 0.16 230 / 0.16);
   --color-danger: oklch(64% 0.2 25);
+  /* Single source: bubble/tools/attachments share max-width via `max-w-bubble`. */
+  --container-bubble: min(760px, 80%);
 }
 
 :root {
