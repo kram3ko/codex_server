@@ -98,8 +98,8 @@ async def promote_pending(chat_id: int, thread_id: str, turn_id: str) -> bool:
     new_payload = _encode(
         ActiveTurn(thread_id=thread_id, turn_id=turn_id, is_admin=rec.is_admin)
     )
-    # SET ... IFEQ <raw> EX <ttl> — server байт-порівнює поточне значення з `raw`
-    # який ми щойно прочитали; повертає None якщо інший воркер встиг змінити.
+    # SET ... IFEQ <raw> EX <ttl> — server байт-порівнює поточне значення з `raw`.
+    # redis-py SET response callback парсить відповідь: match → True, mismatch → None.
     try:
         result = await cache.execute_command(
             "SET", _key(chat_id), new_payload, "EX", _ttl_s(), "IFEQ", raw
@@ -107,7 +107,7 @@ async def promote_pending(chat_id: int, thread_id: str, turn_id: str) -> bool:
     except RedisError as exc:
         log.warning("turn_registry_promote_set_failed", chat_id=chat_id, error=str(exc))
         return False
-    return result == "OK"
+    return bool(result)
 
 
 async def drop_if_matches(chat_id: int, thread_id: str, turn_id: str | None) -> bool:
