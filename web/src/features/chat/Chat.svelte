@@ -36,8 +36,11 @@
   let error = $state("");
   let info = $state("");
   let draftStartedAt = $state<number | undefined>(undefined);
+  let lastActivityAt = $state<number | undefined>(undefined);
   let activeTurnId = $state(0);
   let streamedPrefix = "";
+
+  const IDLE_TIMEOUT_MS = 300_000;
 
   let infoTimer: ReturnType<typeof setTimeout> | null = null;
   function flashInfo(message: string): void {
@@ -123,6 +126,7 @@
     busy = false;
     streamingClientId = null;
     draftStartedAt = undefined;
+    lastActivityAt = undefined;
     typer.reset();
     tools = [];
     attachments = [];
@@ -169,8 +173,8 @@
         if (partialAssistant) {
           streamedPrefix += partialText;
           typer.reset();
-          draftStartedAt = Date.now();
         }
+        lastActivityAt = Date.now();
         const streamIdx = streamingClientId
           ? messages.findIndex((m) => clientIdOf(m) === streamingClientId)
           : -1;
@@ -199,6 +203,7 @@
     streamedPrefix = "";
     typer.reset();
     draftStartedAt = Date.now();
+    lastActivityAt = Date.now();
     const userMetaJson: { upload_ids?: number[]; audio_upload_ids?: number[] } = {};
     if (imageIds.length) userMetaJson.upload_ids = imageIds.map((id) => Number(id));
     if (audioIds.length) userMetaJson.audio_upload_ids = audioIds.map((id) => Number(id));
@@ -233,6 +238,7 @@
         if (turnId !== activeTurnId) {
           break;
         }
+        lastActivityAt = Date.now();
         switch (event.kind.case) {
           case "token":
             typer.push(event.kind.value.delta);
@@ -311,6 +317,7 @@
             }
             streamingClientId = null;
             draftStartedAt = undefined;
+            lastActivityAt = undefined;
             typer.reset();
             streamedPrefix = "";
             tools = [];
@@ -328,6 +335,8 @@
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
             streamingClientId = null;
             streamedPrefix = "";
+            lastActivityAt = undefined;
+            draftStartedAt = undefined;
             break;
         }
         await tick();
@@ -338,6 +347,8 @@
         messages = messages.filter((m) => clientIdOf(m) !== clientId);
         streamingClientId = null;
         streamedPrefix = "";
+        lastActivityAt = undefined;
+        draftStartedAt = undefined;
       }
     } finally {
       if (turnId === activeTurnId) {
@@ -367,6 +378,7 @@
     typer.reset();
     streamedPrefix = "";
     draftStartedAt = undefined;
+    lastActivityAt = undefined;
     await chatClient.interruptTurn({ chatId: selected.id });
     busy = false;
   }
@@ -397,7 +409,7 @@
         <Spinner />
       </div>
     {:else}
-      <MessageList messages={displayMessages} streamingClientId={streamingClientId} {tools} {attachments} {draftStartedAt} {loadingOlder} {hasMoreOlder} onloadolder={loadOlderMessages} />
+      <MessageList messages={displayMessages} streamingClientId={streamingClientId} {tools} {attachments} {draftStartedAt} {lastActivityAt} idleTimeoutMs={IDLE_TIMEOUT_MS} {loadingOlder} {hasMoreOlder} onloadolder={loadOlderMessages} />
       <Composer {busy} onsend={send} oninterrupt={interrupt} />
     {/if}
   </section>

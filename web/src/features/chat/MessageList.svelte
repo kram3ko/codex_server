@@ -15,6 +15,8 @@
     tools,
     attachments,
     draftStartedAt,
+    lastActivityAt,
+    idleTimeoutMs,
     loadingOlder = false,
     hasMoreOlder = false,
     onloadolder
@@ -24,6 +26,8 @@
     tools: ToolEvent[];
     attachments: ChatAttachment[];
     draftStartedAt?: number;
+    lastActivityAt?: number;
+    idleTimeoutMs?: number;
     loadingOlder?: boolean;
     hasMoreOlder?: boolean;
     onloadolder?: () => void;
@@ -148,6 +152,8 @@
             {message}
             {streaming}
             startedAt={streaming ? draftStartedAt : undefined}
+            lastActivityAt={streaming ? lastActivityAt : undefined}
+            idleTimeoutMs={streaming ? idleTimeoutMs : undefined}
             currentToolName={streaming ? currentToolName : undefined}
           />
           {#if streaming && tools.length}

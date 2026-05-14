@@ -13,11 +13,15 @@
     message,
     streaming = false,
     startedAt,
+    lastActivityAt,
+    idleTimeoutMs,
     currentToolName
   }: {
     message: ChatMessage;
     streaming?: boolean;
     startedAt?: number;
+    lastActivityAt?: number;
+    idleTimeoutMs?: number;
     currentToolName?: string;
   } = $props();
 
@@ -52,23 +56,31 @@
     return value.map((v) => Number(v)).filter((n) => Number.isFinite(n));
   }
 
-  let elapsed = $state(0);
+  let now = $state(Date.now());
   $effect(() => {
-    if (!streaming || !startedAt) {
-      elapsed = 0;
-      return;
-    }
-    elapsed = Math.floor((Date.now() - startedAt) / 1000);
-    const id = setInterval(() => {
-      elapsed = Math.floor((Date.now() - startedAt) / 1000);
-    }, 250);
+    if (!streaming) return;
+    now = Date.now();
+    const id = setInterval(() => { now = Date.now(); }, 250);
     return () => clearInterval(id);
   });
 
-  function fmtElapsed(s: number) {
+  const elapsed = $derived(
+    streaming && startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0
+  );
+  const idleS = $derived(
+    streaming && lastActivityAt ? Math.max(0, Math.floor((now - lastActivityAt) / 1000)) : 0
+  );
+  const idleMaxS = $derived(idleTimeoutMs ? Math.floor(idleTimeoutMs / 1000) : 0);
+  const idleWarn = $derived(idleMaxS > 0 && idleS >= idleMaxS - 60);
+
+  function fmtMSS(s: number) {
     const m = Math.floor(s / 60);
     const r = s % 60;
-    return m > 0 ? `${m}:${r.toString().padStart(2, "0")}` : `${s}s`;
+    return `${m}:${r.toString().padStart(2, "0")}`;
+  }
+
+  function fmtElapsed(s: number) {
+    return s < 60 ? `${s}s` : fmtMSS(s);
   }
 
   let copied = $state(false);
@@ -107,7 +119,13 @@
             <span class="size-1.5 rounded-full bg-[var(--color-bg)] animate-pulse"></span>
             {currentToolName ?? "streaming"}
             {#if startedAt}
-              <span class="rounded bg-[var(--color-bg)]/30 px-1 font-mono tabular-nums">{fmtElapsed(elapsed)}</span>
+              <span class="rounded bg-[var(--color-bg)]/30 px-1 font-mono tabular-nums" title="Total turn time">{fmtElapsed(elapsed)}</span>
+            {/if}
+            {#if lastActivityAt && idleMaxS > 0}
+              <span
+                class="rounded px-1 font-mono tabular-nums {idleWarn ? 'bg-[oklch(72%_0.18_50/0.85)] text-[var(--color-bg)]' : 'bg-[var(--color-bg)]/30'}"
+                title="Time since last stream activity — resets on each event, timeout at {fmtMSS(idleMaxS)}"
+              >idle {fmtMSS(idleS)}/{fmtMSS(idleMaxS)}</span>
             {/if}
           </span>
         {/if}
