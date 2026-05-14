@@ -129,19 +129,6 @@ class TGHandlers:
     async def on_incoming(self, message: Message) -> None:
         if message.chat is None:
             return
-        log.info(
-            "tg_incoming",
-            chat_id=message.chat.id,
-            message_id=message.message_id,
-            from_user=message.from_user.id if message.from_user else None,
-            has_text=bool(message.text),
-            has_caption=bool(message.caption),
-            has_photo=bool(message.photo),
-            has_document=bool(message.document),
-            has_voice=bool(message.voice),
-            has_audio=bool(message.audio),
-            has_video_note=bool(message.video_note),
-        )
         await self._runner.handle(message)
 
 

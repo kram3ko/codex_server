@@ -57,7 +57,7 @@ async def open_codex_turn(
     stored_thread_id = await _load_stored_thread_id(db_chat_id)
     initial = stored_thread_id if settings.CODEX_THREAD_REUSE_ENABLED else None
     if initial is not None and await cache.get(quarantine_key(initial)):
-        log.warning("codex_thread_quarantined_skip", thread_id=initial)
+        log.info("codex_thread_quarantined_skip", thread_id=initial)
         initial = None
 
     client = CodexClient(
