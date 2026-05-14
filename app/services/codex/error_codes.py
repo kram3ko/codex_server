@@ -12,4 +12,5 @@ class CodexErrorCode(StrEnum):
     EMPTY_RESPONSE = "empty_response"
     CODEX_ERROR = "codex_error"
     TURN_TIMEOUT = "turn_timeout"
+    TURN_BUSY = "turn_busy"
     STREAM_DROPPED = "stream_dropped"

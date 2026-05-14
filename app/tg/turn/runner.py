@@ -106,7 +106,12 @@ class TurnRunner:
                     try:
                         await stream_turn(client, session, message, prepared, progress)
                     finally:
-                        await turn_registry.drop(session.db_chat_id)
+                        # CAS-drop: silent miss — нормально після interrupt (вже стерто).
+                        await turn_registry.drop_if_matches(
+                            session.db_chat_id,
+                            client.current_thread_id or "",
+                            client.current_turn_id,
+                        )
             except TimeoutError:
                 await self._on_timeout(session, message, progress)
             except asyncio.CancelledError:
