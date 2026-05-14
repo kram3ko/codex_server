@@ -37,6 +37,7 @@
   let info = $state("");
   let draftStartedAt = $state<number | undefined>(undefined);
   let activeTurnId = $state(0);
+  let streamedPrefix = "";
 
   let infoTimer: ReturnType<typeof setTimeout> | null = null;
   function flashInfo(message: string): void {
@@ -125,6 +126,7 @@
     typer.reset();
     tools = [];
     attachments = [];
+    streamedPrefix = "";
     if (wasBusy && previous) {
       await chatClient.interruptTurn({ chatId: previous.id }).catch(() => undefined);
     }
@@ -150,14 +152,35 @@
           meta: { steered: true },
           createdAt: nowTimestamp()
         });
-        // Steered user message went INTO the running response — insert it
-        // ABOVE the streaming assistant bubble so the visual order matches
-        // the semantics ("user added context → assistant is responding to all").
+        // Split already-visible assistant text before the steered user message.
+        // The same Codex turn keeps streaming after steer, but visually it is a
+        // new assistant segment responding to the additional user context.
+        const partialText = typer.displayed;
+        const partialAssistant = partialText.trim()
+          ? create(MessageSchema, {
+              id: -BigInt(Date.now() + 1),
+              chatId: selected.id,
+              role: 2,
+              text: partialText,
+              meta: { partial: true },
+              createdAt: nowTimestamp()
+            })
+          : null;
+        if (partialAssistant) {
+          streamedPrefix += partialText;
+          typer.reset();
+          draftStartedAt = Date.now();
+        }
         const streamIdx = streamingClientId
           ? messages.findIndex((m) => clientIdOf(m) === streamingClientId)
           : -1;
         if (streamIdx >= 0) {
-          messages = [...messages.slice(0, streamIdx), userMessage, ...messages.slice(streamIdx)];
+          const before = messages.slice(0, streamIdx);
+          const streaming = messages[streamIdx];
+          const after = messages.slice(streamIdx + 1);
+          messages = partialAssistant
+            ? [...before, partialAssistant, userMessage, streaming, ...after]
+            : [...before, userMessage, streaming, ...after];
         } else {
           messages = [...messages, userMessage];
         }
@@ -173,6 +196,7 @@
     error = "";
     tools = [];
     attachments = [];
+    streamedPrefix = "";
     typer.reset();
     draftStartedAt = Date.now();
     const userMetaJson: { upload_ids?: number[]; audio_upload_ids?: number[] } = {};
@@ -259,9 +283,12 @@
               break;
             }
             if (done.finalText) {
+              const finalText = streamedPrefix && done.finalText.startsWith(streamedPrefix)
+                ? done.finalText.slice(streamedPrefix.length)
+                : done.finalText;
               const already = typer.displayed;
-              if (done.finalText.length > already.length && done.finalText.startsWith(already)) {
-                typer.push(done.finalText.slice(already.length));
+              if (finalText.length > already.length && finalText.startsWith(already)) {
+                typer.push(finalText.slice(already.length));
               }
             }
             await typer.drained();
@@ -269,8 +296,11 @@
             if (persisted) {
               // ID swap: streaming placeholder → real DB message by client_id.
               // Same key (client_id) keeps DOM instance stable, no remount.
+              const renderedPersisted = streamedPrefix
+                ? create(MessageSchema, { ...persisted, text: typer.displayed })
+                : persisted;
               messages = messages.map((m) =>
-                clientIdOf(m) === clientId ? persisted : m
+                clientIdOf(m) === clientId ? renderedPersisted : m
               );
             } else {
               messages = messages.map((m) =>
@@ -282,6 +312,7 @@
             streamingClientId = null;
             draftStartedAt = undefined;
             typer.reset();
+            streamedPrefix = "";
             tools = [];
             attachments = [];
             void loadChats(true);
@@ -296,6 +327,7 @@
             // Drop streaming placeholder on error.
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
             streamingClientId = null;
+            streamedPrefix = "";
             break;
         }
         await tick();
@@ -305,6 +337,7 @@
         error = exc instanceof Error ? exc.message : "Turn failed";
         messages = messages.filter((m) => clientIdOf(m) !== clientId);
         streamingClientId = null;
+        streamedPrefix = "";
       }
     } finally {
       if (turnId === activeTurnId) {
@@ -332,6 +365,7 @@
     }
     streamingClientId = null;
     typer.reset();
+    streamedPrefix = "";
     draftStartedAt = undefined;
     await chatClient.interruptTurn({ chatId: selected.id });
     busy = false;
