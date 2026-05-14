@@ -102,7 +102,7 @@ class PollingMode:
         self._lock_renew_task = asyncio.create_task(
             self._renew_lock(), name="tg_polling_renew"
         )
-        log.info("tg_polling_started")
+        log.debug("tg_polling_started")
 
     @staticmethod
     def _on_polling_done(task: asyncio.Task) -> None:
@@ -123,7 +123,7 @@ class PollingMode:
         if not acquired:
             return False
         self._lock_token = token
-        log.info("tg_polling_lock_acquired", ttl=_LOCK_TTL_S)
+        log.debug("tg_polling_lock_acquired", ttl=_LOCK_TTL_S)
         return True
 
     async def _renew_lock(self) -> None:
@@ -158,4 +158,4 @@ class PollingMode:
                 "Awaitable[Any]",
                 cache.eval(_RELEASE_SCRIPT, 1, _LOCK_KEY, token),
             )
-        log.info("tg_polling_lock_released")
+        log.debug("tg_polling_lock_released")

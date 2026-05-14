@@ -55,13 +55,26 @@ async def stream_turn(
     partial_msg_id: int | None = None
 
     if client.current_thread_id:
-        await turn_registry.register_pending(
+        registered = await turn_registry.try_register_pending(
             persisted_chat_id, client.current_thread_id, is_admin=True
         )
+        if not registered:
+            yield error_event(
+                CodexErrorCode.TURN_BUSY, "another turn is active for this chat"
+            )
+            return
 
     async def _on_started(turn_id: str, thread_id: str) -> None:
-        promoted = await turn_registry.promote(persisted_chat_id, turn_id)
+        promoted = await turn_registry.promote_pending(
+            persisted_chat_id, thread_id, turn_id
+        )
         if not promoted:
+            log.warning(
+                "registry_promote_lost",
+                chat_id=persisted_chat_id,
+                thread_id=thread_id,
+                turn_id=turn_id,
+            )
             with contextlib.suppress(Exception):
                 await client.interrupt(turn_id=turn_id)
             raise asyncio.CancelledError

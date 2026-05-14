@@ -137,14 +137,16 @@ class ToolResultEvent(_message.Message):
     def __init__(self, name: _Optional[str] = ..., text: _Optional[str] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., error: _Optional[str] = ...) -> None: ...
 
 class DoneEvent(_message.Message):
-    __slots__ = ("chat_id", "final_text", "message")
+    __slots__ = ("chat_id", "final_text", "message", "steered_fallback")
     CHAT_ID_FIELD_NUMBER: _ClassVar[int]
     FINAL_TEXT_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    STEERED_FALLBACK_FIELD_NUMBER: _ClassVar[int]
     chat_id: int
     final_text: str
     message: _message_pb2.Message
-    def __init__(self, chat_id: _Optional[int] = ..., final_text: _Optional[str] = ..., message: _Optional[_Union[_message_pb2.Message, _Mapping]] = ...) -> None: ...
+    steered_fallback: bool
+    def __init__(self, chat_id: _Optional[int] = ..., final_text: _Optional[str] = ..., message: _Optional[_Union[_message_pb2.Message, _Mapping]] = ..., steered_fallback: bool = ...) -> None: ...
 
 class ErrorEvent(_message.Message):
     __slots__ = ("code", "detail")

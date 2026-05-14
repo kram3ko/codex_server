@@ -42,7 +42,7 @@ async def handle_empty_response(
     message: Message,
     prepared: PreparedTurn,
 ) -> None:
-    log.warning(
+    log.info(
         "tg_empty_response",
         attachments=len(prepared.attachments),
         text_len=len(prepared.text),
@@ -64,7 +64,7 @@ async def handle_dropped_stream(
     tool_calls: list[ToolCallRecord],
     committed_prefix: str,
 ) -> None:
-    log.warning(
+    log.error(
         "tg_codex_stream_ended_without_done",
         chat_id=message.chat.id if message.chat else None,
         buffer_len=len(buffer),

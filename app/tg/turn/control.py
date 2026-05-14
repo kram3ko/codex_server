@@ -25,7 +25,8 @@ async def cancel_turn(session: ChatSession) -> bool:
     """Stop button — interrupt running Codex turn + cancel local task."""
     record = await turn_registry.get(session.db_chat_id)
     if record is not None and record.turn_id is None:
-        await turn_registry.drop(session.db_chat_id)
+        # CAS-drop pending — owner у `promote_pending` побачить None і скасує turn.
+        await turn_registry.drop_if_matches(session.db_chat_id, record.thread_id, None)
     elif record is not None:
         with contextlib.suppress(Exception):
             await turn_registry.send_interrupt(record)

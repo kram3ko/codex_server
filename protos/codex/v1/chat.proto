@@ -103,6 +103,8 @@ message DoneEvent {
   // id → real DB id (via client_id match) and apply final meta (upload_ids,
   // calls) without round-tripping ListMessages.
   Message message = 3;
+  // True = текст пішов у running turn через server-side steer; client знімає streaming placeholder без порожньої баблі.
+  bool steered_fallback = 4;
 }
 
 message ErrorEvent {

@@ -349,7 +349,7 @@ class CodexClient:
         finally:
             self._idle_s = None
             self._idle_deadline = None
-            self._current_turn_id = None
+            # Не чистимо _current_turn_id — callers у власному finally читають його для CAS-drop.
 
     async def interrupt(self, turn_id: str | None = None) -> None:
         """Send turn/interrupt. `turn_id` override дозволяє іншому воркеру
@@ -517,23 +517,23 @@ class CodexClient:
         self._turn_diagnostics.absorb_raw(note)
         match note.method:
             case "item/started":
-                log.info(
+                log.debug(
                     "codex_item_started",
                     **self._turn_diagnostics.snapshot(self._transport),
                 )
             case "item/completed":
-                log.info(
+                log.debug(
                     "codex_item_completed",
                     **self._turn_diagnostics.snapshot(self._transport),
                 )
             case "turn/completed":
-                log.info(
+                log.debug(
                     "codex_turn_completed_raw",
                     **self._turn_diagnostics.snapshot(self._transport),
                 )
             case _:
                 if prev_active != self._turn_diagnostics._selected_active_item():
-                    log.info(
+                    log.debug(
                         "codex_active_item_changed",
                         **self._turn_diagnostics.snapshot(self._transport),
                     )

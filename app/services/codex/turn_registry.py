@@ -5,8 +5,10 @@
 не побачить — тому ховаємо координати turn'а у Redis. Будь-який воркер
 відкриває власну WS, шле `turn/interrupt|steer` зі збереженим turn_id.
 
-Запис: `runTurn` після `turn/start` → `register`. На exit (success/error/cancel)
-→ `drop`. TTL дублюється на час turn-timeout щоб crashed worker не лишив зомбі.
+Lifecycle: `try_register_pending` (NX) → `promote_pending` (CAS) →
+`drop_if_matches` (CAS). Атомарність — нативні Redis 8.4+ команди
+`SET ... IFEQ` і `DELEX ... IFEQ`. TTL дублює `turn-timeout + 60s` щоб
+crashed worker не лишав зомбі-запис.
 """
 
 import contextlib
@@ -45,33 +47,94 @@ class ActiveTurn:
     is_admin: bool
 
 
-async def register(chat_id: int, turn: ActiveTurn) -> None:
-    payload = orjson.dumps(
+def _encode(turn: ActiveTurn) -> str:
+    # orjson дає стабільні bytes — round-trip через `decode_responses=True`
+    # гарантує бітову рівність для IFEQ-порівняння на сервері.
+    return orjson.dumps(
         {"thread_id": turn.thread_id, "turn_id": turn.turn_id, "is_admin": turn.is_admin}
-    )
+    ).decode("utf-8")
+
+
+def _decode(raw: str | bytes) -> ActiveTurn | None:
     try:
-        await cache.set(_key(chat_id), payload, ex=_ttl_s())
+        data = orjson.loads(raw)
+        return ActiveTurn(
+            thread_id=data["thread_id"],
+            turn_id=data["turn_id"],
+            is_admin=data["is_admin"],
+        )
+    except (orjson.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+async def try_register_pending(chat_id: int, thread_id: str, is_admin: bool) -> bool:
+    """Atomic NX-register pending turn. False якщо запис вже існує — caller
+    MUST cancel turn (інший воркер вже володіє цим chat'ом)."""
+    payload = _encode(ActiveTurn(thread_id=thread_id, turn_id=None, is_admin=is_admin))
+    try:
+        result = await cache.set(_key(chat_id), payload, ex=_ttl_s(), nx=True)
     except RedisError as exc:
-        log.warning("turn_registry_register_failed", chat_id=chat_id, error=str(exc))
-
-
-async def register_pending(chat_id: int, thread_id: str, is_admin: bool) -> None:
-    """Pre-turn запис з `turn_id=None` до того як `turn/start` повернув. Закриває
-    race-window: interrupt RPC у це вікно бачить pending → робить `drop`, що
-    сигналізує worker'у-власнику турна в `promote()`. Без додаткового флага."""
-    await register(chat_id, ActiveTurn(thread_id=thread_id, turn_id=None, is_admin=is_admin))
-
-
-async def promote(chat_id: int, turn_id: str) -> bool:
-    """Дописати turn_id у pending запис. Returns False якщо record зник
-    (interrupt RPC drop'нув його у race-window) — caller має cancel'нути turn."""
-    record = await get(chat_id)
-    if record is None:
+        log.warning("turn_registry_try_register_failed", chat_id=chat_id, error=str(exc))
         return False
-    await register(
-        chat_id, ActiveTurn(thread_id=record.thread_id, turn_id=turn_id, is_admin=record.is_admin)
-    )
+    if not result:
+        log.warning("registry_pending_conflict", chat_id=chat_id, thread_id=thread_id)
+        return False
     return True
+
+
+async def promote_pending(chat_id: int, thread_id: str, turn_id: str) -> bool:
+    """CAS-promote pending → active через `SET ... IFEQ <raw>`. False якщо
+    record зник або був мутований у race-window — caller MUST cancel turn."""
+    try:
+        raw = await cache.get(_key(chat_id))
+    except RedisError as exc:
+        log.warning("turn_registry_promote_get_failed", chat_id=chat_id, error=str(exc))
+        return False
+    if not raw:
+        return False
+    rec = _decode(raw)
+    if rec is None or rec.thread_id != thread_id or rec.turn_id is not None:
+        return False
+    new_payload = _encode(
+        ActiveTurn(thread_id=thread_id, turn_id=turn_id, is_admin=rec.is_admin)
+    )
+    # SET ... IFEQ <raw> EX <ttl> — server байт-порівнює поточне значення з `raw`
+    # який ми щойно прочитали; повертає None якщо інший воркер встиг змінити.
+    try:
+        result = await cache.execute_command(
+            "SET", _key(chat_id), new_payload, "EX", _ttl_s(), "IFEQ", raw
+        )
+    except RedisError as exc:
+        log.warning("turn_registry_promote_set_failed", chat_id=chat_id, error=str(exc))
+        return False
+    return result == "OK"
+
+
+async def drop_if_matches(chat_id: int, thread_id: str, turn_id: str | None) -> bool:
+    """CAS-delete лише якщо record == (thread_id, turn_id). `turn_id=None` →
+    match pending. False якщо record зник/змінено — caller лише логить
+    `registry_cas_drop_miss`, без паніки."""
+    try:
+        raw = await cache.get(_key(chat_id))
+    except RedisError as exc:
+        log.warning("turn_registry_drop_get_failed", chat_id=chat_id, error=str(exc))
+        return False
+    if not raw:
+        return False
+    rec = _decode(raw)
+    if rec is None or rec.thread_id != thread_id or rec.turn_id != turn_id:
+        return False
+    # DELEX ... IFEQ <raw> — атомарне compare-and-delete. Steer-key чистимо
+    # окремим викликом (втрата steer-маркера допустима, note_steer перевизве).
+    try:
+        deleted = await cache.execute_command("DELEX", _key(chat_id), "IFEQ", raw)
+    except RedisError as exc:
+        log.warning("turn_registry_delex_failed", chat_id=chat_id, error=str(exc))
+        return False
+    if deleted:
+        with contextlib.suppress(RedisError):
+            await cache.delete(_steer_key(chat_id))
+    return bool(deleted)
 
 
 async def get(chat_id: int) -> ActiveTurn | None:
@@ -82,22 +145,13 @@ async def get(chat_id: int) -> ActiveTurn | None:
         return None
     if not raw:
         return None
-    try:
-        data = orjson.loads(raw)
-        return ActiveTurn(
-            thread_id=data["thread_id"], turn_id=data["turn_id"], is_admin=data["is_admin"]
-        )
-    except (orjson.JSONDecodeError, KeyError, TypeError) as exc:
-        log.warning("turn_registry_corrupted_record", chat_id=chat_id, error=str(exc))
-        await drop(chat_id)
+    record = _decode(raw)
+    if record is None:
+        log.warning("turn_registry_corrupted_record", chat_id=chat_id)
+        with contextlib.suppress(RedisError):
+            await cache.delete(_key(chat_id), _steer_key(chat_id))
         return None
-
-
-async def drop(chat_id: int) -> None:
-    try:
-        await cache.delete(_key(chat_id), _steer_key(chat_id))
-    except RedisError as exc:
-        log.warning("turn_registry_drop_failed", chat_id=chat_id, error=str(exc))
+    return record
 
 
 async def note_steer(chat_id: int, turn_id: str) -> None:

@@ -8,6 +8,7 @@ Interrupt/Steer працюють cross-worker через Redis `turn_registry`: 
 WS. Сумісно з `gunicorn -w N`.
 """
 
+import contextlib
 from collections.abc import AsyncIterator
 from typing import Any, override
 
@@ -109,6 +110,56 @@ class ChatRPC(ChatProtocol):
             list(request.upload_ids), user_id=user_pk
         )
         voice_reply = bool(audio_ids)
+        has_uploads = bool(data_urls) or bool(audio_ids)
+
+        # Guard: active/pending turn → server-side steer / BUSY (race-safe для multi-tab / direct RPC).
+        active = await turn_registry.get(persisted_chat_id)
+        if active is not None:
+            if active.turn_id is None:
+                # Pending — інший воркер у вікні turn/start. Reject as busy.
+                log.warning("registry_pending_conflict", chat_id=persisted_chat_id)
+                yield error_event(
+                    CodexErrorCode.TURN_BUSY, "another turn is starting for this chat"
+                )
+                return
+            if has_uploads:
+                # Uploads + active → BUSY; client має сам interrupt + retry (sidecar overlap risk inline).
+                log.warning("registry_active_with_uploads", chat_id=persisted_chat_id)
+                yield error_event(
+                    CodexErrorCode.TURN_BUSY,
+                    "previous turn still finishing — retry shortly",
+                )
+                return
+            # Text-only + active: cross-worker steer у running turn.
+            accepted = False
+            with contextlib.suppress(Exception):
+                accepted = await turn_registry.send_steer(
+                    persisted_chat_id, active, text
+                )
+            if accepted:
+                async with SessionLocal() as db:
+                    await message_service.append(
+                        db,
+                        persisted_chat_id,
+                        MessageRole.USER,
+                        text,
+                        meta={"steered": True},
+                    )
+                    await db.commit()
+                yield chat_pb2.ChatEvent(
+                    done=chat_pb2.DoneEvent(
+                        chat_id=persisted_chat_id,
+                        final_text="",
+                        steered_fallback=True,
+                    )
+                )
+                return
+            # Steer rejected → turn закінчився між get і send. Drop stale CAS-safely
+            # і впадаємо у новий turn нижче.
+            await turn_registry.drop_if_matches(
+                persisted_chat_id, active.thread_id, active.turn_id
+            )
+
         user_meta: dict[str, Any] = {}
         if image_ids:
             user_meta["upload_ids"] = image_ids
@@ -140,7 +191,12 @@ class ChatRPC(ChatProtocol):
                 ):
                     yield event
             finally:
-                await turn_registry.drop(persisted_chat_id)
+                # CAS-drop: silent miss — нормально після interrupt'у (запис уже стертий).
+                await turn_registry.drop_if_matches(
+                    persisted_chat_id,
+                    client.current_thread_id or "",
+                    client.current_turn_id,
+                )
 
     @override
     async def interrupt_turn(
@@ -155,8 +211,11 @@ class ChatRPC(ChatProtocol):
         if record is None:
             return chat_pb2.InterruptTurnResponse()
         if record.turn_id is None:
-            # Pending — `drop` сигналізує worker'у-власнику турна у `promote`.
-            await turn_registry.drop(chat.id)
+            # Pending — CAS-drop сигналізує worker'у-власнику турна через
+            # promote_pending=False. Якщо owner встиг promote-нути між нашим
+            # get і drop — no-op, активний turn лишається живим (юзер може
+            # повторити interrupt уже на promoted record).
+            await turn_registry.drop_if_matches(chat.id, record.thread_id, None)
             return chat_pb2.InterruptTurnResponse()
         try:
             await turn_registry.send_interrupt(record)

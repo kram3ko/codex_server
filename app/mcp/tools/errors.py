@@ -5,30 +5,32 @@ endpoint вже захищений `MCP_CALLBACK_TOKEN`, видно тільки
 `BUGSINK_AUTH_TOKEN` → tool кидає зрозумілу ToolError замість 401.
 """
 
-from typing import Annotated, Any
+from typing import Annotated
 
 import httpx
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from app.mcp.core import mcp
+from app.mcp.schemas.errors import EventDetail, IssueSummary
 from app.services.errors.default import bugsink_client
 
 
-@mcp.tool(
-    description=(
-        "List recent error issues from Bugsink. Use when user asks 'why is "
-        "X crashing', 'what errors today', or before suggesting a fix. "
-        "Returns most-recent-first by last_seen."
-    ),
-)
+@mcp.tool(name="list_errors")
 async def list_errors(
     project_slug: Annotated[
         str | None,
-        Field(description="Project slug (e.g. 'codex-server'). Empty → first project."),
+        Field(description="Project slug; empty → first/only project."),
     ] = None,
-    limit: Annotated[int, Field(ge=1, le=100, description="Max issues to return.")] = 20,
-) -> dict[str, Any]:
+    limit: Annotated[int, Field(ge=1, le=100, description="Max issues.")] = 20,
+) -> list[IssueSummary]:
+    """Recent error issues from this server's Bugsink, newest-first.
+
+    Each item: {id, type, message, events, last_seen, resolved}. Call
+    get_error(id) afterwards to drill into a specific issue's stacktrace.
+    Use when user asks about crashes, exceptions, recent errors, or before
+    suggesting a fix.
+    """
     project_id = await _resolve_project_id(project_slug)
     try:
         body = await bugsink_client.list_issues(
@@ -37,36 +39,19 @@ async def list_errors(
     except httpx.HTTPError as exc:
         raise ToolError(f"bugsink_api_error: {exc!s}") from exc
 
-    issues = body.get("results", [])[:limit]
-    return {
-        "project_id": project_id,
-        "count": len(issues),
-        "issues": [
-            {
-                "id": i["id"],
-                "type": i.get("calculated_type"),
-                "message": i.get("calculated_value"),
-                "transaction": i.get("transaction"),
-                "events": i.get("stored_event_count"),
-                "first_seen": i.get("first_seen"),
-                "last_seen": i.get("last_seen"),
-                "resolved": i.get("is_resolved"),
-            }
-            for i in issues
-        ],
-    }
+    return [IssueSummary.model_validate(i) for i in body.get("results", [])[:limit]]
 
 
-@mcp.tool(
-    description=(
-        "Fetch full detail for one error issue: latest event with stacktrace, "
-        "tags (release/environment/user), and breadcrumbs. Use after "
-        "list_errors when drilling into a specific issue."
-    ),
-)
+@mcp.tool(name="get_error")
 async def get_error(
     issue_id: Annotated[str, Field(description="Issue UUID from list_errors.")],
-) -> dict[str, Any]:
+) -> EventDetail:
+    """Full detail for one error issue: latest event with stacktrace + tags.
+
+    Returns {issue_id, event_id, timestamp, stacktrace, platform, level,
+    logger, environment, release, transaction, tags}. Use after list_errors
+    when drilling into a specific issue.
+    """
     try:
         events = await bugsink_client.list_events(issue=issue_id, order="desc")
     except httpx.HTTPError as exc:
@@ -78,24 +63,32 @@ async def get_error(
 
     detail = await bugsink_client.get_event(results[0]["id"])
     data = detail.get("data") or {}
-    # Whitelist: stacktrace + minimal context. Raw `data` несе request body,
-    # headers, breadcrumbs з user-prompt'ами — LLM не повинен це бачити.
-    return {
-        "issue_id": issue_id,
-        "event_id": detail["id"],
-        "timestamp": detail.get("timestamp"),
-        "stacktrace": detail.get("stacktrace_md", ""),
-        "platform": data.get("platform"),
-        "level": data.get("level"),
-        "logger": data.get("logger"),
-        "environment": data.get("environment"),
-        "release": data.get("release"),
-        "transaction": data.get("transaction"),
-        "tags": data.get("tags"),
-    }
+    return EventDetail(
+        issue_id=issue_id,
+        event_id=detail["id"],
+        timestamp=detail.get("timestamp"),
+        stacktrace=detail.get("stacktrace_md", ""),
+        platform=data.get("platform"),
+        level=data.get("level"),
+        logger=data.get("logger"),
+        environment=data.get("environment"),
+        release=data.get("release"),
+        transaction=data.get("transaction"),
+        tags=data.get("tags"),
+    )
+
+
+# Per-worker resolved-id cache: project_id у Bugsink стабільний (DB-генерований
+# при першому ingest), повторно /projects/ запитувати на кожен tool-call не
+# треба. Key=slug (None для дефолтного "first project"). Без TTL — invalidation
+# = restart воркера.
+_project_id_cache: dict[str | None, int] = {}
 
 
 async def _resolve_project_id(slug: str | None) -> int:
+    if (cached := _project_id_cache.get(slug)) is not None:
+        return cached
+
     try:
         body = await bugsink_client.list_projects()
     except httpx.HTTPError as exc:
@@ -106,9 +99,14 @@ async def _resolve_project_id(slug: str | None) -> int:
         raise ToolError("no_bugsink_projects_configured")
 
     if slug is None:
-        return int(projects[0]["id"])
+        pid = int(projects[0]["id"])
+    else:
+        match = next(
+            (p for p in projects if slug in (p.get("slug"), p.get("name"))), None
+        )
+        if match is None:
+            raise ToolError(f"project_not_found: {slug}")
+        pid = int(match["id"])
 
-    for project in projects:
-        if project.get("slug") == slug or project.get("name") == slug:
-            return int(project["id"])
-    raise ToolError(f"project_not_found: {slug}")
+    _project_id_cache[slug] = pid
+    return pid
