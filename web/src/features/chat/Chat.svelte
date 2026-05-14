@@ -288,6 +288,20 @@
             if (turnId !== activeTurnId) {
               break;
             }
+            if (done.steeredFallback) {
+              // Текст пішов у running turn — наш placeholder зайвий, реальна відповідь прийде там.
+              messages = messages.filter((m) => clientIdOf(m) !== clientId);
+              streamingClientId = null;
+              draftStartedAt = undefined;
+              lastActivityAt = undefined;
+              typer.reset();
+              streamedPrefix = "";
+              tools = [];
+              attachments = [];
+              flashInfo("Message added to running turn");
+              void loadChats(true);
+              break;
+            }
             if (done.finalText) {
               const finalText = streamedPrefix && done.finalText.startsWith(streamedPrefix)
                 ? done.finalText.slice(streamedPrefix.length)

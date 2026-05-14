@@ -59,12 +59,6 @@ async def stream_turn(
             persisted_chat_id, client.current_thread_id, is_admin=True
         )
         if not registered:
-            log.warning(
-                "registry_pending_conflict",
-                source="web_stream",
-                chat_id=persisted_chat_id,
-                thread_id=client.current_thread_id,
-            )
             yield error_event(
                 CodexErrorCode.TURN_BUSY, "another turn is active for this chat"
             )
@@ -75,9 +69,8 @@ async def stream_turn(
             persisted_chat_id, thread_id, turn_id
         )
         if not promoted:
-            log.info(
+            log.warning(
                 "registry_promote_lost",
-                source="web_stream",
                 chat_id=persisted_chat_id,
                 thread_id=thread_id,
                 turn_id=turn_id,

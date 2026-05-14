@@ -47,12 +47,6 @@ async def stream_turn(
             session.db_chat_id, client.current_thread_id, is_admin=session.is_admin
         )
         if not registered:
-            log.warning(
-                "registry_pending_conflict",
-                source="tg_stream",
-                db_chat_id=session.db_chat_id,
-                thread_id=client.current_thread_id,
-            )
             await message.answer(
                 tg_markdown.escape(
                     "⚠ Інший turn у цьому чаті ще активний — почекай завершення."
@@ -65,9 +59,8 @@ async def stream_turn(
             session.db_chat_id, thread_id, turn_id
         )
         if not promoted:
-            log.info(
+            log.warning(
                 "registry_promote_lost",
-                source="tg_stream",
                 db_chat_id=session.db_chat_id,
                 thread_id=thread_id,
                 turn_id=turn_id,

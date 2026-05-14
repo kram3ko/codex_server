@@ -112,9 +112,7 @@ class ChatRPC(ChatProtocol):
         voice_reply = bool(audio_ids)
         has_uploads = bool(data_urls) or bool(audio_ids)
 
-        # Server-side guard: detect active/pending turn before opening a new one.
-        # TG path робить це через `_try_auto_steer`; web без цього race-prone,
-        # бо два таби / direct RPC / retry легко обходять клієнтський steer.
+        # Guard: active/pending turn → server-side steer / BUSY (race-safe для multi-tab / direct RPC).
         active = await turn_registry.get(persisted_chat_id)
         if active is not None:
             if active.turn_id is None:
@@ -124,37 +122,43 @@ class ChatRPC(ChatProtocol):
                     CodexErrorCode.TURN_BUSY, "another turn is starting for this chat"
                 )
                 return
-            if not has_uploads:
-                accepted = False
-                with contextlib.suppress(Exception):
-                    accepted = await turn_registry.send_steer(
-                        persisted_chat_id, active, text
-                    )
-                if accepted:
-                    async with SessionLocal() as db:
-                        await message_service.append(
-                            db,
-                            persisted_chat_id,
-                            MessageRole.USER,
-                            text,
-                            meta={"steered": True},
-                        )
-                        await db.commit()
-                    yield chat_pb2.ChatEvent(
-                        done=chat_pb2.DoneEvent(chat_id=persisted_chat_id, final_text="")
-                    )
-                    return
-                # Steer rejected → turn закінчився; drop stale CAS-safely і впадаємо у новий turn.
-                await turn_registry.drop_if_matches(
-                    persisted_chat_id, active.thread_id, active.turn_id
+            if has_uploads:
+                # Uploads + active → BUSY; client має сам interrupt + retry (sidecar overlap risk inline).
+                log.warning("registry_active_with_uploads", chat_id=persisted_chat_id)
+                yield error_event(
+                    CodexErrorCode.TURN_BUSY,
+                    "previous turn still finishing — retry shortly",
                 )
-            else:
-                # Uploads → interrupt active, drop stale, далі новий turn.
-                with contextlib.suppress(Exception):
-                    await turn_registry.send_interrupt(active)
-                await turn_registry.drop_if_matches(
-                    persisted_chat_id, active.thread_id, active.turn_id
+                return
+            # Text-only + active: cross-worker steer у running turn.
+            accepted = False
+            with contextlib.suppress(Exception):
+                accepted = await turn_registry.send_steer(
+                    persisted_chat_id, active, text
                 )
+            if accepted:
+                async with SessionLocal() as db:
+                    await message_service.append(
+                        db,
+                        persisted_chat_id,
+                        MessageRole.USER,
+                        text,
+                        meta={"steered": True},
+                    )
+                    await db.commit()
+                yield chat_pb2.ChatEvent(
+                    done=chat_pb2.DoneEvent(
+                        chat_id=persisted_chat_id,
+                        final_text="",
+                        steered_fallback=True,
+                    )
+                )
+                return
+            # Steer rejected → turn закінчився між get і send. Drop stale CAS-safely
+            # і впадаємо у новий turn нижче.
+            await turn_registry.drop_if_matches(
+                persisted_chat_id, active.thread_id, active.turn_id
+            )
 
         user_meta: dict[str, Any] = {}
         if image_ids:

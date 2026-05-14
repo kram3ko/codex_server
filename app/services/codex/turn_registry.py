@@ -76,7 +76,10 @@ async def try_register_pending(chat_id: int, thread_id: str, is_admin: bool) -> 
     except RedisError as exc:
         log.warning("turn_registry_try_register_failed", chat_id=chat_id, error=str(exc))
         return False
-    return bool(result)
+    if not result:
+        log.warning("registry_pending_conflict", chat_id=chat_id, thread_id=thread_id)
+        return False
+    return True
 
 
 async def promote_pending(chat_id: int, thread_id: str, turn_id: str) -> bool:
