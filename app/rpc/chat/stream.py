@@ -24,7 +24,7 @@ from app.rpc.chat.mappers import (
 from app.rpc.chat.tts import attach_tts_to_message
 from app.services.bus.default import event_bus
 from app.services.codex import turn_registry
-from app.services.codex.client import CodexClient
+from app.services.codex.client import CodexClient, StaleTurnStreamError
 from app.services.codex.collector import StreamCollector
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
@@ -77,7 +77,7 @@ async def stream_turn(
             )
             with contextlib.suppress(Exception):
                 await client.interrupt(turn_id=turn_id)
-            raise asyncio.CancelledError
+            raise turn_registry.TurnOwnershipLost
 
     events_count = 0
     last_event_type = "none"
@@ -147,6 +147,42 @@ async def stream_turn(
                     break
                 case _:
                     yield chat_event_to_pb(ev)
+    except turn_registry.TurnOwnershipLost:
+        yield error_event(
+            CodexErrorCode.TURN_BUSY,
+            "another turn took ownership of this chat",
+        )
+        await _emit_event(
+            persisted_chat_id,
+            user_pk,
+            EventKind.TURN_INTERRUPTED,
+            {"source": "web", "reason": "ownership_lost"},
+        )
+        return
+    except StaleTurnStreamError as exc:
+        with contextlib.suppress(Exception):
+            await client.interrupt()
+        await quarantine_thread(client.current_thread_id)
+        if collector.buffer or collector.tool_calls or collector.attachments:
+            await _persist_assistant_turn(
+                persisted_chat_id,
+                user_pk,
+                collector.buffer,
+                collector.tool_calls,
+                collector.attachments,
+                partial=True,
+                client_id=client_id,
+                msg_id=partial_msg_id,
+            )
+        detail = "stale-turn-notifications"
+        yield error_event(CodexErrorCode.TURN_TIMEOUT, detail)
+        await _emit_event(
+            persisted_chat_id,
+            user_pk,
+            EventKind.THREAD_RESET,
+            {"reason": "stale_turn_stream", "diagnostics": exc.diagnostics},
+        )
+        return
     except TimeoutError:
         # Idle-timeout — best-effort interrupt sidecar + quarantine thread,
         # інакше наступний run_turn пробує resume тої самої мертвої thread.

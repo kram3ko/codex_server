@@ -29,7 +29,7 @@ from app.services.messages.default import message_service
 
 log = structlog.get_logger(__name__)
 
-_HISTORY_REPLAY_LIMIT = 10
+_HISTORY_REPLAY_LIMIT = 20
 _QUARANTINE_KEY_PREFIX = "codex:thread:quarantine:"
 
 

@@ -344,7 +344,17 @@
             if (turnId !== activeTurnId) {
               break;
             }
-            error = event.kind.value.detail || event.kind.value.code;
+            {
+              const code = event.kind.value.code;
+              const detail = event.kind.value.detail;
+              if (code === "turn_timeout" && detail === "stale-turn-notifications") {
+                error = "Codex завис — thread скинуто, історію (20 останніх повідомлень) буде відновлено на наступному turn'і. Повтори запит.";
+              } else if (code === "turn_busy") {
+                error = "Інший turn у цьому чаті вже активний — почекай завершення.";
+              } else {
+                error = detail || code;
+              }
+            }
             // Drop streaming placeholder on error.
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
             streamingClientId = null;

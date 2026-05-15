@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     CODEX_REQUEST_TIMEOUT_SECONDS: float = 600.0
     CODEX_THREAD_REUSE_ENABLED: bool = True
     CODEX_REASONING_EFFORT: str = "medium"
+    # Поріг "шторму" stale-notif'ів після resume: skip idle-timeout якщо
+    # підряд приходить ≥N notif'ів від старого turn_id і 0 від нового.
+    # Емпірика; калібрувати по `codex_stale_turn_notification_ignored`.
+    CODEX_STALE_STORM_THRESHOLD: int = 25
 
     # --- Speech-to-text (Speechmatics batch v2) ---
     # `language='auto'` triggers Speechmatics Language Identification.

@@ -143,7 +143,7 @@ class TurnRunner:
         await auto_reset_thread(session)
         await message.answer(
             tg_markdown.escape(
-                "Codex завис — thread скинуто, історію (10 останніх "
+                "Codex завис — thread скинуто, історію (20 останніх "
                 "повідомлень) буде відновлено на наступному turn'і. "
                 "Повтори запит.",
             )

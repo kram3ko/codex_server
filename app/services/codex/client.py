@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 import structlog
 
+from app.config import settings
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
     ChatEvent,
@@ -52,6 +53,12 @@ _PERSIST_BOUNDARY_ITEMS: frozenset[str] = frozenset(
         CodexItem.IMAGE_GENERATION,
     }
 )
+class StaleTurnStreamError(RuntimeError):
+    """Raised when a resumed thread only emits events for an older turn."""
+
+    def __init__(self, diagnostics: dict[str, Any]) -> None:
+        super().__init__("stale turn notification storm")
+        self.diagnostics = diagnostics
 
 
 class _Method(StrEnum):
@@ -496,10 +503,17 @@ class CodexClient:
         if self._turn_diagnostics is None:
             return
         self._turn_diagnostics.absorb_stale_raw(note)
+        diagnostics = self._turn_diagnostics.snapshot(self._transport)
         log.warning(
             "codex_stale_turn_notification_ignored",
-            **self._turn_diagnostics.snapshot(self._transport),
+            **diagnostics,
         )
+        if (
+            self._turn_diagnostics.raw_count == 0
+            and self._turn_diagnostics.stale_raw_count >= settings.CODEX_STALE_STORM_THRESHOLD
+        ):
+            log.error("codex_stale_turn_storm", **diagnostics)
+            raise StaleTurnStreamError(diagnostics)
 
     def _record_noise_raw_note(self, note: Notification) -> None:
         if self._turn_diagnostics is None:

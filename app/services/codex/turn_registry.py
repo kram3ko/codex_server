@@ -47,6 +47,10 @@ class ActiveTurn:
     is_admin: bool
 
 
+class TurnOwnershipLost(RuntimeError):
+    """Expected control-flow: pending record disappeared or changed before promote."""
+
+
 def _encode(turn: ActiveTurn) -> str:
     # orjson дає стабільні bytes — round-trip через `decode_responses=True`
     # гарантує бітову рівність для IFEQ-порівняння на сервері.
