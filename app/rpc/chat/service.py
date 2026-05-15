@@ -234,22 +234,24 @@ class ChatRPC(ChatProtocol):
         request: chat_pb2.SteerTurnRequest,
         ctx: RequestContext,
     ) -> chat_pb2.SteerTurnResponse:
-        await require_user(ctx)
+        user = await require_user(ctx)
         text = request.text.strip()
         if not text:
             return chat_pb2.SteerTurnResponse(accepted=False)
-        record = await turn_registry.get(request.chat_id)
+        async with SessionLocal() as db:
+            chat = await load_chat_owned(db, request.chat_id, user.id)
+        record = await turn_registry.get(chat.id)
         if record is None:
             return chat_pb2.SteerTurnResponse(accepted=False)
         try:
-            accepted = await turn_registry.send_steer(request.chat_id, record, text)
+            accepted = await turn_registry.send_steer(chat.id, record, text)
         except Exception as exc:  # noqa: BLE001 — steer best-effort, лог + accepted=False
-            log.warning("web_steer_rpc_failed", chat_id=request.chat_id, error=str(exc))
+            log.warning("web_steer_rpc_failed", chat_id=chat.id, error=str(exc))
             return chat_pb2.SteerTurnResponse(accepted=False)
         if accepted:
             async with SessionLocal() as db:
                 await message_service.append(
-                    db, request.chat_id, MessageRole.USER, text, meta={"steered": True}
+                    db, chat.id, MessageRole.USER, text, meta={"steered": True}
                 )
                 await db.commit()
         return chat_pb2.SteerTurnResponse(accepted=accepted)

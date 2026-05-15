@@ -15,7 +15,8 @@ from app.services.codex import turn_registry
 class FakeRedis:
     """Мінімум, потрібний реджистру: SET (з NX), GET, DELETE, execute_command для
     `SET ... IFEQ` та `DELEX ... IFEQ`. Decode-responses=True у проді, тут теж
-    повертаємо str — щоб байт-порівняння IFEQ працювало як у реальному Redis."""
+    повертаємо str. SET-callback в redis-py парсить ответ у `True`/`None` —
+    fake поверне ту ж семантику, інакше test/prod parity ламається."""
 
     def __init__(self) -> None:
         self.store: dict[str, str] = {}
@@ -26,13 +27,13 @@ class FakeRedis:
         value: str | bytes,
         ex: int | None = None,
         nx: bool = False,
-    ) -> str | None:
+    ) -> bool | None:
         del ex
         v = value.decode() if isinstance(value, bytes) else value
         if nx and key in self.store:
             return None
         self.store[key] = v
-        return "OK"
+        return True
 
     async def get(self, key: str) -> str | None:
         return self.store.get(key)
@@ -44,7 +45,7 @@ class FakeRedis:
                 count += 1
         return count
 
-    async def execute_command(self, *args: object) -> str | int | None:
+    async def execute_command(self, *args: object) -> bool | int | None:
         cmd = str(args[0]).upper()
         if cmd == "SET":
             # SET key value EX ttl IFEQ <old>
@@ -58,7 +59,7 @@ class FakeRedis:
             if ifeq_val is not None and self.store.get(key) != ifeq_val:
                 return None
             self.store[key] = value
-            return "OK"
+            return True
         if cmd == "DELEX":
             # DELEX key IFEQ <old>
             key = str(args[1])
