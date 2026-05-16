@@ -3,7 +3,13 @@
 
   import { auth } from "./auth";
 
-  let { onlogin }: { onlogin: () => void } = $props();
+  let {
+    onlogin,
+    onswitch,
+  }: {
+    onlogin: () => void;
+    onswitch?: () => void;
+  } = $props();
   let email = $state("");
   let password = $state("");
   let error = $state("");
@@ -75,6 +81,18 @@
       >
         {busy ? "Signing in…" : "Sign in"}
       </button>
+      {#if onswitch}
+        <p class="text-center text-sm text-[var(--color-text-muted)]">
+          Have an invite?
+          <button
+            type="button"
+            class="text-[var(--color-accent)] hover:underline"
+            onclick={onswitch}
+          >
+            Sign up
+          </button>
+        </p>
+      {/if}
     </form>
   </section>
 </main>

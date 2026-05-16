@@ -53,6 +53,8 @@ _PERSIST_BOUNDARY_ITEMS: frozenset[str] = frozenset(
         CodexItem.IMAGE_GENERATION,
     }
 )
+
+
 class StaleTurnStreamError(RuntimeError):
     """Raised when a resumed thread only emits events for an older turn."""
 
@@ -211,13 +213,17 @@ class CodexClient:
         initial_thread_id: str | None = None,
         on_thread_change: ThreadChangeCallback | None = None,
         reasoning_effort: str | None = None,
+        notification_queue_max: int | None = None,
     ) -> None:
         self._url = url
         self._cwd = cwd
         self._approval_policy = approval_policy
         self._sandbox = sandbox
         self._reasoning_effort = reasoning_effort
-        self._transport = AppServerClient(url=url, request_timeout=request_timeout)
+        transport_kwargs: dict[str, Any] = {"url": url, "request_timeout": request_timeout}
+        if notification_queue_max is not None:
+            transport_kwargs["notification_queue_max"] = notification_queue_max
+        self._transport = AppServerClient(**transport_kwargs)
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
         self._thread_resumed_or_started = False
@@ -620,7 +626,7 @@ class CodexClient:
             return
         try:
             await self._on_thread_change(new_thread_id)
-        except Exception as exc:  # noqa: BLE001 — user-supplied callback, isolate
+        except Exception as exc:
             log.warning(
                 "codex_on_thread_change_failed",
                 new=new_thread_id,

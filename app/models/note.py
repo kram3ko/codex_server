@@ -1,6 +1,11 @@
-"""Notes/knowledge base entries — full-text search via tsvector."""
+"""Notes/knowledge base entries — full-text search via tsvector.
 
-from sqlalchemy import Computed, Index, String, Text
+Per-user: кожен запис прив'язаний до `user_id` (CASCADE on user delete).
+Cross-user sharing наразі не передбачено — search/list/get/delete фільтруються
+по owner'у у `notes_service`.
+"""
+
+from sqlalchemy import BigInteger, Computed, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,6 +15,12 @@ from app.db.base import Base
 class Note(Base):
     __tablename__ = "notes"
 
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list[str]] = mapped_column(

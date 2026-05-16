@@ -9,6 +9,7 @@ from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
 
+from app.config import settings
 from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import common_pb2, uploads_pb2
 from app.grpc_generated.codex.v1.uploads_connect import UploadsService as UploadsProtocol
@@ -19,8 +20,6 @@ from app.services.uploads.default import upload_service
 
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 200
-_DEFAULT_PRESIGNED_TTL_S = 3600
-_MAX_PRESIGNED_TTL_S = 24 * 3600
 
 
 class UploadsRPC(UploadsProtocol):
@@ -49,7 +48,7 @@ class UploadsRPC(UploadsProtocol):
             await db.commit()
             await db.refresh(upload)
 
-        ttl_s = _DEFAULT_PRESIGNED_TTL_S
+        ttl_s = settings.S3_PRESIGNED_DEFAULT_TTL_SECONDS
         url = await upload_service.presigned_for_upload(upload, ttl_s=ttl_s)
         return uploads_pb2.UploadResponse(
             upload=upload_to_pb(upload),
@@ -131,8 +130,8 @@ class UploadsRPC(UploadsProtocol):
 
 def _resolve_ttl(seconds: int) -> int:
     if seconds <= 0:
-        return _DEFAULT_PRESIGNED_TTL_S
-    return min(seconds, _MAX_PRESIGNED_TTL_S)
+        return settings.S3_PRESIGNED_DEFAULT_TTL_SECONDS
+    return min(seconds, settings.S3_PRESIGNED_MAX_TTL_SECONDS)
 
 
 def _resolve_page(p: common_pb2.Pagination) -> tuple[int, int]:

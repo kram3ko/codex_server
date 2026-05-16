@@ -38,11 +38,11 @@ async def test_list_recent_fetches_latest_messages_and_returns_chronological_ord
     older = Message(id=11, chat_id=1, text="older")
     session = _Session([newer, older])
 
-    messages = await service.list_recent(session, chat_id=1, limit=10)  # type: ignore[arg-type]
+    messages = await service.list_recent(session, chat_id=1, limit=10)
 
     assert messages == [older, newer]
     sql = str(
-        session.statement.compile(  # type: ignore[union-attr]
+        session.statement.compile(
             dialect=postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         ),

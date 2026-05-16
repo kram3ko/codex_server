@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import BinaryIO
 
 import structlog
+from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Upload
@@ -52,7 +54,7 @@ class UploadService:
                     user_id=user_id,
                     source=path,
                 )
-            except Exception as exc:  # noqa: BLE001 — окремий файл не валить турн
+            except (OSError, SQLAlchemyError, BotoCoreError, ClientError) as exc:
                 log.warning(
                     "uploads_persist_failed",
                     chat_id=chat_id,
@@ -140,7 +142,7 @@ class UploadService:
         if key is not None:
             try:
                 await storage_service.delete(key)
-            except Exception as exc:  # noqa: BLE001 — DB row однозначно дропаємо
+            except (OSError, BotoCoreError, ClientError) as exc:
                 log.warning("uploads_s3_delete_failed", key=key, error=str(exc))
         await session.delete(upload)
         return True

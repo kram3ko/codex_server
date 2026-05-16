@@ -103,13 +103,14 @@
 
   async function loadOlderMessages() {
     if (loadingOlder || !hasMoreOlder || !selected || messages.length === 0) return;
+    const oldest = messages[0];
+    if (!oldest) return;
     loadingOlder = true;
     try {
-      const oldestId = messages[0].id;
       const response = await messageClient.listMessages({
         chatId: selected.id,
         pagination: { limit: PAGE_SIZE },
-        beforeId: oldestId
+        beforeId: oldest.id
       });
       messages = [...response.messages, ...messages];
       hasMoreOlder = response.messages.length >= PAGE_SIZE;
@@ -178,9 +179,9 @@
         const streamIdx = streamingClientId
           ? messages.findIndex((m) => clientIdOf(m) === streamingClientId)
           : -1;
-        if (streamIdx >= 0) {
+        const streaming = streamIdx >= 0 ? messages[streamIdx] : undefined;
+        if (streaming) {
           const before = messages.slice(0, streamIdx);
-          const streaming = messages[streamIdx];
           const after = messages.slice(streamIdx + 1);
           messages = partialAssistant
             ? [...before, partialAssistant, userMessage, streaming, ...after]

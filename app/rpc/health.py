@@ -2,8 +2,12 @@
 
 Паралельно пінгує Postgres + Redis + Codex sidecar через `asyncio.TaskGroup`,
 агрегує результат у єдиний SERVING/NOT_SERVING статус. Дзвінок жорстко
-обмежений `_PROBE_TIMEOUT_S` через `asyncio.timeout` — чорний ящик для
-docker healthcheck не повинен висіти.
+обмежений `settings.HEALTH_PROBE_TIMEOUT_SECONDS` через `asyncio.timeout` —
+чорний ящик для docker healthcheck не повинен висіти.
+
+Probes повертають `bool` і самі ловлять свої доменні помилки (вузько). Якщо
+вискочить bug-exception у probe — TaskGroup підніме ExceptionGroup; ми
+ловимо TimeoutError + ExceptionGroup і повертаємо NOT_SERVING.
 """
 
 import asyncio
@@ -13,7 +17,9 @@ from typing import override
 import structlog
 import websockets
 from connectrpc.request import RequestContext
+from redis.exceptions import RedisError
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.db.base import SessionLocal
@@ -23,7 +29,6 @@ from app.services.cache.default import cache
 
 log = structlog.get_logger(__name__)
 
-_PROBE_TIMEOUT_S = 3.0
 _SERVING = common_pb2.HealthCheckResponse.SERVING
 _NOT_SERVING = common_pb2.HealthCheckResponse.NOT_SERVING
 
@@ -39,15 +44,15 @@ class HealthRPC(HealthProtocol):
     ) -> common_pb2.HealthCheckResponse:
         del request, ctx
         results: dict[str, bool] = {}
+        timeout_s = settings.HEALTH_PROBE_TIMEOUT_SECONDS
         try:
-            async with asyncio.timeout(_PROBE_TIMEOUT_S), asyncio.TaskGroup() as tg:
+            async with asyncio.timeout(timeout_s), asyncio.TaskGroup() as tg:
                 pg = tg.create_task(_probe_postgres())
                 rd = tg.create_task(_probe_redis())
                 cx = tg.create_task(_probe_codex_sidecar())
             results = {"postgres": pg.result(), "redis": rd.result(), "codex": cx.result()}
-        except* Exception as eg:  # noqa: BLE001 — TaskGroup ExceptionGroup, лог + NOT_SERVING
-            for exc in eg.exceptions:
-                log.warning("healthcheck_probe_failed", error=str(exc))
+        except TimeoutError:
+            log.warning("healthcheck_timeout", timeout_s=timeout_s)
 
         all_ok = bool(results) and all(results.values())
         log.info("healthcheck_done", **results, serving=all_ok)
@@ -55,7 +60,7 @@ class HealthRPC(HealthProtocol):
 
 
 async def _probe_postgres() -> bool:
-    with contextlib.suppress(Exception):
+    with contextlib.suppress(SQLAlchemyError, OSError, TimeoutError):
         async with SessionLocal() as db:
             await db.execute(text("SELECT 1"))
         return True
@@ -63,7 +68,7 @@ async def _probe_postgres() -> bool:
 
 
 async def _probe_redis() -> bool:
-    with contextlib.suppress(Exception):
+    with contextlib.suppress(RedisError, OSError, TimeoutError):
         # redis-py типізує ping() як `Awaitable[bool] | bool` (sync/async overload);
         # на async client це завжди awaitable, але pyright не narrowить.
         result = cache.ping()
@@ -75,7 +80,7 @@ async def _probe_redis() -> bool:
 
 async def _probe_codex_sidecar() -> bool:
     """Cheap WS-handshake to confirm sidecar accepts connections."""
-    with contextlib.suppress(Exception):
+    with contextlib.suppress(websockets.WebSocketException, OSError, TimeoutError):
         async with websockets.connect(
             settings.CODEX_CLI_URL,
             open_timeout=2.0,

@@ -21,7 +21,13 @@ class AuthService(Protocol):
     async def login(self, request: codex_dot_v1_dot_auth__pb2.LoginRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    async def register(self, request: codex_dot_v1_dot_auth__pb2.RegisterRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
     async def refresh(self, request: codex_dot_v1_dot_auth__pb2.RefreshRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    async def logout(self, request: codex_dot_v1_dot_auth__pb2.LogoutRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LogoutResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
@@ -40,6 +46,16 @@ class AuthServiceASGIApplication(ConnectASGIApplication[AuthService]):
                     ),
                     function=svc.login,
                 ),
+                "/codex.v1.AuthService/Register": Endpoint.unary(
+                    method=MethodInfo(
+                        name="Register",
+                        service_name="codex.v1.AuthService",
+                        input=codex_dot_v1_dot_auth__pb2.RegisterRequest,
+                        output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.register,
+                ),
                 "/codex.v1.AuthService/Refresh": Endpoint.unary(
                     method=MethodInfo(
                         name="Refresh",
@@ -49,6 +65,16 @@ class AuthServiceASGIApplication(ConnectASGIApplication[AuthService]):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=svc.refresh,
+                ),
+                "/codex.v1.AuthService/Logout": Endpoint.unary(
+                    method=MethodInfo(
+                        name="Logout",
+                        service_name="codex.v1.AuthService",
+                        input=codex_dot_v1_dot_auth__pb2.LogoutRequest,
+                        output=codex_dot_v1_dot_auth__pb2.LogoutResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.logout,
                 ),
             },
             interceptors=interceptors,
@@ -84,6 +110,26 @@ class AuthServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    async def register(
+        self,
+        request: codex_dot_v1_dot_auth__pb2.RegisterRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="Register",
+                service_name="codex.v1.AuthService",
+                input=codex_dot_v1_dot_auth__pb2.RegisterRequest,
+                output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
     async def refresh(
         self,
         request: codex_dot_v1_dot_auth__pb2.RefreshRequest,
@@ -104,6 +150,26 @@ class AuthServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    async def logout(
+        self,
+        request: codex_dot_v1_dot_auth__pb2.LogoutRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_auth__pb2.LogoutResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="Logout",
+                service_name="codex.v1.AuthService",
+                input=codex_dot_v1_dot_auth__pb2.LogoutRequest,
+                output=codex_dot_v1_dot_auth__pb2.LogoutResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
 
 
 
@@ -111,7 +177,11 @@ class AuthServiceClient(ConnectClient):
 class AuthServiceSync(Protocol):
     def login(self, request: codex_dot_v1_dot_auth__pb2.LoginRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def register(self, request: codex_dot_v1_dot_auth__pb2.RegisterRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def refresh(self, request: codex_dot_v1_dot_auth__pb2.RefreshRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def logout(self, request: codex_dot_v1_dot_auth__pb2.LogoutRequest, ctx: RequestContext) -> codex_dot_v1_dot_auth__pb2.LogoutResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
@@ -129,6 +199,16 @@ class AuthServiceWSGIApplication(ConnectWSGIApplication):
                     ),
                     function=service.login,
                 ),
+                "/codex.v1.AuthService/Register": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="Register",
+                        service_name="codex.v1.AuthService",
+                        input=codex_dot_v1_dot_auth__pb2.RegisterRequest,
+                        output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.register,
+                ),
                 "/codex.v1.AuthService/Refresh": EndpointSync.unary(
                     method=MethodInfo(
                         name="Refresh",
@@ -138,6 +218,16 @@ class AuthServiceWSGIApplication(ConnectWSGIApplication):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=service.refresh,
+                ),
+                "/codex.v1.AuthService/Logout": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="Logout",
+                        service_name="codex.v1.AuthService",
+                        input=codex_dot_v1_dot_auth__pb2.LogoutRequest,
+                        output=codex_dot_v1_dot_auth__pb2.LogoutResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.logout,
                 ),
             },
             interceptors=interceptors,
@@ -173,6 +263,26 @@ class AuthServiceClientSync(ConnectClientSync):
             timeout_ms=timeout_ms,
         )
 
+    def register(
+        self,
+        request: codex_dot_v1_dot_auth__pb2.RegisterRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_auth__pb2.LoginResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="Register",
+                service_name="codex.v1.AuthService",
+                input=codex_dot_v1_dot_auth__pb2.RegisterRequest,
+                output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
     def refresh(
         self,
         request: codex_dot_v1_dot_auth__pb2.RefreshRequest,
@@ -187,6 +297,26 @@ class AuthServiceClientSync(ConnectClientSync):
                 service_name="codex.v1.AuthService",
                 input=codex_dot_v1_dot_auth__pb2.RefreshRequest,
                 output=codex_dot_v1_dot_auth__pb2.LoginResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def logout(
+        self,
+        request: codex_dot_v1_dot_auth__pb2.LogoutRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_auth__pb2.LogoutResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="Logout",
+                service_name="codex.v1.AuthService",
+                input=codex_dot_v1_dot_auth__pb2.LogoutRequest,
+                output=codex_dot_v1_dot_auth__pb2.LogoutResponse,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,

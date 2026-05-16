@@ -33,9 +33,7 @@ async def list_errors(
     """
     project_id = await _resolve_project_id(project_slug)
     try:
-        body = await bugsink_client.list_issues(
-            project=project_id, sort="last_seen", order="desc"
-        )
+        body = await bugsink_client.list_issues(project=project_id, sort="last_seen", order="desc")
     except httpx.HTTPError as exc:
         raise ToolError(f"bugsink_api_error: {exc!s}") from exc
 
@@ -101,9 +99,7 @@ async def _resolve_project_id(slug: str | None) -> int:
     if slug is None:
         pid = int(projects[0]["id"])
     else:
-        match = next(
-            (p for p in projects if slug in (p.get("slug"), p.get("name"))), None
-        )
+        match = next((p for p in projects if slug in (p.get("slug"), p.get("name"))), None)
         if match is None:
             raise ToolError(f"project_not_found: {slug}")
         pid = int(match["id"])

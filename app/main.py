@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.redis import RedisIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
@@ -38,9 +39,11 @@ if settings.SENTRY_DSN:
             FastApiIntegration(),
             AsyncioIntegration(),
             SqlalchemyIntegration(),
+            RedisIntegration(),
         ],
     )
 from app.db.base import SessionLocal, engine
+from app.grpc_generated.codex.v1.admin_connect import AdminServiceASGIApplication
 from app.grpc_generated.codex.v1.auth_connect import AuthServiceASGIApplication
 from app.grpc_generated.codex.v1.chat_connect import ChatServiceASGIApplication
 from app.grpc_generated.codex.v1.common_connect import HealthServiceASGIApplication
@@ -51,6 +54,7 @@ from app.grpc_generated.codex.v1.uploads_connect import UploadsServiceASGIApplic
 from app.grpc_generated.codex.v1.user_connect import UserServiceASGIApplication
 from app.mcp import mcp_http_app
 from app.models import UserRole
+from app.rpc.admin import AdminRPC
 from app.rpc.auth import AuthRPC
 from app.rpc.chat import ChatRPC
 from app.rpc.event import EventRPC
@@ -102,9 +106,9 @@ async def _sync_admin_account(db) -> None:
     if not email or not settings.ADMIN_PASSWORD:
         return
     admin = await user_service.get_or_create_by_email(db, email)
-    if not auth_service.verify_password(settings.ADMIN_PASSWORD, admin.password_hash):
+    if not await auth_service.verify_password(settings.ADMIN_PASSWORD, admin.password_hash):
         await user_service.set_password_hash(
-            db, admin, auth_service.hash_password(settings.ADMIN_PASSWORD)
+            db, admin, await auth_service.hash_password(settings.ADMIN_PASSWORD)
         )
         log.info("admin_password_synced", email=admin.email)
     if admin.role != UserRole.ADMIN:
@@ -120,6 +124,7 @@ app = FastAPI(
 connect_router = ConnectRouter(
     services=[
         AuthServiceASGIApplication(AuthRPC()),
+        AdminServiceASGIApplication(AdminRPC()),
         HealthServiceASGIApplication(HealthRPC()),
         UserServiceASGIApplication(UserRPC()),
         ChatServiceASGIApplication(ChatRPC()),

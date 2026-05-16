@@ -12,6 +12,9 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "target": "ES2022",
     "verbatimModuleSyntax": true
   },

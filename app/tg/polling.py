@@ -57,9 +57,7 @@ class PollingMode:
             self._launch()
             return
         log.info("tg_polling_lock_busy_waiting", max_attempts=_MAX_WAIT_ATTEMPTS)
-        self._lock_wait_task = asyncio.create_task(
-            self._wait_for_lock(), name="tg_polling_wait"
-        )
+        self._lock_wait_task = asyncio.create_task(self._wait_for_lock(), name="tg_polling_wait")
 
     async def stop(self) -> None:
         for task in (self._lock_wait_task, self._lock_renew_task, self._polling_task):
@@ -99,9 +97,7 @@ class PollingMode:
             name="tg_polling",
         )
         self._polling_task.add_done_callback(self._on_polling_done)
-        self._lock_renew_task = asyncio.create_task(
-            self._renew_lock(), name="tg_polling_renew"
-        )
+        self._lock_renew_task = asyncio.create_task(self._renew_lock(), name="tg_polling_renew")
         log.debug("tg_polling_started")
 
     @staticmethod
@@ -110,7 +106,7 @@ class PollingMode:
             task.result()
         except asyncio.CancelledError:
             return
-        except Exception:  # noqa: BLE001 — done-callback backstop
+        except Exception:
             log.exception("tg_polling_failed")
 
     async def _acquire_lock(self) -> bool:

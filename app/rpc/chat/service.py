@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from typing import Any, override
 
 import structlog
+import websockets
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
@@ -27,13 +28,25 @@ from app.rpc.chat.guards import load_chat_owned, resolve_limit
 from app.rpc.chat.mappers import codex_usage_to_pb, error_event
 from app.rpc.chat.stream import stream_turn
 from app.rpc.chat.uploads import resolve_uploads
+from app.services import rate_limit
 from app.services.chats.default import chat_service
 from app.services.codex import turn_registry
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
+from app.services.codex.transport import AppServerError
 from app.services.codex_usage.default import codex_usage_service
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
+
+# Cross-worker control RPC до Codex sidecar (interrupt/steer) — типова мережа:
+# OS-level (WSL/Docker), WS-protocol (handshake/frames), JSON-RPC error від
+# самого сервера, або сам connect timeout'нувся.
+_CONTROL_RPC_ERRORS = (
+    AppServerError,
+    websockets.WebSocketException,
+    OSError,
+    TimeoutError,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -102,6 +115,24 @@ class ChatRPC(ChatProtocol):
             yield error_event(CodexErrorCode.EMPTY_TEXT, "text is required")
             return
 
+        try:
+            await rate_limit.reserve_turn(user)
+        except rate_limit.RateLimited as exc:
+            yield error_event(CodexErrorCode.RATE_LIMITED, str(exc))
+            return
+
+        try:
+            async for ev in self._run_turn_body(request, user, text):
+                yield ev
+        finally:
+            await rate_limit.release_turn(user)
+
+    async def _run_turn_body(
+        self,
+        request: chat_pb2.RunTurnRequest,
+        user: Any,
+        text: str,
+    ) -> AsyncIterator[chat_pb2.ChatEvent]:
         persisted_chat_id, user_pk = await _ensure_web_chat(user.id)
         if request.HasField("chat_id") and request.chat_id != persisted_chat_id:
             raise ConnectError(Code.NOT_FOUND, f"chat {request.chat_id} not found")
@@ -112,7 +143,8 @@ class ChatRPC(ChatProtocol):
         voice_reply = bool(audio_ids)
         has_uploads = bool(data_urls) or bool(audio_ids)
 
-        # Guard: active/pending turn → server-side steer / BUSY (race-safe для multi-tab / direct RPC).
+        # Guard: active/pending turn → server-side steer / BUSY
+        # (race-safe для multi-tab / direct RPC).
         active = await turn_registry.get(persisted_chat_id)
         if active is not None:
             if active.turn_id is None:
@@ -123,7 +155,8 @@ class ChatRPC(ChatProtocol):
                 )
                 return
             if has_uploads:
-                # Uploads + active → BUSY; client має сам interrupt + retry (sidecar overlap risk inline).
+                # Uploads + active → BUSY; client має сам interrupt + retry
+                # (sidecar overlap risk inline).
                 log.warning("registry_active_with_uploads", chat_id=persisted_chat_id)
                 yield error_event(
                     CodexErrorCode.TURN_BUSY,
@@ -133,9 +166,7 @@ class ChatRPC(ChatProtocol):
             # Text-only + active: cross-worker steer у running turn.
             accepted = False
             with contextlib.suppress(Exception):
-                accepted = await turn_registry.send_steer(
-                    persisted_chat_id, active, text
-                )
+                accepted = await turn_registry.send_steer(persisted_chat_id, active, text)
             if accepted:
                 async with SessionLocal() as db:
                     await message_service.append(
@@ -156,9 +187,7 @@ class ChatRPC(ChatProtocol):
                 return
             # Steer rejected → turn закінчився між get і send. Drop stale CAS-safely
             # і впадаємо у новий turn нижче.
-            await turn_registry.drop_if_matches(
-                persisted_chat_id, active.thread_id, active.turn_id
-            )
+            await turn_registry.drop_if_matches(persisted_chat_id, active.thread_id, active.turn_id)
 
         user_meta: dict[str, Any] = {}
         if image_ids:
@@ -219,7 +248,7 @@ class ChatRPC(ChatProtocol):
             return chat_pb2.InterruptTurnResponse()
         try:
             await turn_registry.send_interrupt(record)
-        except Exception as exc:  # noqa: BLE001 — interrupt best-effort
+        except _CONTROL_RPC_ERRORS as exc:
             log.warning(
                 "web_interrupt_rpc_failed",
                 chat_id=chat.id,
@@ -245,7 +274,7 @@ class ChatRPC(ChatProtocol):
             return chat_pb2.SteerTurnResponse(accepted=False)
         try:
             accepted = await turn_registry.send_steer(chat.id, record, text)
-        except Exception as exc:  # noqa: BLE001 — steer best-effort, лог + accepted=False
+        except _CONTROL_RPC_ERRORS as exc:
             log.warning("web_steer_rpc_failed", chat_id=chat.id, error=str(exc))
             return chat_pb2.SteerTurnResponse(accepted=False)
         if accepted:

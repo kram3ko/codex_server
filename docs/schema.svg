@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1080" font-family="ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace" font-size="13">
+  <defs>
+    <marker id="one" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="14" markerHeight="14" orient="auto-start-reverse">
+      <line x1="7" y1="0" x2="7" y2="14" stroke="#0d7377" stroke-width="2"/>
+    </marker>
+    <marker id="many" viewBox="0 0 14 14" refX="13" refY="7" markerWidth="14" markerHeight="14" orient="auto-start-reverse">
+      <path d="M 0 7 L 13 0 M 0 7 L 13 7 M 0 7 L 13 14" stroke="#0d7377" stroke-width="2" fill="none"/>
+    </marker>
+    <style>
+      .title  { font-weight: 700; font-size: 14px; fill: #ffffff; }
+      .field  { fill: #1a1a1a; }
+      .pk     { font-weight: 700; fill: #b8390e; }
+      .fk     { font-weight: 700; fill: #0d7377; }
+      .ty     { fill: #555; }
+      .note   { font-style: italic; fill: #888; font-size: 11px; }
+      .rel    { font-size: 11px; fill: #0d7377; font-weight: 600; }
+      .box    { fill: #ffffff; stroke: #0d7377; stroke-width: 1.5; }
+      .head   { fill: #0d7377; }
+      .uq     { fill: #6b21a8; font-weight: 700; }
+    </style>
+  </defs>
+
+  <!-- title -->
+  <text x="40" y="32" font-size="20" font-weight="700" fill="#0d7377">codex_server — Postgres schema</text>
+  <text x="40" y="52" font-size="12" fill="#666">PK = primary key · FK = foreign key · UQ = unique · NN = not null · Все: Base(id BIGINT PK, created_at, updated_at TIMESTAMPTZ)</text>
+
+  <!-- ===== USERS ===== -->
+  <g transform="translate(40,90)">
+    <rect class="box" width="330" height="240" rx="6"/>
+    <rect class="head" width="330" height="30" rx="6"/>
+    <rect class="head" width="330" height="20" y="10"/>
+    <text class="title" x="14" y="20">USERS</text>
+    <line x1="0" y1="30" x2="330" y2="30" stroke="#0d7377"/>
+    <g transform="translate(14,52)">
+      <text><tspan class="pk">id</tspan>            <tspan class="ty" dx="6">bigint</tspan> <tspan class="note" dx="6">PK</tspan></text>
+      <text y="22"><tspan class="field">tg_user_id</tspan>    <tspan class="ty" dx="6">bigint?</tspan>  <tspan class="uq" dx="6">UQ</tspan> <tspan class="note" dx="4">idx</tspan></text>
+      <text y="44"><tspan class="field">email</tspan>         <tspan class="ty" dx="6">str(255)?</tspan> <tspan class="uq" dx="6">UQ</tspan> <tspan class="note" dx="4">idx</tspan></text>
+      <text y="66"><tspan class="field">password_hash</tspan> <tspan class="ty" dx="6">str(255)?</tspan> <tspan class="note" dx="6">argon2</tspan></text>
+      <text y="88"><tspan class="field">display_name</tspan>  <tspan class="ty" dx="6">str(255)?</tspan></text>
+      <text y="110"><tspan class="field">role</tspan>          <tspan class="ty" dx="6">UserRole</tspan>  <tspan class="note" dx="6">NN, def USER</tspan></text>
+      <text y="132"><tspan class="note">ENUM(USER, ADMIN)</tspan></text>
+      <text y="160"><tspan class="field">created_at</tspan>    <tspan class="ty" dx="6">timestamptz</tspan></text>
+      <text y="182"><tspan class="field">updated_at</tspan>    <tspan class="ty" dx="6">timestamptz</tspan></text>
+    </g>
+  </g>
+
+  <!-- ===== CHATS ===== -->
+  <g transform="translate(520,90)">
+    <rect class="box" width="360" height="270" rx="6"/>
+    <rect class="head" width="360" height="30" rx="6"/>
+    <rect class="head" width="360" height="20" y="10"/>
+    <text class="title" x="14" y="20">CHATS</text>
+    <line x1="0" y1="30" x2="360" y2="30" stroke="#0d7377"/>
+    <g transform="translate(14,52)">
+      <text><tspan class="pk">id</tspan>               <tspan class="ty" dx="6">bigint</tspan> <tspan class="note" dx="6">PK</tspan></text>
+      <text y="22"><tspan class="fk">user_id</tspan>          <tspan class="ty" dx="6">bigint</tspan>  <tspan class="note" dx="6">FK→users CASCADE, idx</tspan></text>
+      <text y="44"><tspan class="field">source</tspan>           <tspan class="ty" dx="6">ChatSource</tspan> <tspan class="note" dx="6">NN</tspan></text>
+      <text y="62"><tspan class="note">ENUM(WEB, TELEGRAM)</tspan></text>
+      <text y="86"><tspan class="field">tg_chat_id</tspan>       <tspan class="ty" dx="6">bigint?</tspan></text>
+      <text y="104"><tspan class="uq">UQ(source, tg_chat_id)</tspan></text>
+      <text y="128"><tspan class="field">codex_thread_id</tspan>  <tspan class="ty" dx="6">str(255)?</tspan></text>
+      <text y="146"><tspan class="note">in-RAM sidecar id (optimistic)</tspan></text>
+      <text y="170"><tspan class="field">title</tspan>            <tspan class="ty" dx="6">str(255)?</tspan></text>
+      <text y="192"><tspan class="field">last_msg_at</tspan>      <tspan class="ty" dx="6">timestamptz</tspan> <tspan class="note" dx="6">def now()</tspan></text>
+      <text y="214"><tspan class="field">created_at</tspan>       <tspan class="ty" dx="6">timestamptz</tspan></text>
+    </g>
+  </g>
+
+  <!-- ===== MESSAGES ===== -->
+  <g transform="translate(1060,90)">
+    <rect class="box" width="380" height="220" rx="6"/>
+    <rect class="head" width="380" height="30" rx="6"/>
+    <rect class="head" width="380" height="20" y="10"/>
+    <text class="title" x="14" y="20">MESSAGES</text>
+    <line x1="0" y1="30" x2="380" y2="30" stroke="#0d7377"/>
+    <g transform="translate(14,52)">
+      <text><tspan class="pk">id</tspan>      <tspan class="ty" dx="6">bigint</tspan> <tspan class="note" dx="6">PK</tspan></text>
+      <text y="22"><tspan class="fk">chat_id</tspan> <tspan class="ty" dx="6">bigint</tspan> <tspan class="note" dx="6">FK→chats CASCADE, idx</tspan></text>
+      <text y="44"><tspan class="field">role</tspan>    <tspan class="ty" dx="6">MessageRole</tspan> <tspan class="note" dx="6">NN</tspan></text>
+      <text y="62"><tspan class="note">ENUM(USER, ASSISTANT, TOOL, SYSTEM)</tspan></text>
+      <text y="86"><tspan class="field">text</tspan>    <tspan class="ty" dx="6">text</tspan> <tspan class="note" dx="6">def '', append-only</tspan></text>
+      <text y="108"><tspan class="field">meta</tspan>    <tspan class="ty" dx="6">jsonb?</tspan></text>
+      <text y="126"><tspan class="note">{client_id, upload_ids, tool calls, …}</tspan></text>
+      <text y="156"><tspan class="field">created_at</tspan>  <tspan class="ty" dx="6">timestamptz</tspan></text>
+      <text y="178"><tspan class="field">updated_at</tspan>  <tspan class="ty" dx="6">timestamptz</tspan></text>
+    </g>
+  </g>
+
+  <!-- ===== UPLOADS ===== -->
+  <g transform="translate(40,500)">
+    <rect class="box" width="330" height="300" rx="6"/>
+    <rect class="head" width="330" height="30" rx="6"/>
+    <rect class="head" width="330" height="20" y="10"/>
+    <text class="title" x="14" y="20">UPLOADS</text>
+    <line x1="0" y1="30" x2="330" y2="30" stroke="#0d7377"/>
+    <g transform="translate(14,52)">
+      <text><tspan class="pk">id</tspan>              <tspan class="ty" dx="6">bigint</tspan> <tspan class="note" dx="6">PK</tspan></text>
+      <text y="22"><tspan class="fk">user_id</tspan>         <tspan class="ty" dx="6">bigint</tspan>  <tspan class="note" dx="6">FK→users CASCADE</tspan></text>
+      <text y="44"><tspan class="fk">chat_id</tspan>         <tspan class="ty" dx="6">bigint?</tspan> <tspan class="note" dx="6">FK→chats SET NULL</tspan></text>
+      <text y="66"><tspan class="field">filename</tspan>        <tspan class="ty" dx="6">str(512)</tspan>  <tspan class="note" dx="6">NN</tspan></text>
+      <text y="88"><tspan class="field">mime</tspan>            <tspan class="ty" dx="6">str(127)</tspan>  <tspan class="note" dx="6">NN</tspan></text>
+      <text y="110"><tspan class="field">size</tspan>            <tspan class="ty" dx="6">int</tspan>       <tspan class="note" dx="6">bytes</tspan></text>
+      <text y="132"><tspan class="field">s3_path</tspan>         <tspan class="ty" dx="6">str(1024)</tspan> <tspan class="note" dx="6">NN, S3/MinIO key</tspan></text>
+      <text y="154"><tspan class="field">extracted_text</tspan>  <tspan class="ty" dx="6">text?</tspan>     <tspan class="note" dx="6">OCR/STT</tspan></text>
+      <text y="180"><tspan class="field">created_at</tspan>      <tspan class="ty" dx="6">timestamptz</tspan></text>
+      <text y="202"><tspan class="field">updated_at</tspan>      <tspan class="ty" dx="6">timestamptz</tspan></text>
+    </g>
+  </g>
+
+  <!-- ===== EVENTS ===== -->
+  <g transform="translate(520,500)">
+    <rect class="box" width="360" height="280" rx="6"/>
+    <rect class="head" width="360" height="30" rx="6"/>
+    <rect class="head" width="360" height="20" y="10"/>
+    <text class="title" x="14" y="20">EVENTS</text>
+    <line x1="0" y1="30" x2="360" y2="30" stroke="#0d7377"/>
+    <g transform="translate(14,52)">
+      <text><tspan class="pk">id</tspan>      <tspan class="ty" dx="6">bigint</tspan> <tspan class="note" dx="6">PK</tspan></text>
+      <text y="22"><tspan class="fk">chat_id</tspan> <tspan class="ty" dx="6">bigint?</tspan> <tspan class="note" dx="6">FK→chats CASCADE, idx</tspan></text>
+      <text y="44"><tspan class="fk">user_id</tspan> <tspan class="ty" dx="6">bigint?</tspan> <tspan class="note" dx="6">FK→users CASCADE, idx</tspan></text>
+      <text y="66"><tspan class="field">kind</tspan>    <tspan class="ty" dx="6">EventKind</tspan> <tspan class="note" dx="6">NN, idx</tspan></text>
+      <text y="86"><tspan class="note">THREAD_OPENED · THREAD_RESET · THREAD_LOST</tspan></text>
+      <text y="102"><tspan class="note">TURN_STARTED · TURN_COMPLETED</tspan></text>
+      <text y="118"><tspan class="note">TURN_INTERRUPTED · TURN_FAILED</tspan></text>
+      <text y="134"><tspan class="note">ATTACHMENT_RECEIVED · AUDIO_TRANSCRIBED</tspan></text>
+      <text y="150"><tspan class="note">ERROR</tspan></text>
+      <text y="180"><tspan class="field">payload</tspan>  <tspan class="ty" dx="6">jsonb?</tspan></text>
+      <text y="208"><tspan class="field">created_at</tspan> <tspan class="ty" dx="6">timestamptz</tspan></text>
+      <text y="230"><tspan class="field">updated_at</tspan> <tspan class="ty" dx="6">timestamptz</tspan></text>
+    </g>
+  </g>
+
+  <!-- ===== NOTES ===== -->
+  <g transform="translate(1060,500)">
+    <rect class="box" width="380" height="260" rx="6"/>
+    <rect class="head" width="380" height="30" rx="6"/>
+    <rect class="head" width="380" height="20" y="10"/>
+    <text class="title" x="14" y="20">NOTES</text>
+    <text class="note" x="80" y="20" fill="#cfeaea">(single-user KB — no user_id FK)</text>
+    <line x1="0" y1="30" x2="380" y2="30" stroke="#0d7377"/>
+    <g transform="translate(14,52)">
+      <text><tspan class="pk">id</tspan>             <tspan class="ty" dx="6">bigint</tspan> <tspan class="note" dx="6">PK</tspan></text>
+      <text y="22"><tspan class="field">title</tspan>          <tspan class="ty" dx="6">str(255)</tspan> <tspan class="note" dx="6">NN</tspan></text>
+      <text y="44"><tspan class="field">body</tspan>           <tspan class="ty" dx="6">text</tspan>     <tspan class="note" dx="6">NN</tspan></text>
+      <text y="66"><tspan class="field">tags</tspan>           <tspan class="ty" dx="6">str[]</tspan>    <tspan class="note" dx="6">def {}, GIN-idx</tspan></text>
+      <text y="88"><tspan class="field">search_vector</tspan>  <tspan class="ty" dx="6">tsvector</tspan> <tspan class="note" dx="6">GENERATED, GIN-idx</tspan></text>
+      <text y="106"><tspan class="note">to_tsvector('simple', title || ' ' || body)</tspan></text>
+      <text y="140"><tspan class="field">created_at</tspan>     <tspan class="ty" dx="6">timestamptz</tspan></text>
+      <text y="162"><tspan class="field">updated_at</tspan>     <tspan class="ty" dx="6">timestamptz</tspan></text>
+    </g>
+  </g>
+
+  <!-- ===== Relationships ===== -->
+  <!-- USERS → CHATS (1:N) -->
+  <g>
+    <path d="M 370 200 L 520 200" stroke="#0d7377" stroke-width="2" fill="none" marker-start="url(#one)" marker-end="url(#many)"/>
+    <text x="395" y="194" class="rel">1</text>
+    <text x="494" y="194" class="rel">N</text>
+    <text x="412" y="216" class="rel">owns (CASCADE)</text>
+  </g>
+
+  <!-- CHATS → MESSAGES (1:N) -->
+  <g>
+    <path d="M 880 180 L 1060 180" stroke="#0d7377" stroke-width="2" fill="none" marker-start="url(#one)" marker-end="url(#many)"/>
+    <text x="905" y="174" class="rel">1</text>
+    <text x="1034" y="174" class="rel">N</text>
+    <text x="918" y="196" class="rel">contains (CASCADE)</text>
+  </g>
+
+  <!-- USERS → UPLOADS (1:N) -->
+  <g>
+    <path d="M 205 330 L 205 500" stroke="#0d7377" stroke-width="2" fill="none" marker-start="url(#one)" marker-end="url(#many)"/>
+    <text x="212" y="350" class="rel">1</text>
+    <text x="212" y="490" class="rel">N</text>
+    <text x="212" y="420" class="rel">owns (CASCADE)</text>
+  </g>
+
+  <!-- CHATS → EVENTS (1:N nullable) -->
+  <g>
+    <path d="M 700 360 L 700 500" stroke="#0d7377" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-start="url(#one)" marker-end="url(#many)"/>
+    <text x="708" y="378" class="rel">1</text>
+    <text x="708" y="492" class="rel">N</text>
+    <text x="708" y="430" class="rel">scope? (CASCADE)</text>
+  </g>
+
+  <!-- CHATS → UPLOADS (1:N nullable, SET NULL) — angled path -->
+  <g>
+    <path d="M 540 360 Q 460 420 380 510" stroke="#0d7377" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-start="url(#one)" marker-end="url(#many)"/>
+    <text x="430" y="430" class="rel">scope? (SET NULL)</text>
+  </g>
+
+  <!-- USERS → EVENTS (actor nullable) -->
+  <g>
+    <path d="M 280 330 Q 380 420 560 500" stroke="#0d7377" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-start="url(#one)" marker-end="url(#many)"/>
+    <text x="350" y="478" class="rel">actor? (CASCADE)</text>
+  </g>
+
+  <!-- legend -->
+  <g transform="translate(40,890)">
+    <text font-size="13" font-weight="700" fill="#0d7377">Legend</text>
+    <line x1="0" y1="22" x2="60" y2="22" stroke="#0d7377" stroke-width="2" marker-start="url(#one)" marker-end="url(#many)"/>
+    <text x="70" y="26">one-to-many (NOT NULL FK)</text>
+
+    <line x1="0" y1="48" x2="60" y2="48" stroke="#0d7377" stroke-width="2" stroke-dasharray="6 4" marker-start="url(#one)" marker-end="url(#many)"/>
+    <text x="70" y="52">one-to-many (nullable FK)</text>
+
+    <text x="320" y="26"><tspan class="pk">id</tspan>     primary key</text>
+    <text x="320" y="52"><tspan class="fk">user_id</tspan> foreign key</text>
+    <text x="500" y="26"><tspan class="uq">UQ</tspan>     unique</text>
+    <text x="500" y="52"><tspan class="ty">bigint?</tspan> nullable</text>
+
+    <text x="700" y="26" class="note">CASCADE = видалення parent видаляє child</text>
+    <text x="700" y="52" class="note">SET NULL = parent видалений → child.parent_id = NULL (blob лишається)</text>
+  </g>
+
+  <!-- footer -->
+  <g transform="translate(40,1020)">
+    <text fill="#666" font-size="11">Alembic head: c7d4e8a9b2f1 · Source: app/models/*.py + app/db/base.py · Update: edit docs/schema.mmd → regen SVG via mermaid.live</text>
+    <text fill="#666" font-size="11" y="18">Postgres ENUM types: user_role, chat_source, message_role, event_kind (defined in app/models/enums.py)</text>
+  </g>
+</svg>

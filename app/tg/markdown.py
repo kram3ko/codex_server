@@ -42,46 +42,46 @@ class _TelegramHtmlRenderer(RendererHTML):
 
     @staticmethod
     def _const(value: str):
-        def render(tokens, idx, options, env):  # noqa: ARG001
+        def render(tokens, idx, options, env):
             return value
 
         return render
 
-    def renderToken(self, tokens, idx, options, env=None):  # noqa: ARG002
+    def renderToken(self, tokens, idx, options, env=None):
         return ""
 
-    def text(self, tokens, idx, options, env):  # noqa: ARG002
+    def text(self, tokens, idx, options, env):
         return html.escape(tokens[idx].content)
 
-    def paragraph_close(self, tokens, idx, options, env):  # noqa: ARG002
+    def paragraph_close(self, tokens, idx, options, env):
         return "\n" if env.get("list_stack") or env.get("bq_depth") else "\n\n"
 
-    def blockquote_open(self, tokens, idx, options, env):  # noqa: ARG002
+    def blockquote_open(self, tokens, idx, options, env):
         env["bq_depth"] = env.get("bq_depth", 0) + 1
         return "<blockquote>"
 
-    def blockquote_close(self, tokens, idx, options, env):  # noqa: ARG002
+    def blockquote_close(self, tokens, idx, options, env):
         env["bq_depth"] -= 1
         return "</blockquote>\n\n"
 
-    def bullet_list_open(self, tokens, idx, options, env):  # noqa: ARG002
+    def bullet_list_open(self, tokens, idx, options, env):
         env.setdefault("list_stack", []).append(["ul", 0])
         return ""
 
-    def bullet_list_close(self, tokens, idx, options, env):  # noqa: ARG002
+    def bullet_list_close(self, tokens, idx, options, env):
         env["list_stack"].pop()
         return "" if env["list_stack"] else "\n"
 
-    def ordered_list_open(self, tokens, idx, options, env):  # noqa: ARG002
+    def ordered_list_open(self, tokens, idx, options, env):
         start = int(tokens[idx].attrGet("start") or 1)
         env.setdefault("list_stack", []).append(["ol", start])
         return ""
 
-    def ordered_list_close(self, tokens, idx, options, env):  # noqa: ARG002
+    def ordered_list_close(self, tokens, idx, options, env):
         env["list_stack"].pop()
         return "" if env["list_stack"] else "\n"
 
-    def list_item_open(self, tokens, idx, options, env):  # noqa: ARG002
+    def list_item_open(self, tokens, idx, options, env):
         kind, num = env["list_stack"][-1]
         indent = "  " * (len(env["list_stack"]) - 1)
         if kind == "ol":
@@ -89,34 +89,34 @@ class _TelegramHtmlRenderer(RendererHTML):
             return f"{indent}{num}. "
         return f"{indent}• "
 
-    def fence(self, tokens, idx, options, env):  # noqa: ARG002
+    def fence(self, tokens, idx, options, env):
         token = tokens[idx]
         body = html.escape(token.content.rstrip("\n"))
         lang = (token.info or "").strip().split(maxsplit=1)
         klass = f' class="language-{html.escape(lang[0])}"' if lang else ""
         return f"<pre><code{klass}>{body}</code></pre>\n\n"
 
-    def code_block(self, tokens, idx, options, env):  # noqa: ARG002
+    def code_block(self, tokens, idx, options, env):
         body = html.escape(tokens[idx].content.rstrip("\n"))
         return f"<pre><code>{body}</code></pre>\n\n"
 
-    def code_inline(self, tokens, idx, options, env):  # noqa: ARG002
+    def code_inline(self, tokens, idx, options, env):
         return f"<code>{html.escape(tokens[idx].content)}</code>"
 
-    def link_open(self, tokens, idx, options, env):  # noqa: ARG002
+    def link_open(self, tokens, idx, options, env):
         href = str(tokens[idx].attrGet("href") or "")
         if urlparse(href).scheme.lower() not in _ALLOWED_LINK_SCHEMES:
             env["_skip_link_close"] = env.get("_skip_link_close", 0) + 1
             return ""
         return f'<a href="{html.escape(href, quote=True)}">'
 
-    def link_close(self, tokens, idx, options, env):  # noqa: ARG002
+    def link_close(self, tokens, idx, options, env):
         if env.get("_skip_link_close"):
             env["_skip_link_close"] -= 1
             return ""
         return "</a>"
 
-    def image(self, tokens, idx, options, env):  # noqa: ARG002
+    def image(self, tokens, idx, options, env):
         # TG inline-картинок у тексті не підтримує — лишаємо тільки alt.
         return html.escape(tokens[idx].content or "")
 

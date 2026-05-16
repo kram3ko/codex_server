@@ -1,36 +1,24 @@
-// Single-user JWT auth with proactive refresh.
+// JWT доставляється у HttpOnly cookie (`codex_jwt`) — JavaScript його не
+// бачить (CLAUDE.md §5). Тут тримаємо лише похідний `signedIn`-стан і
+// expiry-таймер для proactive Refresh.
 //
 // Flow:
-//   login()  → server returns JWT, store it, schedule a refresh just before exp.
-//   refresh() → server reissues JWT using current Bearer. On failure → logout.
-//   logout()  → drop token, cancel timer, emit "auth:logout" so the UI re-renders.
+//   login()/register() → server set'ить cookie → ми лишень знімаємо expiry
+//     з LoginResponse.expires_in і шедулимо refresh.
+//   refresh()  → виклик RPC; на success — сервер видає свіжий cookie + ми
+//     перепланимо наступний refresh.
+//   logout()   → AuthService.Logout RPC очищує cookie + знімаємо локальний
+//     `signedIn` сигнал.
 import { createClient } from "@connectrpc/connect";
 
 import { AuthService } from "../../gen/codex/v1/auth_pb";
-import { clearToken, getToken, setToken } from "../../shared/lib/token";
 import { registerRefresh, transport } from "../../shared/lib/transport";
 
 const REFRESH_LEAD_SECONDS = 60;
 const LOGOUT_EVENT = "auth:logout";
+const LOGIN_EVENT = "auth:login";
 
-function jwtExpMs(token: string): number | null {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
-function isLive(token: string | null): token is string {
-  if (!token) return false;
-  const expMs = jwtExpMs(token);
-  return expMs === null || expMs > Date.now();
-}
-
-let token: string | null = getToken();
+let signedIn = false;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let refreshInFlight: Promise<boolean> | null = null;
 const client = createClient(AuthService, transport);
@@ -42,46 +30,57 @@ function cancelTimer(): void {
   }
 }
 
-function scheduleRefresh(): void {
+function scheduleRefresh(expiresInSeconds: number): void {
   cancelTimer();
-  if (!token) return;
-  const expMs = jwtExpMs(token);
-  if (expMs === null) return;
-  const delay = Math.max(0, expMs - Date.now() - REFRESH_LEAD_SECONDS * 1000);
+  const delay = Math.max(0, (expiresInSeconds - REFRESH_LEAD_SECONDS) * 1000);
   refreshTimer = setTimeout(() => void auth.refresh(), delay);
 }
 
-function apply(newToken: string): void {
-  token = newToken;
-  setToken(newToken);
-  scheduleRefresh();
-}
-
 export const auth = {
-  get token(): string | null {
-    return token;
-  },
-
   get signedIn(): boolean {
-    return isLive(token);
+    return signedIn;
   },
 
   async login(email: string, password: string): Promise<void> {
     const response = await client.login({ email, password });
-    apply(response.accessToken);
+    signedIn = true;
+    scheduleRefresh(Number(response.expiresIn));
+    window.dispatchEvent(new CustomEvent(LOGIN_EVENT));
+  },
+
+  async register(
+    email: string,
+    password: string,
+    displayName: string,
+    inviteToken: string,
+  ): Promise<void> {
+    const response = await client.register({
+      email,
+      password,
+      displayName,
+      inviteToken,
+    });
+    signedIn = true;
+    scheduleRefresh(Number(response.expiresIn));
+    window.dispatchEvent(new CustomEvent(LOGIN_EVENT));
   },
 
   // Single-flight: одночасні 401 від N RPC викликають refresh один раз.
   async refresh(): Promise<boolean> {
-    if (!token) return false;
     if (refreshInFlight) return refreshInFlight;
     refreshInFlight = (async () => {
       try {
         const response = await client.refresh({});
-        apply(response.accessToken);
+        const wasSignedIn = signedIn;
+        signedIn = true;
+        scheduleRefresh(Number(response.expiresIn));
+        if (!wasSignedIn) {
+          window.dispatchEvent(new CustomEvent(LOGIN_EVENT));
+        }
         return true;
       } catch {
-        auth.logout();
+        signedIn = false;
+        cancelTimer();
         return false;
       }
     })();
@@ -92,24 +91,28 @@ export const auth = {
     }
   },
 
-  logout(): void {
-    const wasSignedIn = token !== null;
-    token = null;
-    clearToken();
+  async logout(): Promise<void> {
+    const wasSignedIn = signedIn;
+    signedIn = false;
     cancelTimer();
+    // Сервер скидає cookie через Logout RPC. Якщо мережа впала — клієнт уже
+    // вважає себе вилогіненим, на наступний RPC отримає 401 і викине у Login.
+    try {
+      await client.logout({});
+    } catch {
+      // Best-effort — клієнт-стан уже скинутий.
+    }
     if (wasSignedIn) {
       window.dispatchEvent(new CustomEvent(LOGOUT_EVENT));
     }
   }
 };
 
-// Bootstrap: clear stale token; schedule refresh if still valid.
-if (token && !isLive(token)) {
-  clearToken();
-  token = null;
-} else if (token) {
-  scheduleRefresh();
-}
+// Bootstrap: пробуємо refresh — якщо cookie існує і валідний, отримаємо
+// свіжий + signedIn=true. Якщо ні (немає cookie / прострочений) — тихо
+// лишаємось signedIn=false і user бачить login-форму.
+void auth.refresh().catch(() => {
+  /* no-op — bootstrap-only, will fall through to login screen */
+});
 
-// Експонуємо refresh для transport-interceptor'у (reactive 401 → refresh → retry).
 registerRefresh(() => auth.refresh());

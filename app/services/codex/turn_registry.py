@@ -12,10 +12,10 @@ crashed worker не лишав зомбі-запис.
 """
 
 import contextlib
-from dataclasses import dataclass
 
 import orjson
 import structlog
+from pydantic import BaseModel, ConfigDict, Field
 from redis.exceptions import RedisError
 
 from app.config import settings
@@ -40,11 +40,14 @@ def _ttl_s() -> int:
     return int(max(settings.WEB_TURN_TIMEOUT_SECONDS, settings.TG_TURN_TIMEOUT_SECONDS)) + 60
 
 
-@dataclass(frozen=True, slots=True)
-class ActiveTurn:
-    thread_id: str
-    turn_id: str | None  # None = pending (turn/start ще не повернув)
-    is_admin: bool
+class ActiveTurn(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    thread_id: str = Field(description="Codex thread id який зараз володіє турном.")
+    turn_id: str | None = Field(
+        default=None, description="None = pending (turn/start ще не повернув)."
+    )
+    is_admin: bool = Field(description="Який sidecar обслуговує турн (admin vs guest).")
 
 
 class TurnOwnershipLost(RuntimeError):
@@ -67,7 +70,7 @@ def _decode(raw: str | bytes) -> ActiveTurn | None:
             turn_id=data["turn_id"],
             is_admin=data["is_admin"],
         )
-    except (orjson.JSONDecodeError, KeyError, TypeError):
+    except orjson.JSONDecodeError, KeyError, TypeError, ValueError:
         return None
 
 
@@ -99,9 +102,7 @@ async def promote_pending(chat_id: int, thread_id: str, turn_id: str) -> bool:
     rec = _decode(raw)
     if rec is None or rec.thread_id != thread_id or rec.turn_id is not None:
         return False
-    new_payload = _encode(
-        ActiveTurn(thread_id=thread_id, turn_id=turn_id, is_admin=rec.is_admin)
-    )
+    new_payload = _encode(ActiveTurn(thread_id=thread_id, turn_id=turn_id, is_admin=rec.is_admin))
     # SET ... IFEQ <raw> EX <ttl> — server байт-порівнює поточне значення з `raw`.
     # redis-py SET response callback парсить відповідь: match → True, mismatch → None.
     try:
@@ -211,6 +212,11 @@ async def _one_shot_client(is_admin: bool):
         approval_policy=settings.CODEX_APPROVAL_POLICY,
         sandbox=settings.CODEX_SANDBOX,
         request_timeout=settings.CODEX_REQUEST_TIMEOUT_SECONDS,
+        notification_queue_max=(
+            settings.CODEX_NOTIFICATION_QUEUE_MAX_ADMIN
+            if is_admin
+            else settings.CODEX_NOTIFICATION_QUEUE_MAX_GUEST
+        ),
     )
     await client.connect()
     try:

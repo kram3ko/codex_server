@@ -29,7 +29,7 @@ from app.services.events.default import event_service
 from app.services.sessions.store import ChatSession
 from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn
-from app.tg.progress import TurnProgressReporter
+from app.tg.progress import TurnOutcome, TurnProgressReporter
 from app.tg.turn.control import emit_failure
 from app.tg.turn.outcomes import handle_done, handle_dropped_stream
 from app.tg.turn.persistence import persist_assistant_turn
@@ -52,16 +52,12 @@ async def stream_turn(
         )
         if not registered:
             await message.answer(
-                tg_markdown.escape(
-                    "⚠ Інший turn у цьому чаті ще активний — почекай завершення."
-                )
+                tg_markdown.escape("⚠ Інший turn у цьому чаті ще активний — почекай завершення.")
             )
             return
 
     async def _on_started(turn_id: str, thread_id: str) -> None:
-        promoted = await turn_registry.promote_pending(
-            session.db_chat_id, thread_id, turn_id
-        )
+        promoted = await turn_registry.promote_pending(session.db_chat_id, thread_id, turn_id)
         if not promoted:
             log.warning(
                 "registry_promote_lost",
@@ -116,7 +112,7 @@ async def stream_turn(
                 case ToolResultEvent(name=name, error=error):
                     await progress.mark_tool_done(name, error=bool(error))
                 case ErrorEvent(code=code, detail=detail):
-                    progress.mark_outcome("failed")
+                    progress.mark_outcome(TurnOutcome.FAILED)
                     await message.answer(
                         tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
                     )
@@ -134,13 +130,13 @@ async def stream_turn(
                     )
                     return
     except turn_registry.TurnOwnershipLost:
-        progress.mark_outcome("interrupted")
+        progress.mark_outcome(TurnOutcome.INTERRUPTED)
         await message.answer(
             tg_markdown.escape("Інший turn у цьому чаті вже активний — почекай завершення.")
         )
         return
     except StaleTurnStreamError as exc:
-        progress.mark_outcome("failed")
+        progress.mark_outcome(TurnOutcome.FAILED)
         with contextlib.suppress(Exception):
             await client.interrupt()
         await quarantine_thread(client.current_thread_id)
@@ -171,7 +167,7 @@ async def stream_turn(
         return
 
     if not collector.done_seen:
-        progress.mark_outcome("failed")
+        progress.mark_outcome(TurnOutcome.FAILED)
         await handle_dropped_stream(
             session,
             message,

@@ -2,13 +2,13 @@ import asyncio
 
 import pytest
 
+from app.services.codex.client import CodexClient, StaleTurnStreamError, _TurnDiagnostics
 from app.services.codex.events import (
     CodexItem,
     CodexNotif,
     TokenEvent,
     iterate_with_idle_timeout,
 )
-from app.services.codex.client import CodexClient, StaleTurnStreamError, _TurnDiagnostics
 from app.services.codex.transport import Notification
 
 

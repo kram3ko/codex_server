@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file codex/v1/auth.proto.
  */
 export const file_codex_v1_auth: GenFile = /*@__PURE__*/
-  fileDesc("ChNjb2RleC92MS9hdXRoLnByb3RvEghjb2RleC52MSIvCgxMb2dpblJlcXVlc3QSDQoFZW1haWwYASABKAkSEAoIcGFzc3dvcmQYAiABKAkiTQoNTG9naW5SZXNwb25zZRIUCgxhY2Nlc3NfdG9rZW4YASABKAkSEgoKdG9rZW5fdHlwZRgCIAEoCRISCgpleHBpcmVzX2luGAMgASgDIhAKDlJlZnJlc2hSZXF1ZXN0MoUBCgtBdXRoU2VydmljZRI4CgVMb2dpbhIWLmNvZGV4LnYxLkxvZ2luUmVxdWVzdBoXLmNvZGV4LnYxLkxvZ2luUmVzcG9uc2USPAoHUmVmcmVzaBIYLmNvZGV4LnYxLlJlZnJlc2hSZXF1ZXN0GhcuY29kZXgudjEuTG9naW5SZXNwb25zZWIGcHJvdG8z");
+  fileDesc("ChNjb2RleC92MS9hdXRoLnByb3RvEghjb2RleC52MSIvCgxMb2dpblJlcXVlc3QSDQoFZW1haWwYASABKAkSEAoIcGFzc3dvcmQYAiABKAkiTQoNTG9naW5SZXNwb25zZRIUCgxhY2Nlc3NfdG9rZW4YASABKAkSEgoKdG9rZW5fdHlwZRgCIAEoCRISCgpleHBpcmVzX2luGAMgASgDIhAKDlJlZnJlc2hSZXF1ZXN0Il4KD1JlZ2lzdGVyUmVxdWVzdBINCgVlbWFpbBgBIAEoCRIQCghwYXNzd29yZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSFAoMaW52aXRlX3Rva2VuGAQgASgJIg8KDUxvZ291dFJlcXVlc3QiEAoOTG9nb3V0UmVzcG9uc2UyggIKC0F1dGhTZXJ2aWNlEjgKBUxvZ2luEhYuY29kZXgudjEuTG9naW5SZXF1ZXN0GhcuY29kZXgudjEuTG9naW5SZXNwb25zZRI+CghSZWdpc3RlchIZLmNvZGV4LnYxLlJlZ2lzdGVyUmVxdWVzdBoXLmNvZGV4LnYxLkxvZ2luUmVzcG9uc2USPAoHUmVmcmVzaBIYLmNvZGV4LnYxLlJlZnJlc2hSZXF1ZXN0GhcuY29kZXgudjEuTG9naW5SZXNwb25zZRI7CgZMb2dvdXQSFy5jb2RleC52MS5Mb2dvdXRSZXF1ZXN0GhguY29kZXgudjEuTG9nb3V0UmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * @generated from message codex.v1.LoginRequest
@@ -39,7 +39,9 @@ export const LoginRequestSchema: GenMessage<LoginRequest> = /*@__PURE__*/
  */
 export type LoginResponse = Message<"codex.v1.LoginResponse"> & {
   /**
-   * JWT з claims: sub="codex-user", iat, exp.
+   * access_token + token_type лишаються у body для не-browser клієнтів
+   * (CLI / тестів). Browser-флоу спирається на HttpOnly cookie і body
+   * ігнорує — `expires_in` потрібен для proactive Refresh-таймеру.
    *
    * @generated from field: string access_token = 1;
    */
@@ -81,6 +83,72 @@ export const RefreshRequestSchema: GenMessage<RefreshRequest> = /*@__PURE__*/
   messageDesc(file_codex_v1_auth, 2);
 
 /**
+ * Self-signup via invite token (admin issues invites via AdminService).
+ * On success, server immediately issues a JWT — UX same as Login.
+ *
+ * @generated from message codex.v1.RegisterRequest
+ */
+export type RegisterRequest = Message<"codex.v1.RegisterRequest"> & {
+  /**
+   * @generated from field: string email = 1;
+   */
+  email: string;
+
+  /**
+   * @generated from field: string password = 2;
+   */
+  password: string;
+
+  /**
+   * optional, empty → null у DB
+   *
+   * @generated from field: string display_name = 3;
+   */
+  displayName: string;
+
+  /**
+   * Single-use invite token from AdminService.CreateInvite. ADMIN_EMAIL з env
+   * — єдиний виняток (не потребує invite, upsert на існуючий запис).
+   *
+   * @generated from field: string invite_token = 4;
+   */
+  inviteToken: string;
+};
+
+/**
+ * Describes the message codex.v1.RegisterRequest.
+ * Use `create(RegisterRequestSchema)` to create a new message.
+ */
+export const RegisterRequestSchema: GenMessage<RegisterRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_auth, 3);
+
+/**
+ * @generated from message codex.v1.LogoutRequest
+ */
+export type LogoutRequest = Message<"codex.v1.LogoutRequest"> & {
+};
+
+/**
+ * Describes the message codex.v1.LogoutRequest.
+ * Use `create(LogoutRequestSchema)` to create a new message.
+ */
+export const LogoutRequestSchema: GenMessage<LogoutRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_auth, 4);
+
+/**
+ * @generated from message codex.v1.LogoutResponse
+ */
+export type LogoutResponse = Message<"codex.v1.LogoutResponse"> & {
+};
+
+/**
+ * Describes the message codex.v1.LogoutResponse.
+ * Use `create(LogoutResponseSchema)` to create a new message.
+ */
+export const LogoutResponseSchema: GenMessage<LogoutResponse> = /*@__PURE__*/
+  messageDesc(file_codex_v1_auth, 5);
+
+/**
  * @generated from service codex.v1.AuthService
  */
 export const AuthService: GenService<{
@@ -93,12 +161,28 @@ export const AuthService: GenService<{
     output: typeof LoginResponseSchema;
   },
   /**
+   * @generated from rpc codex.v1.AuthService.Register
+   */
+  register: {
+    methodKind: "unary";
+    input: typeof RegisterRequestSchema;
+    output: typeof LoginResponseSchema;
+  },
+  /**
    * @generated from rpc codex.v1.AuthService.Refresh
    */
   refresh: {
     methodKind: "unary";
     input: typeof RefreshRequestSchema;
     output: typeof LoginResponseSchema;
+  },
+  /**
+   * @generated from rpc codex.v1.AuthService.Logout
+   */
+  logout: {
+    methodKind: "unary";
+    input: typeof LogoutRequestSchema;
+    output: typeof LogoutResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_codex_v1_auth, 0);

@@ -23,6 +23,22 @@ class Settings(BaseSettings):
     CODEX_REQUEST_TIMEOUT_SECONDS: float = 600.0
     CODEX_THREAD_REUSE_ENABLED: bool = True
     CODEX_REASONING_EFFORT: str = "medium"
+    # Bounded notification queue (per CodexClient instance). Drop-oldest на
+    # переповненні з WARN `app_server_notification_dropped`. Розмір треба
+    # сайзити під concurrent-turn-count на цей конкретний sidecar:
+    #   admin: 1 owner + ~50 trusted users → 400 starting point
+    #   guest: ~500 TG-юзерів → 1000+ під реальний burst
+    # Емпірика, моніторити через Bugsink.
+    CODEX_NOTIFICATION_QUEUE_MAX_ADMIN: int = 400
+    CODEX_NOTIFICATION_QUEUE_MAX_GUEST: int = 1000
+
+    # Server-side coalesce token-delta'ів у Connect-RPC stream: buffer
+    # послідовних `TokenEvent.delta` доки сумарний UTF-8 розмір ≥ цієї
+    # межі, потім flush одним `ChatEvent`. Знижує HTTP/2 frame overhead
+    # і тиск на upstream queue при concurrent гостях. 0 → вимикає coalesce
+    # (raw passthrough). 256 байт ≈ 1-2 рядки прози → непомітно у typewriter.
+    # ToolCall/Result/Done/Error завжди форсять flush + passthrough.
+    CHAT_TOKEN_COALESCE_BYTES: int = 256
     # Поріг "шторму" stale-notif'ів після resume: skip idle-timeout якщо
     # підряд приходить ≥N notif'ів від старого turn_id і 0 від нового.
     # Емпірика; калібрувати по `codex_stale_turn_notification_ignored`.
@@ -33,6 +49,10 @@ class Settings(BaseSettings):
     SPEECHMATICS_API_KEY: str = ""
     SPEECHMATICS_LANGUAGE: str = "auto"
     SPEECHMATICS_OPERATING_POINT: str = "enhanced"
+    # Upper-bound на один transcribe-job. TG voice ноти зазвичай 30-90s; 3хв з запасом.
+    STT_TIMEOUT_SECONDS: float = 180.0
+    # Polling cadence на /jobs/{id} у Speechmatics.
+    STT_POLL_INTERVAL_SECONDS: float = 1.5
 
     # --- Text-to-speech (Google Cloud TTS, REST + API key) ---
     GOOGLE_TTS_API_KEY: str = ""
@@ -49,6 +69,10 @@ class Settings(BaseSettings):
 
     # --- Object storage (MinIO local / R2 prod) ---
     STORAGE_BACKEND: str = "s3"  # s3 | dropbox | gdrive (future)
+    # Presigned URL TTL: default 1 година, hard-cap 24 години (захист від
+    # leaked links). Ops може налаштувати під свій security policy.
+    S3_PRESIGNED_DEFAULT_TTL_SECONDS: int = 3600
+    S3_PRESIGNED_MAX_TTL_SECONDS: int = 24 * 3600
     S3_ENDPOINT: str = "http://localhost:9000"
     # Browser-facing prefix/endpoint для presigned URLs.
     # У compose: S3_ENDPOINT=http://minio:9000 (internal),
@@ -86,12 +110,20 @@ class Settings(BaseSettings):
     JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_TTL_HOURS: int = 24
+    # JWT доставляється у HttpOnly cookie (per CLAUDE.md §5 — XSS-захист).
+    # `Secure` лишаємо False у dev (HTTP localhost відмовиться set'нути Secure);
+    # у prod виставляти True (HTTPS обов'язково).
+    COOKIES_SECURE: bool = False
 
     # --- MCP (Codex CLI ↔ FastAPI tools bridge) ---
     # Bearer token який Codex CLI шле у Authorization при stream-HTTP виклику
     # /mcp/streamable. Тільки шлях з docker-network доступний; токен — друга
     # лінія захисту. Empty = MCP routes відкриті, не для prod.
     MCP_CALLBACK_TOKEN: str = ""
+
+    # --- Health probe ---
+    # Docker healthcheck зовнішній timeout — 5s; внутрішній probe має fit'нутися.
+    HEALTH_PROBE_TIMEOUT_SECONDS: float = 3.0
 
     # --- Bugsink (Sentry-SDK-compatible error tracker) ---
     # Empty SENTRY_DSN → sentry_sdk.init no-op. BUGSINK_AUTH_TOKEN — Bearer

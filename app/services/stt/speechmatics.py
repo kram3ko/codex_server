@@ -9,10 +9,20 @@ from typing import BinaryIO
 import structlog
 from speechmatics.batch import (
     AsyncClient,
+    AuthenticationError,
+    BatchError,
+    ConfigurationError,
     FormatType,
     JobError,
     OperatingPoint,
     TranscriptionConfig,
+    TransportError,
+)
+from speechmatics.batch import (
+    ConnectionError as SpeechmaticsConnectionError,
+)
+from speechmatics.batch import (
+    TimeoutError as SpeechmaticsTimeoutError,
 )
 
 from app.config import settings
@@ -20,11 +30,6 @@ from app.services.stt.base import AudioTranscriptionError
 
 log = structlog.get_logger(__name__)
 
-# Upper-bound на один turn. TG voice ноти зазвичай 30-90s; 3хв з запасом.
-_TIMEOUT_S = 180.0
-# Polling cadence на /jobs/{id} — компроміс між швидким першим читанням і
-# не-перевантаженням Speechmatics rate limit.
-_POLL_S = 1.5
 # Speechmatics rejected job без мовлення → нам це не помилка, просто "транскрипту
 # нема". Підрядковий match по тексту exception, бо SDK не дає окремого type.
 _NO_SPEECH_MARKERS = ("no speech", "language identification")
@@ -73,18 +78,27 @@ class SpeechmaticsSTT:
                         audio_file=str(tmp_path),
                         transcription_config=config,
                     )
-                    async with asyncio.timeout(_TIMEOUT_S):
+                    async with asyncio.timeout(settings.STT_TIMEOUT_SECONDS):
                         text = await client.wait_for_completion(
                             job.id,
                             format_type=FormatType.TXT,
-                            polling_interval=_POLL_S,
+                            polling_interval=settings.STT_POLL_INTERVAL_SECONDS,
                         )
                 except JobError as exc:
                     if _is_no_speech(str(exc)):
                         log.info("speechmatics_no_speech", reason=str(exc)[:120])
                         return ""
                     raise AudioTranscriptionError(f"Speechmatics job failed: {exc}") from exc
-                except Exception as exc:  # noqa: BLE001 — SDK багатоликий, wrap in domain error
+                except (
+                    BatchError,
+                    AuthenticationError,
+                    ConfigurationError,
+                    SpeechmaticsConnectionError,
+                    SpeechmaticsTimeoutError,
+                    TransportError,
+                    OSError,
+                    TimeoutError,
+                ) as exc:
                     raise AudioTranscriptionError(
                         f"Speechmatics transcription failed: {exc}"
                     ) from exc

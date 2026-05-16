@@ -1,13 +1,14 @@
-// Connect-RPC transport — JSON over HTTP/2 to /api з двома interceptor'ами:
-// (1) Bearer injection з token-storage, (2) refresh-retry на UNAUTHENTICATED.
+// Connect-RPC transport — JSON over HTTP/2 до /api.
 //
-// Refresh-retry уникає circular import (auth.ts → transport.ts) через
-// `registerRefresh()` — auth-модуль реєструє callback на boot, до того
-// interceptor просто пропускає 401 далі.
+// JWT живе у HttpOnly cookie `codex_jwt` — браузер додає його автоматично
+// (через `credentials: 'include'`), а JavaScript його не бачить (CLAUDE.md §5).
+// Interceptor-Bearer більше не потрібен.
+//
+// Refresh-retry: на 401 викликаємо `refreshFn` (зареєстрованим у `auth.ts`),
+// яка робить `AuthService.Refresh` — сервер видає свіжий cookie, і retry
+// проходить уже з оновленою сесією. `registerRefresh` уникає circular import.
 import { Code, ConnectError, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
-
-import { getToken } from "./token";
 
 type RefreshFn = () => Promise<boolean>;
 
@@ -16,14 +17,6 @@ let refreshFn: RefreshFn | null = null;
 export function registerRefresh(fn: RefreshFn): void {
   refreshFn = fn;
 }
-
-const authInterceptor: Interceptor = (next) => async (req) => {
-  const token = getToken();
-  if (token) {
-    req.header.set("Authorization", `Bearer ${token}`);
-  }
-  return next(req);
-};
 
 const refreshRetryInterceptor: Interceptor = (next) => async (req) => {
   try {
@@ -38,7 +31,6 @@ const refreshRetryInterceptor: Interceptor = (next) => async (req) => {
     }
     const refreshed = await refreshFn();
     if (!refreshed) throw err;
-    // На retry authInterceptor сам підставить свіжий token з getToken().
     return next(req);
   }
 };
@@ -46,7 +38,7 @@ const refreshRetryInterceptor: Interceptor = (next) => async (req) => {
 export const transport = createConnectTransport({
   baseUrl: "/api",
   useBinaryFormat: false,
-  // Order matters: refreshRetry зовнішній → ловить 401 від внутрішніх;
-  // на retry знов проходить через authInterceptor (свіжий Bearer).
-  interceptors: [refreshRetryInterceptor, authInterceptor]
+  interceptors: [refreshRetryInterceptor],
+  // Браузер шле HttpOnly cookie автоматично за умови credentials:'include'.
+  fetch: (input, init) => fetch(input, { ...init, credentials: "include" })
 });

@@ -12,10 +12,10 @@ in-process — все живе у Postgres / Redis, fresh CodexClient per turn.
 import asyncio
 import contextlib
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.base import SessionLocal
 from app.services.chats.default import chat_service
@@ -23,20 +23,30 @@ from app.services.chats.default import chat_service
 log = structlog.get_logger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class SessionBootstrap:
-    db_user_id: int
-    db_chat_id: int
-    is_admin: bool
+class SessionBootstrap(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    db_user_id: int = Field(description="DB users.id для цієї сесії.")
+    db_chat_id: int = Field(description="DB chats.id для цієї сесії.")
+    is_admin: bool = Field(description="Який sidecar обслуговує (admin vs guest).")
 
 
-@dataclass(slots=True)
-class ChatSession:
-    db_chat_id: int
-    db_user_id: int
-    is_admin: bool
-    turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    current_turn_task: asyncio.Task | None = None
+class ChatSession(BaseModel):
+    """Mutating runtime state — не wire contract. asyncio.Lock + Task — internal."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    db_chat_id: int = Field(description="DB chats.id для цього session bucket'у.")
+    db_user_id: int = Field(description="DB users.id який володіє чатом.")
+    is_admin: bool = Field(description="Sidecar роль (admin/guest).")
+    turn_lock: asyncio.Lock = Field(
+        default_factory=asyncio.Lock,
+        description="Per-chat serialization для concurrent повідомлень того ж юзера.",
+    )
+    current_turn_task: asyncio.Task | None = Field(
+        default=None,
+        description="Running turn task для /stop button (cancel target).",
+    )
 
 
 class ChatSessionStore[K, B](ABC):
@@ -141,14 +151,15 @@ class ChatSessionStore[K, B](ABC):
     async def _bootstrap(self, key: K, bootstrap_arg: B) -> SessionBootstrap:
         """Resolve surface key into DB user/chat ids."""
 
-    async def _on_turn_interrupted(self, session: ChatSession) -> None:  # noqa: B027
+    async def _on_turn_interrupted(self, session: ChatSession) -> None:
         """Optional hook: surface може записати TURN_INTERRUPTED у свій журнал."""
+        return None
 
     @staticmethod
     async def _safe_resolve(future: asyncio.Future[ChatSession]) -> ChatSession | None:
         try:
             return await future
-        except Exception as exc:  # noqa: BLE001 — future несе будь-яку failure від setter'а
+        except Exception as exc:
             log.warning("chat_session_resolve_failed", error=str(exc))
             return None
 

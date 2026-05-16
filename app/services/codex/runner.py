@@ -69,6 +69,11 @@ async def open_codex_turn(
         initial_thread_id=initial,
         on_thread_change=_thread_change_callback(db_chat_id),
         reasoning_effort=settings.CODEX_REASONING_EFFORT,
+        notification_queue_max=(
+            settings.CODEX_NOTIFICATION_QUEUE_MAX_ADMIN
+            if is_admin
+            else settings.CODEX_NOTIFICATION_QUEUE_MAX_GUEST
+        ),
     )
     await client.connect()
     try:

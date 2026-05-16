@@ -40,6 +40,7 @@ lint = [
     "ruff>=0.15.12",
     "pyright>=1.1.409",
     "types-aiobotocore-s3>=3.7.0",
+    "pre-commit>=4.0.1",
 ]
 test = [
     "pytest>=9.0.3",
@@ -59,6 +60,36 @@ extend-exclude = ["app/grpc_generated"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+
+# Legitimate broad-except patterns (per CLAUDE.md §3 §7). Inline `# noqa`
+# заборонено — все що залишилось після narrow'у живе тут з пояснення-чому.
+[tool.ruff.lint.per-file-ignores]
+# Декоратор-registration pattern: підмодулі `tools/*` мають side-effect
+# реєструють @mcp.tool — імпорт через `*` потрібен.
+"app/mcp/__init__.py" = ["F401", "F403"]
+# RPC server-stream backstop: must always yield ErrorEvent, не можна давати
+# unhandled exception завалити Connect-RPC stream silently.
+"app/rpc/chat/stream.py" = ["BLE001"]
+# User-supplied callback isolation: викликаємо on_thread_change від caller'а,
+# що може кинути будь-що — isolate щоб не зламати reader-loop.
+"app/services/codex/client.py" = ["BLE001"]
+# Background read-loop: WebSocket consumer крутиться в asyncio.Task до close();
+# будь-який unhandled exc → silent crash → всі pending future'и підвисають.
+"app/services/codex/transport.py" = ["BLE001"]
+# Future-from-setter resolver: setter може кинути будь-що, ловимо щоб
+# вернути None замість CancelledError у getter'у.
+"app/services/sessions/store.py" = ["BLE001"]
+# asyncio done-callback: Python спеціально вимагає не пускати exc з callback,
+# інакше Task warning + сторонні task'и не отримують сигнал.
+"app/tg/polling.py" = ["BLE001"]
+# TG turn backstop: aiogram polling-loop не повинен впасти від bug у одному
+# turn-handler'і — інакше бот замовкає на всіх юзерів.
+"app/tg/turn/runner.py" = ["BLE001"]
+# markdown-it RendererHTML interface override: signature `(tokens, idx, options, env)`
+# зафіксована библотекою; не можна префіксувати unused params `_*` бо pyright
+# каже `reportIncompatibleMethodOverride`. Імена потрібно зберегти, тому ARG002
+# тут — by design.
+"app/tg/markdown.py" = ["ARG001", "ARG002"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

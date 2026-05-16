@@ -31,6 +31,7 @@ from app.services.codex.events import (
     Attachment,
     DoneEvent,
     ErrorEvent,
+    TokenEvent,
     ToolCallRecord,
 )
 from app.services.codex.runner import quarantine_thread
@@ -59,15 +60,11 @@ async def stream_turn(
             persisted_chat_id, client.current_thread_id, is_admin=True
         )
         if not registered:
-            yield error_event(
-                CodexErrorCode.TURN_BUSY, "another turn is active for this chat"
-            )
+            yield error_event(CodexErrorCode.TURN_BUSY, "another turn is active for this chat")
             return
 
     async def _on_started(turn_id: str, thread_id: str) -> None:
-        promoted = await turn_registry.promote_pending(
-            persisted_chat_id, thread_id, turn_id
-        )
+        promoted = await turn_registry.promote_pending(persisted_chat_id, thread_id, turn_id)
         if not promoted:
             log.warning(
                 "registry_promote_lost",
@@ -127,6 +124,24 @@ async def stream_turn(
         on_item_boundary=_on_item_boundary,
     )
 
+    # Coalesce TokenEvent deltas щоб зменшити кількість HTTP/2 DATA фреймів і
+    # тиск на upstream queue при concurrent гостях. Buffer flush'иться при:
+    # (1) size >= settings.CHAT_TOKEN_COALESCE_BYTES; (2) будь-який не-Token event;
+    # (3) DoneEvent/ErrorEvent. event_bus.publish + collector.absorb бачать
+    # кожен event індивідуально — coalesce впливає тільки на client-facing yield.
+    coalesce_bytes = settings.CHAT_TOKEN_COALESCE_BYTES
+    pending_text: list[str] = []
+    pending_size = 0
+
+    def _flush_token_buffer() -> chat_pb2.ChatEvent | None:
+        nonlocal pending_text, pending_size
+        if not pending_text:
+            return None
+        merged = "".join(pending_text)
+        pending_text = []
+        pending_size = 0
+        return chat_pb2.ChatEvent(token=chat_pb2.TokenEvent(delta=merged))
+
     try:
         async for ev in stream:
             events_count += 1
@@ -135,6 +150,9 @@ async def stream_turn(
             collector.absorb(ev)
             match ev:
                 case ErrorEvent():
+                    flushed = _flush_token_buffer()
+                    if flushed is not None:
+                        yield flushed
                     yield chat_event_to_pb(ev)
                     await _emit_event(
                         persisted_chat_id,
@@ -144,8 +162,21 @@ async def stream_turn(
                     )
                     return
                 case DoneEvent():
+                    flushed = _flush_token_buffer()
+                    if flushed is not None:
+                        yield flushed
                     break
+                case TokenEvent(delta=delta) if coalesce_bytes > 0:
+                    pending_text.append(delta)
+                    pending_size += len(delta.encode("utf-8"))
+                    if pending_size >= coalesce_bytes:
+                        flushed = _flush_token_buffer()
+                        if flushed is not None:
+                            yield flushed
                 case _:
+                    flushed = _flush_token_buffer()
+                    if flushed is not None:
+                        yield flushed
                     yield chat_event_to_pb(ev)
     except turn_registry.TurnOwnershipLost:
         yield error_event(
@@ -239,7 +270,7 @@ async def stream_turn(
             {"source": "web", "partial_len": len(collector.buffer)},
         )
         raise
-    except Exception as exc:  # noqa: BLE001 — backstop для RPC stream'у, lift у ErrorEvent
+    except Exception as exc:
         log.exception("web_rpc_codex_run_turn_failed")
         yield error_event(CodexErrorCode.CODEX_ERROR, str(exc))
         await _emit_event(
@@ -334,6 +365,10 @@ async def _persist_assistant_turn(
         else:
             await message_service.update_text(db, msg_id, text, meta=meta if meta else None)
             assistant_msg = await db.get(Message, msg_id)
+            if assistant_msg is None:
+                # msg_id має існувати — щойно update'нули. None означає race
+                # з DELETE chat'у; кидаємо щоб caller обробив як stream_dropped.
+                raise LookupError(f"message {msg_id} disappeared mid-turn")
         payload: dict[str, Any] = {
             "final_text_len": len(text),
             "tool_calls": len(tool_calls),

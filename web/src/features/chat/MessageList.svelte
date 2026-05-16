@@ -76,7 +76,7 @@
     if (!container || !topSentinel) return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (!entries[0].isIntersecting) return;
+        if (!entries[0]?.isIntersecting) return;
         if (!hasMoreOlder || loadingOlder || !container) return;
         scrollAnchor = {
           scrollHeight: container.scrollHeight,

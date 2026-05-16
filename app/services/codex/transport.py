@@ -12,18 +12,20 @@ Lifecycle: `connect()` ідемпотентний; `close()` final, reconnect п
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from typing import Any
 
 import orjson
 import structlog
 import websockets
+from pydantic import BaseModel, ConfigDict, Field
 
 log = structlog.get_logger(__name__)
 
 _JSONRPC_VERSION = "2.0"
 _DEFAULT_REQUEST_TIMEOUT = 60.0
-_NOTIFICATION_QUEUE_MAX = 1000
+# Default — per-CodexClient. Caller (runner.py) override'ить через ctor
+# залежно від sidecar роль (admin: ~400, guest: ~1000+ для 500 юзерів).
+_DEFAULT_NOTIFICATION_QUEUE_MAX = 1000
 # Sidecar може transient'но не resolv'итись (DNS прогрів) одразу після свого старту.
 _CONNECT_RETRIES = 3
 _CONNECT_BACKOFF_S = 1.5
@@ -38,17 +40,20 @@ class AppServerError(RuntimeError):
         self.data = data
 
 
-@dataclass(frozen=True, slots=True)
-class Notification:
+class Notification(BaseModel):
     """Server-initiated notification (no id, no response expected).
 
     `turn_id` витягається з `params.turnId` для турн-скоупних нот; для
     session-level (`initialized` тощо) лишається None.
     """
 
-    method: str
-    params: dict[str, Any]
-    turn_id: str | None
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    method: str = Field(description="JSON-RPC method name з notification frame.")
+    params: dict[str, Any] = Field(description="JSON-RPC params object (нормалізований у dict).")
+    turn_id: str | None = Field(
+        default=None, description="`params.turnId` коли notification турн-scoped."
+    )
 
 
 class AppServerClient:
@@ -64,6 +69,7 @@ class AppServerClient:
         url: str,
         auth_token: str | None = None,
         request_timeout: float = _DEFAULT_REQUEST_TIMEOUT,
+        notification_queue_max: int = _DEFAULT_NOTIFICATION_QUEUE_MAX,
     ) -> None:
         self._url = url
         self._auth_token = auth_token
@@ -73,7 +79,7 @@ class AppServerClient:
         # None — close-sentinel; кладеться у `close()` щоб `notifications()`
         # консьюмер прокинувся без polling-таймауту.
         self._notifications: asyncio.Queue[Notification | None] = asyncio.Queue(
-            maxsize=_NOTIFICATION_QUEUE_MAX,
+            maxsize=notification_queue_max,
         )
         self._ws: websockets.ClientConnection | None = None
         self._reader_task: asyncio.Task | None = None
@@ -195,7 +201,7 @@ class AppServerClient:
             raise
         except websockets.ConnectionClosed:
             log.info("app_server_ws_closed")
-        except Exception:  # noqa: BLE001 — backstop для read-loop, must never crash silently
+        except Exception:
             log.exception("app_server_reader_error")
         finally:
             # Reader умер — транспорт втрачено, але не explicit close;

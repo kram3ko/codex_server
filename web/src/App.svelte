@@ -3,34 +3,65 @@
 
   import { auth } from "./features/auth/auth";
   import Login from "./features/auth/Login.svelte";
+  import Signup from "./features/auth/Signup.svelte";
   import Chat from "./features/chat/Chat.svelte";
   import Notes from "./features/notes/Notes.svelte";
   import { theme } from "./shared/lib/theme.svelte";
 
   type Route = "chat" | "notes";
+  type AuthView = "login" | "signup";
+
+  // URL `?invite=XYZ` → одразу signup-форма з префілленим токеном.
+  const inviteFromUrl = new URLSearchParams(window.location.search).get("invite") ?? "";
 
   let signedIn = $state(auth.signedIn);
   let route = $state<Route>("chat");
+  let authView = $state<AuthView>(inviteFromUrl ? "signup" : "login");
 
   $effect(() => {
-    const handler = () => { signedIn = false; };
-    window.addEventListener("auth:logout", handler);
-    return () => window.removeEventListener("auth:logout", handler);
+    // Bootstrap refresh у auth.ts може долинути після маунту → синхронізуємось
+    // через `auth:login`. Logout — симетрично.
+    const onLoginEvent = () => { signedIn = true; };
+    const onLogoutEvent = () => { signedIn = false; };
+    window.addEventListener("auth:login", onLoginEvent);
+    window.addEventListener("auth:logout", onLogoutEvent);
+    return () => {
+      window.removeEventListener("auth:login", onLoginEvent);
+      window.removeEventListener("auth:logout", onLogoutEvent);
+    };
   });
 
   function onLogin() {
     signedIn = true;
     route = "chat";
+    if (inviteFromUrl) {
+      // Чистимо `?invite=...` з URL після успішного signup, щоб f5 не подразнював.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("invite");
+      window.history.replaceState({}, "", url.toString());
+    }
   }
 
   function logout() {
-    auth.logout();
+    void auth.logout();
     signedIn = false;
+    authView = "login";
   }
 </script>
 
 {#if !signedIn}
-  <Login onlogin={onLogin} />
+  {#if authView === "signup"}
+    <Signup
+      onlogin={onLogin}
+      onswitch={() => (authView = "login")}
+      initialInvite={inviteFromUrl}
+    />
+  {:else}
+    <Login
+      onlogin={onLogin}
+      onswitch={() => (authView = "signup")}
+    />
+  {/if}
 {:else}
   <div class="min-h-screen text-[var(--color-text)]">
     <header class="glass sticky top-0 z-20 flex h-14 items-center justify-between px-4">
