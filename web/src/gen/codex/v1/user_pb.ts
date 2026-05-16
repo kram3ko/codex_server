@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file codex/v1/user.proto.
  */
 export const file_codex_v1_user: GenFile = /*@__PURE__*/
-  fileDesc("ChNjb2RleC92MS91c2VyLnByb3RvEghjb2RleC52MSK0AQoEVXNlchIKCgJpZBgBIAEoAxIXCgp0Z191c2VyX2lkGAIgASgDSACIAQESEgoFZW1haWwYAyABKAlIAYgBARIZCgxkaXNwbGF5X25hbWUYBCABKAlIAogBARIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEINCgtfdGdfdXNlcl9pZEIICgZfZW1haWxCDwoNX2Rpc3BsYXlfbmFtZSILCglNZVJlcXVlc3QiJwoPVXBkYXRlTWVSZXF1ZXN0EhQKDGRpc3BsYXlfbmFtZRgBIAEoCTJvCgtVc2VyU2VydmljZRIpCgJNZRITLmNvZGV4LnYxLk1lUmVxdWVzdBoOLmNvZGV4LnYxLlVzZXISNQoIVXBkYXRlTWUSGS5jb2RleC52MS5VcGRhdGVNZVJlcXVlc3QaDi5jb2RleC52MS5Vc2VyYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChNjb2RleC92MS91c2VyLnByb3RvEghjb2RleC52MSLCAQoEVXNlchIKCgJpZBgBIAEoAxIXCgp0Z191c2VyX2lkGAIgASgDSACIAQESEgoFZW1haWwYAyABKAlIAYgBARIZCgxkaXNwbGF5X25hbWUYBCABKAlIAogBARIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIMCgRyb2xlGAYgASgJQg0KC190Z191c2VyX2lkQggKBl9lbWFpbEIPCg1fZGlzcGxheV9uYW1lIgsKCU1lUmVxdWVzdCInCg9VcGRhdGVNZVJlcXVlc3QSFAoMZGlzcGxheV9uYW1lGAEgASgJMm8KC1VzZXJTZXJ2aWNlEikKAk1lEhMuY29kZXgudjEuTWVSZXF1ZXN0Gg4uY29kZXgudjEuVXNlchI1CghVcGRhdGVNZRIZLmNvZGV4LnYxLlVwZGF0ZU1lUmVxdWVzdBoOLmNvZGV4LnYxLlVzZXJiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message codex.v1.User
@@ -42,6 +42,13 @@ export type User = Message<"codex.v1.User"> & {
    * @generated from field: google.protobuf.Timestamp created_at = 5;
    */
   createdAt?: Timestamp | undefined;
+
+  /**
+   * StrEnum value: "USER" або "ADMIN" — frontend conditionally renders Admin tab.
+   *
+   * @generated from field: string role = 6;
+   */
+  role: string;
 };
 
 /**

@@ -66,6 +66,7 @@ from app.rpc.uploads import UploadsRPC
 from app.rpc.user import UserRPC
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
+from app.services.chats import turn_runner
 from app.services.errors.default import bugsink_client
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
@@ -85,6 +86,9 @@ async def lifespan(_app: FastAPI):
         cancelled = await tg_bot_service.interrupt_active_turns()
         if cancelled:
             log.info("app_shutdown_turns_interrupted", count=cancelled)
+        bg = await turn_runner.cancel_all()
+        if bg:
+            log.info("app_shutdown_bg_turns_cancelled", count=bg)
         await tg_bot_service.stop()
         await bugsink_client.aclose()
         await cache.aclose()

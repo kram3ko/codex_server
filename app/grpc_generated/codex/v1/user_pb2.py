@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x63odex/v1/user.proto\x12\x08\x63odex.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb4\x01\n\x04User\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x17\n\ntg_user_id\x18\x02 \x01(\x03H\x00\x88\x01\x01\x12\x12\n\x05\x65mail\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x19\n\x0c\x64isplay_name\x18\x04 \x01(\tH\x02\x88\x01\x01\x12.\n\ncreated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\r\n\x0b_tg_user_idB\x08\n\x06_emailB\x0f\n\r_display_name\"\x0b\n\tMeRequest\"\'\n\x0fUpdateMeRequest\x12\x14\n\x0c\x64isplay_name\x18\x01 \x01(\t2o\n\x0bUserService\x12)\n\x02Me\x12\x13.codex.v1.MeRequest\x1a\x0e.codex.v1.User\x12\x35\n\x08UpdateMe\x12\x19.codex.v1.UpdateMeRequest\x1a\x0e.codex.v1.Userb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x63odex/v1/user.proto\x12\x08\x63odex.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc2\x01\n\x04User\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x17\n\ntg_user_id\x18\x02 \x01(\x03H\x00\x88\x01\x01\x12\x12\n\x05\x65mail\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x19\n\x0c\x64isplay_name\x18\x04 \x01(\tH\x02\x88\x01\x01\x12.\n\ncreated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x0c\n\x04role\x18\x06 \x01(\tB\r\n\x0b_tg_user_idB\x08\n\x06_emailB\x0f\n\r_display_name\"\x0b\n\tMeRequest\"\'\n\x0fUpdateMeRequest\x12\x14\n\x0c\x64isplay_name\x18\x01 \x01(\t2o\n\x0bUserService\x12)\n\x02Me\x12\x13.codex.v1.MeRequest\x1a\x0e.codex.v1.User\x12\x35\n\x08UpdateMe\x12\x19.codex.v1.UpdateMeRequest\x1a\x0e.codex.v1.Userb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,11 +33,11 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'codex.v1.user_pb2', _global
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_USER']._serialized_start=67
-  _globals['_USER']._serialized_end=247
-  _globals['_MEREQUEST']._serialized_start=249
-  _globals['_MEREQUEST']._serialized_end=260
-  _globals['_UPDATEMEREQUEST']._serialized_start=262
-  _globals['_UPDATEMEREQUEST']._serialized_end=301
-  _globals['_USERSERVICE']._serialized_start=303
-  _globals['_USERSERVICE']._serialized_end=414
+  _globals['_USER']._serialized_end=261
+  _globals['_MEREQUEST']._serialized_start=263
+  _globals['_MEREQUEST']._serialized_end=274
+  _globals['_UPDATEMEREQUEST']._serialized_start=276
+  _globals['_UPDATEMEREQUEST']._serialized_end=315
+  _globals['_USERSERVICE']._serialized_start=317
+  _globals['_USERSERVICE']._serialized_end=428
 # @@protoc_insertion_point(module_scope)

@@ -53,7 +53,7 @@ def to_struct(payload: dict[str, Any] | None) -> Struct | None:
 
 
 def user_to_pb(u: User) -> user_pb2.User:
-    msg = user_pb2.User(id=u.id, created_at=to_ts(u.created_at))
+    msg = user_pb2.User(id=u.id, role=u.role.value, created_at=to_ts(u.created_at))
     if u.tg_user_id is not None:
         msg.tg_user_id = u.tg_user_id
     if u.email is not None:
