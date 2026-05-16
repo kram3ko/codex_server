@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Copy, Plus, Trash2, Users } from "lucide-svelte";
+  import { Copy, Globe, Plus, Send, Trash2, Users } from "lucide-svelte";
   import { onMount } from "svelte";
 
   import { adminClient } from "../../shared/lib/clients";
@@ -174,9 +174,21 @@
                 <span class="text-xs text-[var(--color-text-muted)]">{u.email}</span>
               {/if}
             </div>
-            <span class="rounded-md bg-[var(--color-accent-soft)] px-2 py-0.5 text-xs font-medium text-[var(--color-accent)]">
-              {roleLabel(u.role)}
-            </span>
+            <div class="flex items-center gap-1.5">
+              {#if u.email}
+                <span class="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-muted)]" title="Web account">
+                  <Globe size={12} />
+                </span>
+              {/if}
+              {#if u.tgUserId}
+                <span class="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[oklch(70%_0.16_230/0.4)] bg-[oklch(70%_0.16_230/0.12)] text-[oklch(70%_0.16_230)]" title="Telegram (id: {u.tgUserId})">
+                  <Send size={12} />
+                </span>
+              {/if}
+              <span class="inline-flex h-6 w-14 items-center justify-center rounded-md bg-[var(--color-accent-soft)] text-xs font-medium text-[var(--color-accent)]">
+                {roleLabel(u.role)}
+              </span>
+            </div>
           </li>
         {/each}
       </ul>
