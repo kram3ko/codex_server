@@ -55,13 +55,9 @@ async def stream_turn(
     collector = StreamCollector()
     partial_msg_id: int | None = None
 
-    if client.current_thread_id:
-        registered = await turn_registry.try_register_pending(
-            persisted_chat_id, client.current_thread_id, is_admin=True
-        )
-        if not registered:
-            yield error_event(CodexErrorCode.TURN_BUSY, "another turn is active for this chat")
-            return
+    # `try_register_pending` тепер caller's відповідальність (turn_runner._run
+    # реєструє синхронно до spawn-ready сигналу). Тут — лише `promote_pending`
+    # коли codex поверне turn_id.
 
     async def _on_started(turn_id: str, thread_id: str) -> None:
         promoted = await turn_registry.promote_pending(persisted_chat_id, thread_id, turn_id)

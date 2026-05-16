@@ -200,7 +200,7 @@ class ChatRPC(ChatProtocol):
             # Decouple: turn live'ає в background task, переживає browser disconnect.
             # RPC = просто reader Redis Stream'у; rate-limit release ownership
             # передається background'у.
-            turn_runner.spawn(
+            ready = turn_runner.spawn(
                 chat_id=persisted_chat_id,
                 user_pk=user_pk,
                 rl_user=user,
@@ -211,6 +211,12 @@ class ChatRPC(ChatProtocol):
                 is_admin=True,
             )
             bg_owns_release = True
+
+            # Sync point: чекаємо поки background встигне `try_register_pending`
+            # (або зрепортить помилку у stream). Без цього tail() бейлиться на
+            # першому ж empty-XREAD бо registry ще не наповнений.
+            # `finally: ready.set()` у `_run` гарантує що signal завжди прийде.
+            await ready.wait()
 
             async for event in turn_stream.tail(persisted_chat_id, after_id=""):
                 yield event
