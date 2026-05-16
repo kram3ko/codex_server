@@ -16,21 +16,12 @@ from app.config import settings
 log = structlog.get_logger(__name__)
 
 
-def build_cache() -> Redis:
-    log.info("redis_client_built", host=urlparse(settings.REDIS_URL).hostname, mode="text")
+def build_cache(*, decode_responses: bool = True) -> Redis:
+    mode = "text" if decode_responses else "binary"
+    log.info("redis_client_built", host=urlparse(settings.REDIS_URL).hostname, mode=mode)
     return from_url(
         settings.REDIS_URL,
         password=settings.REDIS_PASSWORD or None,
-        decode_responses=True,
-        health_check_interval=30,
-    )
-
-
-def build_binary_cache() -> Redis:
-    log.info("redis_client_built", host=urlparse(settings.REDIS_URL).hostname, mode="binary")
-    return from_url(
-        settings.REDIS_URL,
-        password=settings.REDIS_PASSWORD or None,
-        decode_responses=False,
+        decode_responses=decode_responses,
         health_check_interval=30,
     )
