@@ -40,13 +40,11 @@ async def publish(chat_id: int, event: chat_pb2.ChatEvent) -> str:
 
 
 async def tail(chat_id: int, after_id: str) -> AsyncIterator[chat_pb2.ChatEvent]:
-    """Async iterator: yield ChatEvent з stream'у починаючи з `after_id`
-    (порожній → "0"). BLOCK на нові events; виходить коли done/error,
-    `turn_registry` показує що турн завершився, або client cancel'ить.
-    Reg-check на empty XREAD — захист від нескінченного wait після cleanup.
-    Caller повинен гарантувати що turn_registry entry існує до першого
-    `tail()` виклику (інакше bail на empty XREAD)."""
-    cursor = after_id or "0"
+    """Yield ChatEvent з stream'у. Порожній `after_id` → `$` (лише нові,
+    стрім shared across turns, leftover-events попереднього turn-у дадуть
+    duplicate). Явний `after_id` → replay (TailTurn resume). Виходить на
+    done/error або коли `turn_registry` порожній на empty XREAD."""
+    cursor = after_id or "$"
     while True:
         response = await binary_cache.xread({_key(chat_id): cursor}, block=_TAIL_BLOCK_MS, count=64)
         if not response:
