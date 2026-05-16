@@ -1,19 +1,19 @@
 """Redis Stream-based event log per chat — durable buffer для resume-on-reconnect.
 
-Each `ChatEvent` (proto bytes) write'иться у `chat:{chat_id}:events` зі
+Each `ChatEvent` (raw proto bytes) write'иться у `chat:{chat_id}:events` зі
 sliding cap (MAXLEN ~ N events) + TTL 1 година. Client'и читають через
 `TailTurnRequest.after_id` (`XREAD ... BLOCK`).
 
-Key cleanup: `XADD ~ MAXLEN 500` тримає тільки останні 500 events;
-`EXPIRE` на 1 годину — захист від накопичення мертвих ключів.
+Bytes path: використовуємо `binary_cache` (`decode_responses=False`), бо
+protobuf payload може містити НЕ-UTF8 байти, які ламали б text-decoder
+основного `cache`-клієнта. Це канонічний redis-py pattern — окремий pool
+per `decode_responses` mode.
 """
 
-import asyncio
 from collections.abc import AsyncIterator
-from typing import Any
 
 from app.grpc_generated.codex.v1 import chat_pb2
-from app.services.cache.default import cache
+from app.services.cache.default import binary_cache
 from app.services.codex import turn_registry
 
 _EVENTS_KEY = "chat:{}:events"
@@ -30,16 +30,13 @@ def _key(chat_id: int) -> str:
     return _EVENTS_KEY.format(chat_id)
 
 
-def _decode(value: bytes | str) -> str:
-    return value.decode() if isinstance(value, bytes) else value
-
-
 async def publish(chat_id: int, event: chat_pb2.ChatEvent) -> str:
     """XADD event у stream, повертає assigned event_id."""
-    payload: Any = {"pb": event.SerializeToString()}
-    raw_id: Any = await cache.xadd(_key(chat_id), payload, maxlen=_MAX_EVENTS, approximate=True)
-    await cache.expire(_key(chat_id), _EVENTS_TTL_S)
-    return _decode(raw_id)
+    raw_id = await binary_cache.xadd(
+        _key(chat_id), {"pb": event.SerializeToString()}, maxlen=_MAX_EVENTS, approximate=True
+    )
+    await binary_cache.expire(_key(chat_id), _EVENTS_TTL_S)
+    return raw_id.decode("ascii")
 
 
 async def tail(chat_id: int, after_id: str) -> AsyncIterator[chat_pb2.ChatEvent]:
@@ -49,20 +46,16 @@ async def tail(chat_id: int, after_id: str) -> AsyncIterator[chat_pb2.ChatEvent]
     Reg-check на empty XREAD — захист від нескінченного wait після cleanup."""
     cursor = after_id or "0"
     while True:
-        raw: Any = cache.xread({_key(chat_id): cursor}, block=_TAIL_BLOCK_MS, count=64)
-        if asyncio.iscoroutine(raw):
-            raw = await raw
-        if not raw:
+        response = await binary_cache.xread({_key(chat_id): cursor}, block=_TAIL_BLOCK_MS, count=64)
+        if not response:
             if await turn_registry.get(chat_id) is None:
                 return
             continue
-        response: list[Any] = raw
         for _stream, entries in response:
             for entry_id, fields in entries:
-                eid = _decode(entry_id)
-                pb_bytes = fields.get(b"pb") or fields.get("pb") or b""
+                eid = entry_id.decode("ascii")
                 event = chat_pb2.ChatEvent()
-                event.ParseFromString(pb_bytes)
+                event.ParseFromString(fields[b"pb"])
                 event.event_id = eid
                 yield event
                 cursor = eid
@@ -72,4 +65,4 @@ async def tail(chat_id: int, after_id: str) -> AsyncIterator[chat_pb2.ChatEvent]
 
 async def cleanup(chat_id: int) -> None:
     """Stream живе ще 60s після завершення турну на випадок останнього reconnect."""
-    await cache.expire(_key(chat_id), 60)
+    await binary_cache.expire(_key(chat_id), 60)
