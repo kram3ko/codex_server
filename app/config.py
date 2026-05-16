@@ -114,6 +114,8 @@ class Settings(BaseSettings):
     # `Secure` лишаємо False у dev (HTTP localhost відмовиться set'нути Secure);
     # у prod виставляти True (HTTPS обов'язково).
     COOKIES_SECURE: bool = False
+    # CORS allowlist — explicit origins, wildcard несумісне з cookie credentials.
+    CORS_ALLOWED_ORIGINS: list[str] = []
 
     # --- MCP (Codex CLI ↔ FastAPI tools bridge) ---
     # Bearer token який Codex CLI шле у Authorization при stream-HTTP виклику
@@ -146,6 +148,13 @@ class Settings(BaseSettings):
         if not stripped:
             return set()
         return {int(part) for part in stripped.split(",") if part.strip()}
+
+    @field_validator("CORS_ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return [part.strip() for part in value.split(",") if part.strip()]
 
     @model_validator(mode="after")
     def _validate_jwt_secret(self) -> Settings:

@@ -22,16 +22,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # --- notes.user_id ----------------------------------------------------
-    # Backfill на першого ADMIN-а якщо випадково є існуючі рядки (порожньо
-    # на 2026-05-16; решта — гарантія детермінізму на тест-БД).
-    op.add_column("notes", sa.Column("user_id", sa.BigInteger(), nullable=True))
-    op.execute(
-        "UPDATE notes SET user_id = ("
-        "  SELECT id FROM users WHERE role = 'ADMIN' ORDER BY id LIMIT 1"
-        ") WHERE user_id IS NULL"
-    )
-    op.execute("DELETE FROM notes WHERE user_id IS NULL")
-    op.alter_column("notes", "user_id", nullable=False)
+    # ADD COLUMN NOT NULL без DEFAULT — Postgres дозволяє на порожній таблиці;
+    # на непорожній відмовиться сам (немає "правильного" owner'а для legacy
+    # рядків, тому fail loud > arbitrary assign).
+    op.add_column("notes", sa.Column("user_id", sa.BigInteger(), nullable=False))
     op.create_foreign_key(
         "fk_notes_user_id_users",
         "notes",

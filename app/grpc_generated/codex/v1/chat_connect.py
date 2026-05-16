@@ -34,6 +34,9 @@ class ChatService(Protocol):
     def run_turn(self, request: codex_dot_v1_dot_chat__pb2.RunTurnRequest, ctx: RequestContext) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    def tail_turn(self, request: codex_dot_v1_dot_chat__pb2.TailTurnRequest, ctx: RequestContext) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
     async def interrupt_turn(self, request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
@@ -98,6 +101,16 @@ class ChatServiceASGIApplication(ConnectASGIApplication[ChatService]):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=svc.run_turn,
+                ),
+                "/codex.v1.ChatService/TailTurn": Endpoint.server_stream(
+                    method=MethodInfo(
+                        name="TailTurn",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.TailTurnRequest,
+                        output=codex_dot_v1_dot_chat__pb2.ChatEvent,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.tail_turn,
                 ),
                 "/codex.v1.ChatService/InterruptTurn": Endpoint.unary(
                     method=MethodInfo(
@@ -243,6 +256,26 @@ class ChatServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    def tail_turn(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.TailTurnRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="TailTurn",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.TailTurnRequest,
+                output=codex_dot_v1_dot_chat__pb2.ChatEvent,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
     async def interrupt_turn(
         self,
         request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest,
@@ -318,6 +351,8 @@ class ChatServiceSync(Protocol):
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def run_turn(self, request: codex_dot_v1_dot_chat__pb2.RunTurnRequest, ctx: RequestContext) -> Iterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def tail_turn(self, request: codex_dot_v1_dot_chat__pb2.TailTurnRequest, ctx: RequestContext) -> Iterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def interrupt_turn(self, request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def steer_turn(self, request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
@@ -379,6 +414,16 @@ class ChatServiceWSGIApplication(ConnectWSGIApplication):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=service.run_turn,
+                ),
+                "/codex.v1.ChatService/TailTurn": EndpointSync.server_stream(
+                    method=MethodInfo(
+                        name="TailTurn",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.TailTurnRequest,
+                        output=codex_dot_v1_dot_chat__pb2.ChatEvent,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.tail_turn,
                 ),
                 "/codex.v1.ChatService/InterruptTurn": EndpointSync.unary(
                     method=MethodInfo(
@@ -517,6 +562,26 @@ class ChatServiceClientSync(ConnectClientSync):
                 name="RunTurn",
                 service_name="codex.v1.ChatService",
                 input=codex_dot_v1_dot_chat__pb2.RunTurnRequest,
+                output=codex_dot_v1_dot_chat__pb2.ChatEvent,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def tail_turn(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.TailTurnRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> Iterator[codex_dot_v1_dot_chat__pb2.ChatEvent]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="TailTurn",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.TailTurnRequest,
                 output=codex_dot_v1_dot_chat__pb2.ChatEvent,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),

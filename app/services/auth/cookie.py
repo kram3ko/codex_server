@@ -24,7 +24,7 @@ def build_set_cookie(token: str, ttl_seconds: int) -> str:
         f"{JWT_COOKIE_NAME}={token}",
         "HttpOnly",
         "SameSite=Lax",
-        "Path=/",
+        "Path=/api",
         f"Max-Age={ttl_seconds}",
     ]
     if settings.COOKIES_SECURE:
@@ -38,7 +38,7 @@ def build_clear_cookie() -> str:
         f"{JWT_COOKIE_NAME}=",
         "HttpOnly",
         "SameSite=Lax",
-        "Path=/",
+        "Path=/api",
         "Max-Age=0",
     ]
     if settings.COOKIES_SECURE:

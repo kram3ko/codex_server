@@ -29,6 +29,7 @@ from app.rpc.chat.mappers import codex_usage_to_pb, error_event
 from app.rpc.chat.stream import stream_turn
 from app.rpc.chat.uploads import resolve_uploads
 from app.services import rate_limit
+from app.services.chats import turn_stream
 from app.services.chats.default import chat_service
 from app.services.codex import turn_registry
 from app.services.codex.error_codes import CodexErrorCode
@@ -218,14 +219,32 @@ class ChatRPC(ChatProtocol):
                     voice_reply=voice_reply,
                     client_id=request.client_id or None,
                 ):
+                    # XADD у Redis Stream → TailTurn зможе replay'ити при reconnect.
+                    event.event_id = await turn_stream.publish(persisted_chat_id, event)
                     yield event
             finally:
+                await turn_stream.cleanup(persisted_chat_id)
                 # CAS-drop: silent miss — нормально після interrupt'у (запис уже стертий).
                 await turn_registry.drop_if_matches(
                     persisted_chat_id,
                     client.current_thread_id or "",
                     client.current_turn_id,
                 )
+
+    @override
+    async def tail_turn(
+        self,
+        request: chat_pb2.TailTurnRequest,
+        ctx: RequestContext,
+    ) -> AsyncIterator[chat_pb2.ChatEvent]:
+        """Resume mid-turn stream: replay'ить XREAD-buffer з `after_id`, потім
+        BLOCK на нові події доки `done`/`error` не прийде або stream не зникне.
+        """
+        user = await require_user(ctx)
+        async with SessionLocal() as db:
+            await load_chat_owned(db, request.chat_id, user.id)
+        async for event in turn_stream.tail(request.chat_id, request.after_id):
+            yield event
 
     @override
     async def interrupt_turn(

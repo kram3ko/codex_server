@@ -66,8 +66,12 @@ class InviteService:
         token: str,
         user_id: int,
     ) -> Invite:
-        """Помічає invite як used. Кидає InviteNotFound/InviteUsed/InviteExpired."""
-        invite = await self.get_by_token(session, token)
+        """Помічає invite як used. Атомарне: SELECT FOR UPDATE блокує row
+        до commit/rollback — два concurrent redeem'и того ж token'у
+        серіалізуються, другий бачить used_at != None і кидає InviteUsed.
+        """
+        stmt = select(Invite).where(Invite.token == token).with_for_update()
+        invite = (await session.execute(stmt)).scalar_one_or_none()
         if invite is None:
             raise InviteNotFound(token)
         if invite.used_at is not None:

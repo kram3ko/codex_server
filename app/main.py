@@ -121,6 +121,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS — empty list = same-origin only; cloud deploy виставляє у env.
+if settings.CORS_ALLOWED_ORIGINS:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 connect_router = ConnectRouter(
     services=[
         AuthServiceASGIApplication(AuthRPC()),

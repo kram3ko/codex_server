@@ -11,7 +11,7 @@
   import { create } from "@bufbuild/protobuf";
   import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 
-  import type { Attachment as ChatAttachment, Chat } from "../../gen/codex/v1/chat_pb";
+  import type { Attachment as ChatAttachment, Chat, ChatEvent } from "../../gen/codex/v1/chat_pb";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import { MessageSchema } from "../../gen/codex/v1/message_pb";
 
@@ -227,18 +227,14 @@
       createdAt: nowTimestamp()
     });
     messages = [...messages, userMessage, streamingPlaceholder];
+    let lastEventId = "";
 
-    try {
-      const stream = chatClient.runTurn({
-        chatId: selected?.id,
-        text,
-        uploadIds,
-        clientId
-      });
+    async function processStream(stream: AsyncIterable<ChatEvent>) {
       for await (const event of stream) {
         if (turnId !== activeTurnId) {
           break;
         }
+        if (event.eventId) lastEventId = event.eventId;
         lastActivityAt = Date.now();
         switch (event.kind.case) {
           case "token":
@@ -366,8 +362,35 @@
         }
         await tick();
       }
+    }
+
+    try {
+      await processStream(chatClient.runTurn({
+        chatId: selected?.id,
+        text,
+        uploadIds,
+        clientId
+      }));
     } catch (exc) {
-      if (turnId === activeTurnId) {
+      // Mid-turn disconnect (network blip / page sleep) — one reconnect attempt
+      // via TailTurn replays missed events з server-side Redis Stream + далі live.
+      if (turnId === activeTurnId && lastEventId && selected) {
+        try {
+          await processStream(chatClient.tailTurn({
+            chatId: selected.id,
+            afterId: lastEventId
+          }));
+        } catch (tailExc) {
+          if (turnId === activeTurnId) {
+            error = tailExc instanceof Error ? tailExc.message : "Stream lost";
+            messages = messages.filter((m) => clientIdOf(m) !== clientId);
+            streamingClientId = null;
+            streamedPrefix = "";
+            lastActivityAt = undefined;
+            draftStartedAt = undefined;
+          }
+        }
+      } else if (turnId === activeTurnId) {
         error = exc instanceof Error ? exc.message : "Turn failed";
         messages = messages.filter((m) => clientIdOf(m) !== clientId);
         streamingClientId = null;
