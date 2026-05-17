@@ -229,7 +229,8 @@
     messages = [...messages, userMessage, streamingPlaceholder];
     let lastEventId = "";
 
-    async function processStream(stream: AsyncIterable<ChatEvent>) {
+    async function processStream(stream: AsyncIterable<ChatEvent>): Promise<boolean> {
+      let terminalSeen = false;
       for await (const event of stream) {
         if (turnId !== activeTurnId) {
           break;
@@ -335,6 +336,7 @@
             attachments = [];
             void loadChats(true);
             turnSignal.doneCount += 1;
+            terminalSeen = true;
             break;
           }
           case "error":
@@ -358,28 +360,58 @@
             streamedPrefix = "";
             lastActivityAt = undefined;
             draftStartedAt = undefined;
+            terminalSeen = true;
             break;
         }
         await tick();
       }
+      return terminalSeen;
+    }
+
+    // Stream EOF без `done`/`error` — backend turn міг штатно завершитися у БД,
+    // але terminal event до клієнта не дойшов (TTL Redis-стріму, transport
+    // drop without RST, etc). Reload з БД + reset streaming state, інакше UI
+    // зависає у "streaming" попри готовий assistant message.
+    async function recoverSilentEof() {
+      messages = messages.filter((m) => clientIdOf(m) !== clientId);
+      streamingClientId = null;
+      streamedPrefix = "";
+      lastActivityAt = undefined;
+      draftStartedAt = undefined;
+      typer.reset();
+      tools = [];
+      attachments = [];
+      if (selected) await loadChatMessages(selected);
     }
 
     try {
-      await processStream(chatClient.runTurn({
+      const ok = await processStream(chatClient.runTurn({
         chatId: selected?.id,
         text,
         uploadIds,
         clientId
       }));
+      if (!ok && turnId === activeTurnId && selected) {
+        const tailOk = await processStream(chatClient.tailTurn({
+          chatId: selected.id,
+          afterId: lastEventId || "0"
+        }));
+        if (!tailOk && turnId === activeTurnId) {
+          await recoverSilentEof();
+        }
+      }
     } catch (exc) {
       // Mid-turn disconnect (network blip / page sleep) — one reconnect attempt
       // via TailTurn replays missed events з server-side Redis Stream + далі live.
-      if (turnId === activeTurnId && lastEventId && selected) {
+      if (turnId === activeTurnId && selected) {
         try {
-          await processStream(chatClient.tailTurn({
+          const tailOk = await processStream(chatClient.tailTurn({
             chatId: selected.id,
-            afterId: lastEventId
+            afterId: lastEventId || "0"
           }));
+          if (!tailOk && turnId === activeTurnId) {
+            await recoverSilentEof();
+          }
         } catch (tailExc) {
           if (turnId === activeTurnId) {
             error = tailExc instanceof Error ? tailExc.message : "Stream lost";

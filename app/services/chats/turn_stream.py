@@ -13,8 +13,10 @@ per `decode_responses` mode.
 from collections.abc import AsyncIterator
 
 from app.grpc_generated.codex.v1 import chat_pb2
+from app.rpc.chat.mappers import error_event
 from app.services.cache.default import binary_cache
 from app.services.codex import turn_registry
+from app.services.codex.error_codes import CodexErrorCode
 
 _EVENTS_KEY = "chat:{}:events"
 # Long Codex turn з багатьма tools може дати кілька сотень events; 2000 з
@@ -30,6 +32,13 @@ def _key(chat_id: int) -> str:
     return _EVENTS_KEY.format(chat_id)
 
 
+async def reset(chat_id: int) -> None:
+    """DEL stream key. Викликати у handler ДО `spawn()` для свіжого turn-у —
+    гарантує що `tail(after_id="0")` стартує з порожнього стрім-а і catch-нe
+    кожен XADD з background-у (без race з `$`-cursor проти першого publish)."""
+    await binary_cache.delete(_key(chat_id))
+
+
 async def publish(chat_id: int, event: chat_pb2.ChatEvent) -> str:
     """XADD event у stream, повертає assigned event_id."""
     raw_id = await binary_cache.xadd(
@@ -43,12 +52,21 @@ async def tail(chat_id: int, after_id: str) -> AsyncIterator[chat_pb2.ChatEvent]
     """Yield ChatEvent з stream'у. Порожній `after_id` → `$` (лише нові,
     стрім shared across turns, leftover-events попереднього turn-у дадуть
     duplicate). Явний `after_id` → replay (TailTurn resume). Виходить на
-    done/error або коли `turn_registry` порожній на empty XREAD."""
+    done/error.
+
+    Якщо registry вже порожній і стрім пустий (background завершився, TTL
+    стрім-ключа міг встигнути минути ДО reconnect) — віддаємо synthetic
+    STREAM_DROPPED замість silent return, щоб UI міг детермінованно
+    закрити turn placeholder."""
     cursor = after_id or "$"
     while True:
         response = await binary_cache.xread({_key(chat_id): cursor}, block=_TAIL_BLOCK_MS, count=64)
         if not response:
             if await turn_registry.get(chat_id) is None:
+                yield error_event(
+                    CodexErrorCode.STREAM_DROPPED,
+                    "turn stream expired before terminal event",
+                )
                 return
             continue
         for _stream, entries in response:

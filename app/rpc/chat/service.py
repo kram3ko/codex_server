@@ -31,8 +31,9 @@ from app.services import rate_limit
 from app.services.chats import turn_runner, turn_stream
 from app.services.chats.default import chat_service
 from app.services.codex import turn_registry
+from app.services.codex.client import StaleSidecarTurnError
 from app.services.codex.error_codes import CodexErrorCode
-from app.services.codex.runner import open_codex_turn
+from app.services.codex.runner import open_codex_turn, quarantine_thread
 from app.services.codex.transport import AppServerError
 from app.services.codex_usage.default import codex_usage_service
 from app.services.events.default import event_service
@@ -125,7 +126,10 @@ class ChatRPC(ChatProtocol):
             yield error_event(CodexErrorCode.RATE_LIMITED, str(exc))
             return
 
+        persisted_chat_id: int | None = None
         bg_owns_release = False
+        bg_owns_registry = False
+        prelock_acquired = False
         try:
             persisted_chat_id, user_pk = await _ensure_web_chat(user.id)
             if request.HasField("chat_id") and request.chat_id != persisted_chat_id:
@@ -155,8 +159,22 @@ class ChatRPC(ChatProtocol):
                     )
                     return
                 accepted = False
-                with contextlib.suppress(Exception):
+                try:
                     accepted = await turn_registry.send_steer(persisted_chat_id, active, text)
+                except StaleSidecarTurnError as exc:
+                    await _handle_stale_sidecar_turn(persisted_chat_id, active, exc)
+                    yield error_event(
+                        CodexErrorCode.STALE_ACTIVE_TURN,
+                        "previous Codex turn is stale; retry shortly",
+                    )
+                    return
+                except _CONTROL_RPC_ERRORS as exc:
+                    log.warning(
+                        "web_inline_steer_rpc_failed",
+                        chat_id=persisted_chat_id,
+                        turn_id=active.turn_id,
+                        error=str(exc),
+                    )
                 if accepted:
                     async with SessionLocal() as db:
                         await message_service.append(
@@ -175,9 +193,49 @@ class ChatRPC(ChatProtocol):
                         )
                     )
                     return
+                interrupted = False
+                try:
+                    interrupted = await turn_registry.send_interrupt(active)
+                except StaleSidecarTurnError as exc:
+                    await _handle_stale_sidecar_turn(persisted_chat_id, active, exc)
+                    yield error_event(
+                        CodexErrorCode.STALE_ACTIVE_TURN,
+                        "previous Codex turn is stale; retry shortly",
+                    )
+                    return
+                except _CONTROL_RPC_ERRORS as exc:
+                    log.warning(
+                        "web_inline_interrupt_rpc_failed",
+                        chat_id=persisted_chat_id,
+                        turn_id=active.turn_id,
+                        error=str(exc),
+                    )
+                if not interrupted:
+                    yield error_event(
+                        CodexErrorCode.TURN_BUSY,
+                        "previous turn still finishing — retry shortly",
+                    )
+                    return
                 await turn_registry.drop_if_matches(
                     persisted_chat_id, active.thread_id, active.turn_id
                 )
+
+            # Synchronously захоплюємо registry slot ДО persist + spawn. Закриває:
+            # (1) гонку де два concurrent RunTurn-и обидва бачили б `active=None`
+            #     і обидва писали б user message + спавнили WS-и;
+            # (2) orphan user message у БД від loser-а який потім падає BUSY.
+            # Placeholder thread_id=None — реальний thread_id виставиться
+            # `promote_pending` у `_on_started` коли codex поверне turn_id.
+            registered = await turn_registry.try_register_pending(
+                persisted_chat_id, thread_id=None, is_admin=True
+            )
+            if not registered:
+                yield error_event(
+                    CodexErrorCode.TURN_BUSY,
+                    "another turn is starting for this chat",
+                )
+                return
+            prelock_acquired = True
 
             user_meta: dict[str, Any] = {}
             if image_ids:
@@ -197,6 +255,11 @@ class ChatRPC(ChatProtocol):
                 )
                 await db.commit()
 
+            # Чистий стрім перед новим turn-ом → tail(after_id="0") catch-нe
+            # кожен XADD від background без race з `$`-cursor проти першого
+            # publish-у. Альтернатива (per-turn stream key) вимагала б proto-зміну.
+            await turn_stream.reset(persisted_chat_id)
+
             # Decouple: turn live'ає в background task, переживає browser disconnect.
             # RPC = просто reader Redis Stream'у; rate-limit release ownership
             # передається background'у.
@@ -211,18 +274,26 @@ class ChatRPC(ChatProtocol):
                 is_admin=True,
             )
             bg_owns_release = True
+            bg_owns_registry = True
 
-            # Sync point: чекаємо поки background встигне `try_register_pending`
-            # (або зрепортить помилку у stream). Без цього tail() бейлиться на
-            # першому ж empty-XREAD бо registry ще не наповнений.
-            # `finally: ready.set()` у `_run` гарантує що signal завжди прийде.
+            # Wait WS handshake done; `finally: ready.set()` у `_run` гарантує
+            # що signal прийде навіть на crash.
             await ready.wait()
 
-            async for event in turn_stream.tail(persisted_chat_id, after_id=""):
+            async for event in turn_stream.tail(persisted_chat_id, after_id="0"):
                 yield event
         finally:
             if not bg_owns_release:
                 await rate_limit.release_turn(user)
+            # До spawn ownership ще у RPC handler-а: якщо впали після pre-lock,
+            # але до передачі background task-у, чистимо placeholder тут.
+            # Після spawn registry cleanup належить `turn_runner`, і RPC reader
+            # не має права знімати lock при browser disconnect.
+            if prelock_acquired and not bg_owns_registry and persisted_chat_id is not None:
+                with contextlib.suppress(Exception):
+                    await turn_registry.drop_if_matches(
+                        persisted_chat_id, thread_id=None, turn_id=None
+                    )
 
     @override
     async def tail_turn(
@@ -260,6 +331,8 @@ class ChatRPC(ChatProtocol):
             return chat_pb2.InterruptTurnResponse()
         try:
             await turn_registry.send_interrupt(record)
+        except StaleSidecarTurnError as exc:
+            await _handle_stale_sidecar_turn(chat.id, record, exc)
         except _CONTROL_RPC_ERRORS as exc:
             log.warning(
                 "web_interrupt_rpc_failed",
@@ -286,6 +359,9 @@ class ChatRPC(ChatProtocol):
             return chat_pb2.SteerTurnResponse(accepted=False)
         try:
             accepted = await turn_registry.send_steer(chat.id, record, text)
+        except StaleSidecarTurnError as exc:
+            await _handle_stale_sidecar_turn(chat.id, record, exc)
+            return chat_pb2.SteerTurnResponse(accepted=False)
         except _CONTROL_RPC_ERRORS as exc:
             log.warning("web_steer_rpc_failed", chat_id=chat.id, error=str(exc))
             return chat_pb2.SteerTurnResponse(accepted=False)
@@ -319,3 +395,23 @@ async def _ensure_web_chat(user_id: int) -> tuple[int, int]:
         chat = await chat_service.get_or_create_for_web(db, user_id)
         await db.commit()
         return chat.id, user_id
+
+
+async def _handle_stale_sidecar_turn(
+    chat_id: int,
+    active: turn_registry.ActiveTurn,
+    exc: StaleSidecarTurnError,
+) -> None:
+    """Break registry/sidecar mismatch without spawning another doomed turn."""
+    log.warning(
+        "web_stale_sidecar_turn",
+        chat_id=chat_id,
+        registry_thread_id=active.thread_id,
+        registry_turn_id=active.turn_id,
+        expected_turn_id=exc.expected_turn_id,
+        actual_turn_id=exc.actual_turn_id,
+    )
+    with contextlib.suppress(Exception):
+        await turn_registry.send_interrupt_turn_id(active.is_admin, exc.actual_turn_id)
+    await quarantine_thread(active.thread_id)
+    await turn_registry.drop_if_matches(chat_id, active.thread_id, active.turn_id)

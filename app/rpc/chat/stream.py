@@ -217,11 +217,9 @@ async def stream_turn(
         with contextlib.suppress(Exception):
             await client.interrupt()
         await quarantine_thread(client.current_thread_id)
-        # Persist partial так само як на CancelledError — token deltas могли
-        # настрімитись у buffer ДО timeout'а, але boundary callback не встиг
-        # спрацювати (idle прилетів між item/started і item/completed).
-        turn_started = diagnostics.get("turn_id") is not None
-        if turn_started or collector.buffer or collector.tool_calls or collector.attachments:
+        # Persist partial тільки якщо є видимий контент. Інакше timeout до першого
+        # token/tool не має створювати порожній assistant row.
+        if collector.buffer or collector.tool_calls or collector.attachments:
             await _persist_assistant_turn(
                 persisted_chat_id,
                 user_pk,
@@ -244,11 +242,9 @@ async def stream_turn(
     except asyncio.CancelledError:
         with contextlib.suppress(Exception):
             await client.interrupt()
-        # Persist якщо турн встиг стартувати на sidecar (turn_id отримано) АБО
-        # вже накопичено будь-який видимий контент. Інакше cancel прилетів
-        # до `turn/start` — у БД пустий placeholder не пишемо.
-        turn_started = client.turn_diagnostics().get("turn_id") is not None
-        if turn_started or collector.buffer or collector.tool_calls or collector.attachments:
+        # Persist partial тільки якщо вже накопичено будь-який видимий контент.
+        # Інакше cancel/timeout до першого token/tool не створює порожній row.
+        if collector.buffer or collector.tool_calls or collector.attachments:
             await _persist_assistant_turn(
                 persisted_chat_id,
                 user_pk,
