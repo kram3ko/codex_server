@@ -160,9 +160,7 @@ async def test_create_invite_rejects_non_admin(monkeypatch: pytest.MonkeyPatch) 
 
 async def test_create_invite_rejects_missing_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
     with _wire(monkeypatch, user=None), pytest.raises(ConnectError) as exc:
-        await admin_rpc.AdminRPC().create_invite(
-            admin_pb2.CreateInviteRequest(ttl_days=7), _Ctx()
-        )
+        await admin_rpc.AdminRPC().create_invite(admin_pb2.CreateInviteRequest(ttl_days=7), _Ctx())
     assert exc.value.code is Code.UNAUTHENTICATED
 
 
