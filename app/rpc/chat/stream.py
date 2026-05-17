@@ -5,8 +5,8 @@
 """
 
 import asyncio
-import contextlib
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
@@ -14,7 +14,7 @@ import structlog
 from app.config import settings
 from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import chat_pb2
-from app.models import EventKind, Message, MessageRole
+from app.models import EventKind, Message, MessageRole, TurnStatus
 from app.rpc._mappers import message_to_pb
 from app.rpc.chat.mappers import (
     chat_event_to_pb,
@@ -23,7 +23,7 @@ from app.rpc.chat.mappers import (
 )
 from app.rpc.chat.tts import attach_tts_to_message
 from app.services.bus.default import event_bus
-from app.services.codex import turn_registry
+from app.services.codex import codex_remote
 from app.services.codex.client import CodexClient, StaleTurnStreamError
 from app.services.codex.collector import StreamCollector
 from app.services.codex.error_codes import CodexErrorCode
@@ -37,9 +37,24 @@ from app.services.codex.events import (
 from app.services.codex.runner import quarantine_thread
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
+from app.services.turns.default import turn_service
+from app.services.turns.probe import (
+    CodexTurnTerminal,
+    interrupt_best_effort,
+    probe_or_extend_idle,
+)
 from app.services.uploads.default import upload_service
 
 log = structlog.get_logger(__name__)
+
+
+@dataclass
+class _StreamState:
+    collector: StreamCollector
+    partial_msg_id: int | None = None
+    assistant_attached: bool = False
+    events_count: int = 0
+    last_event_type: str = "none"
 
 
 async def stream_turn(
@@ -51,65 +66,31 @@ async def stream_turn(
     image_urls: tuple[str, ...] = (),
     voice_reply: bool = False,
     client_id: str | None = None,
+    turn_id: int | None = None,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
-    collector = StreamCollector()
-    partial_msg_id: int | None = None
+    state = _StreamState(collector=StreamCollector())
 
-    # `try_register_pending` тепер caller's відповідальність (turn_runner._run
-    # реєструє синхронно до spawn-ready сигналу). Тут — лише `promote_pending`
-    # коли codex поверне turn_id.
-
-    async def _on_started(turn_id: str, thread_id: str) -> None:
-        promoted = await turn_registry.promote_pending(persisted_chat_id, thread_id, turn_id)
-        if not promoted:
-            log.warning(
-                "registry_promote_lost",
-                chat_id=persisted_chat_id,
-                thread_id=thread_id,
-                turn_id=turn_id,
-            )
-            with contextlib.suppress(Exception):
-                await client.interrupt(turn_id=turn_id)
-            raise turn_registry.TurnOwnershipLost
-
-    events_count = 0
-    last_event_type = "none"
+    async def _on_started(codex_turn_id: str, thread_id: str) -> None:
+        await _mark_started(turn_id, thread_id, codex_turn_id)
 
     async def _on_idle() -> bool:
-        if await turn_registry.consume_steer(persisted_chat_id, client.current_turn_id):
-            return client.extend_idle_deadline()
-        diagnostics = client.turn_diagnostics()
-        log.error(
-            "web_rpc_codex_idle_timeout",
-            db_chat_id=persisted_chat_id,
-            idle_timeout_s=settings.WEB_TURN_TIMEOUT_SECONDS,
-            events_count=events_count,
-            last_event_type=last_event_type,
-            **diagnostics,
+        return await _handle_idle(
+            client,
+            persisted_chat_id=persisted_chat_id,
+            turn_id=turn_id,
+            events_count=state.events_count,
+            last_event_type=state.last_event_type,
         )
-        with contextlib.suppress(Exception):
-            await client.interrupt()
-        return False
 
-    # Persist partial state на каждій item/completed-границі (agentMessage paragraph
-    # / tool completion). Перший INSERT, далі UPDATE того ж row'а. Якщо crash mid-
-    # stream — history до останнього boundary в БД.
     async def _on_item_boundary(item_type: str) -> None:
-        nonlocal partial_msg_id
-        if not (collector.buffer or collector.tool_calls or collector.attachments):
-            return  # нічого видимого ще не накопичили — пустий placeholder не пишемо
-        msg = await _persist_assistant_turn(
+        del item_type
+        await _persist_boundary(
+            state,
             persisted_chat_id,
             user_pk,
-            collector.buffer,
-            collector.tool_calls,
-            [],  # attachments persistимо тільки на finalize
-            partial=True,
             client_id=client_id,
-            msg_id=partial_msg_id,
-            emit_journal=False,
+            turn_id=turn_id,
         )
-        partial_msg_id = msg.id
 
     stream = client.run_turn(
         text,
@@ -140,10 +121,10 @@ async def stream_turn(
 
     try:
         async for ev in stream:
-            events_count += 1
-            last_event_type = type(ev).__name__
+            state.events_count += 1
+            state.last_event_type = type(ev).__name__
             await event_bus.publish(persisted_chat_id, ev)
-            collector.absorb(ev)
+            state.collector.absorb(ev)
             match ev:
                 case ErrorEvent():
                     flushed = _flush_token_buffer()
@@ -174,33 +155,22 @@ async def stream_turn(
                     if flushed is not None:
                         yield flushed
                     yield chat_event_to_pb(ev)
-    except turn_registry.TurnOwnershipLost:
-        yield error_event(
-            CodexErrorCode.TURN_BUSY,
-            "another turn took ownership of this chat",
-        )
-        await _emit_event(
+    except CodexTurnTerminal as exc:
+        event = await _event_from_probe_terminal(
+            state,
             persisted_chat_id,
             user_pk,
-            EventKind.TURN_INTERRUPTED,
-            {"source": "web", "reason": "ownership_lost"},
+            status=exc.status,
+            raw_status=exc.detail or exc.status.value,
+            client_id=client_id,
+            turn_id=turn_id,
         )
+        yield event
         return
     except StaleTurnStreamError as exc:
-        with contextlib.suppress(Exception):
-            await client.interrupt()
+        await interrupt_best_effort(client, reason="web_stale_turn_stream")
         await quarantine_thread(client.current_thread_id)
-        if collector.buffer or collector.tool_calls or collector.attachments:
-            await _persist_assistant_turn(
-                persisted_chat_id,
-                user_pk,
-                collector.buffer,
-                collector.tool_calls,
-                collector.attachments,
-                partial=True,
-                client_id=client_id,
-                msg_id=partial_msg_id,
-            )
+        await _persist_visible_partial(state, persisted_chat_id, user_pk, client_id=client_id)
         detail = "stale-turn-notifications"
         yield error_event(CodexErrorCode.TURN_TIMEOUT, detail)
         await _emit_event(
@@ -214,22 +184,9 @@ async def stream_turn(
         # Idle-timeout — best-effort interrupt sidecar + quarantine thread,
         # інакше наступний run_turn пробує resume тої самої мертвої thread.
         diagnostics = client.turn_diagnostics()
-        with contextlib.suppress(Exception):
-            await client.interrupt()
+        await interrupt_best_effort(client, reason="web_idle_timeout")
         await quarantine_thread(client.current_thread_id)
-        # Persist partial тільки якщо є видимий контент. Інакше timeout до першого
-        # token/tool не має створювати порожній assistant row.
-        if collector.buffer or collector.tool_calls or collector.attachments:
-            await _persist_assistant_turn(
-                persisted_chat_id,
-                user_pk,
-                collector.buffer,
-                collector.tool_calls,
-                collector.attachments,
-                partial=True,
-                client_id=client_id,
-                msg_id=partial_msg_id,
-            )
+        await _persist_visible_partial(state, persisted_chat_id, user_pk, client_id=client_id)
         detail = f"idle>{settings.WEB_TURN_TIMEOUT_SECONDS}s"
         yield error_event(CodexErrorCode.TURN_TIMEOUT, detail)
         await _emit_event(
@@ -240,26 +197,13 @@ async def stream_turn(
         )
         return
     except asyncio.CancelledError:
-        with contextlib.suppress(Exception):
-            await client.interrupt()
-        # Persist partial тільки якщо вже накопичено будь-який видимий контент.
-        # Інакше cancel/timeout до першого token/tool не створює порожній row.
-        if collector.buffer or collector.tool_calls or collector.attachments:
-            await _persist_assistant_turn(
-                persisted_chat_id,
-                user_pk,
-                collector.buffer,
-                collector.tool_calls,
-                collector.attachments,
-                partial=True,
-                client_id=client_id,
-                msg_id=partial_msg_id,
-            )
+        await interrupt_best_effort(client, reason="web_cancelled")
+        await _persist_visible_partial(state, persisted_chat_id, user_pk, client_id=client_id)
         await _emit_event(
             persisted_chat_id,
             user_pk,
             EventKind.TURN_INTERRUPTED,
-            {"source": "web", "partial_len": len(collector.buffer)},
+            {"source": "web", "partial_len": len(state.collector.buffer)},
         )
         raise
     except Exception as exc:
@@ -273,7 +217,7 @@ async def stream_turn(
         )
         return
 
-    if not collector.done_seen:
+    if not state.collector.done_seen:
         yield error_event(CodexErrorCode.STREAM_DROPPED, "Codex stream ended without completion")
         await _emit_event(
             persisted_chat_id,
@@ -286,29 +230,175 @@ async def stream_turn(
     assistant_msg = await _persist_assistant_turn(
         persisted_chat_id,
         user_pk,
-        collector.final_text,
-        collector.tool_calls,
-        collector.attachments,
+        state.collector.final_text,
+        state.collector.tool_calls,
+        state.collector.attachments,
         client_id=client_id,
-        msg_id=partial_msg_id,
+        msg_id=state.partial_msg_id,
     )
+    await _attach_assistant_to_turn(state, turn_id, assistant_msg.id)
 
     # TTS off the hot path — finalize turn for client first, attach audio коли
     # synth закінчиться. Codex flagged the prior blocking flow.
-    if voice_reply and collector.final_text.strip():
+    if voice_reply and state.collector.final_text.strip():
         asyncio.create_task(
             attach_tts_to_message(
-                assistant_msg.id, collector.final_text, persisted_chat_id, user_pk
+                assistant_msg.id, state.collector.final_text, persisted_chat_id, user_pk
             )
         )
 
     yield chat_pb2.ChatEvent(
         done=chat_pb2.DoneEvent(
             chat_id=persisted_chat_id,
-            final_text=final_text_for_done_frame(collector.final_text, collector.buffer),
+            final_text=final_text_for_done_frame(
+                state.collector.final_text,
+                state.collector.buffer,
+            ),
             message=message_to_pb(assistant_msg),
         )
     )
+
+
+async def _mark_started(
+    turn_id: int | None,
+    thread_id: str,
+    codex_turn_id: str,
+) -> None:
+    if turn_id is None:
+        return
+    async with SessionLocal() as db:
+        await turn_service.mark_running(db, turn_id, thread_id, codex_turn_id)
+        await db.commit()
+
+
+async def _handle_idle(
+    client: CodexClient,
+    *,
+    persisted_chat_id: int,
+    turn_id: int | None,
+    events_count: int,
+    last_event_type: str,
+) -> bool:
+    if await codex_remote.consume_steer(persisted_chat_id, client.current_turn_id):
+        return client.extend_idle_deadline()
+    if turn_id is not None and await probe_or_extend_idle(client, turn_id):
+        return client.extend_idle_deadline()
+
+    diagnostics = client.turn_diagnostics()
+    log.error(
+        "web_rpc_codex_idle_timeout",
+        db_chat_id=persisted_chat_id,
+        idle_timeout_s=settings.WEB_TURN_TIMEOUT_SECONDS,
+        events_count=events_count,
+        last_event_type=last_event_type,
+        **diagnostics,
+    )
+    await interrupt_best_effort(client, reason="web_idle_timeout")
+    return False
+    return False
+
+
+async def _event_from_probe_terminal(
+    state: _StreamState,
+    persisted_chat_id: int,
+    user_pk: int,
+    *,
+    status: TurnStatus,
+    raw_status: str,
+    client_id: str | None,
+    turn_id: int | None,
+) -> chat_pb2.ChatEvent:
+    if status == TurnStatus.COMPLETED:
+        text = state.collector.final_text or state.collector.buffer
+        message = None
+        if _has_visible_content(state):
+            message = await _persist_assistant_turn(
+                persisted_chat_id,
+                user_pk,
+                text,
+                state.collector.tool_calls,
+                state.collector.attachments,
+                client_id=client_id,
+                msg_id=state.partial_msg_id,
+            )
+            await _attach_assistant_to_turn(state, turn_id, message.id)
+        done = chat_pb2.DoneEvent(
+            chat_id=persisted_chat_id,
+            final_text=final_text_for_done_frame(text, state.collector.buffer),
+        )
+        if message is not None:
+            done.message.CopyFrom(message_to_pb(message))
+        return chat_pb2.ChatEvent(done=done)
+
+    await _persist_visible_partial(state, persisted_chat_id, user_pk, client_id=client_id)
+    return error_event(f"codex_reported_{raw_status}", raw_status)
+
+
+async def _persist_boundary(
+    state: _StreamState,
+    persisted_chat_id: int,
+    user_pk: int,
+    *,
+    client_id: str | None,
+    turn_id: int | None,
+) -> None:
+    if not _has_visible_content(state):
+        return
+    msg = await _persist_assistant_turn(
+        persisted_chat_id,
+        user_pk,
+        state.collector.buffer,
+        state.collector.tool_calls,
+        [],
+        partial=True,
+        client_id=client_id,
+        msg_id=state.partial_msg_id,
+        emit_journal=False,
+    )
+    state.partial_msg_id = msg.id
+    await _attach_assistant_to_turn(state, turn_id, msg.id)
+
+
+async def _persist_visible_partial(
+    state: _StreamState,
+    persisted_chat_id: int,
+    user_pk: int,
+    *,
+    client_id: str | None,
+) -> None:
+    if not _has_visible_content(state):
+        return
+    await _persist_assistant_turn(
+        persisted_chat_id,
+        user_pk,
+        state.collector.buffer,
+        state.collector.tool_calls,
+        state.collector.attachments,
+        partial=True,
+        client_id=client_id,
+        msg_id=state.partial_msg_id,
+    )
+
+
+def _has_visible_content(state: _StreamState) -> bool:
+    return bool(
+        state.collector.buffer
+        or state.collector.tool_calls
+        or state.collector.attachments
+    )
+
+
+async def _attach_assistant_to_turn(
+    state: _StreamState,
+    turn_id: int | None,
+    message_id: int,
+) -> None:
+    if turn_id is None or state.assistant_attached:
+        return
+    async with SessionLocal() as db:
+        await turn_service.attach_assistant_message(db, turn_id, message_id)
+        await db.commit()
+    state.assistant_attached = True
 
 
 async def _persist_assistant_turn(

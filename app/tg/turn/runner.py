@@ -1,10 +1,7 @@
-"""TurnRunner — orchestration-точка для TG-handler'а.
+"""TurnRunner — orchestration для TG-handler-а. `turns` table — source of truth.
 
-Кожен turn = fresh Codex WebSocket (`open_codex_turn`). Це і дає auto-steer:
-поки `active.get(tg_chat_id)` повертає running handle — наступне повідомлення
-вирушає у `client.steer(...)` замість нового turn'у. Юзер не натискає кнопку
-«continue» — просто пише далі. Якщо steer не accept'нувся (turn вже завершився)
-— fall through до нового turn'а.
+Auto-steer: якщо `turn_service.get_active_for_chat` повертає row з `codex_turn_id`,
+шлемо `send_steer_by_ids` у його sidecar; на reject — fall through до нового turn.
 """
 
 import asyncio
@@ -15,14 +12,22 @@ from aiogram.types import Message
 
 from app.config import settings
 from app.db.base import SessionLocal
+from app.models import TurnStatus
 from app.services import rate_limit
 from app.services.chats.default import chat_service
-from app.services.codex import turn_registry
+from app.services.codex import codex_remote
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
 from app.services.codex.transport import AppServerError
 from app.services.sessions.store import ChatSession
 from app.services.stt.base import STTBackend
+from app.services.turns import locks as turn_locks
+from app.services.turns.default import turn_service
+from app.services.turns.locks import LockAcquireOutcome
+from app.services.turns.probe import CodexTurnTerminal
+from app.services.turns.recovery import reconcile_if_stale
+from app.services.turns.runner import heartbeat_loop
+from app.services.turns.schemas import TurnCreate, TurnRow
 from app.services.users.default import user_service
 from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn, prepare_turn
@@ -34,8 +39,6 @@ from app.tg.turn.stream import stream_turn
 
 log = structlog.get_logger(__name__)
 
-# Cross-worker steer RPC до Codex sidecar — мережеві/протокольні помилки що
-# не повинні валити користувача (fall through до нового turn'а).
 _STEER_RPC_ERRORS = (
     AppServerError,
     websockets.WebSocketException,
@@ -53,11 +56,11 @@ class TurnRunner:
         if message.chat is None or message.from_user is None:
             return
 
-        # Resolve user + chat FIRST — `prepare_turn` потребує обидва id для
-        # scope'у uploads rows. Idempotent — session bootstrap re-uses їх.
         display_name = message.from_user.full_name or message.from_user.username
         async with SessionLocal() as db:
-            user = await user_service.get_or_create_by_tg(db, message.from_user.id, display_name)
+            user = await user_service.get_or_create_by_tg(
+                db, message.from_user.id, display_name
+            )
             chat = await chat_service.get_or_create_for_tg(db, user.id, message.chat.id)
             db_user_id = user.id
             db_chat_id = chat.id
@@ -94,19 +97,27 @@ class TurnRunner:
             return
 
         try:
-            # Auto-steer: якщо у цьому чаті прямо зараз стрімиться turn —
-            # дописуємо текст у running turn замість нового. Codex steer reject'не
-            # якщо turn вже завершився між нашою перевіркою і викликом — fall
-            # through до нового turn'а.
             if prepared.text and await _try_auto_steer(session, prepared):
                 return
 
-            await persist_user_turn(session, prepared)
+            user_msg_id = await persist_user_turn(session, prepared)
+            sidecar = "admin" if session.is_admin else "guest"
+            async with SessionLocal() as db:
+                turn = await turn_service.create_starting(
+                    db,
+                    TurnCreate(
+                        chat_id=session.db_chat_id,
+                        user_id=session.db_user_id,
+                        user_message_id=user_msg_id,
+                        sidecar=sidecar,
+                    ),
+                )
+                await db.commit()
 
             progress = TurnProgressReporter(message)
             await progress.start()
             try:
-                await self._run_locked(session, message, prepared, progress)
+                await self._run_locked(session, message, prepared, progress, turn)
             finally:
                 await progress.stop()
         finally:
@@ -118,31 +129,98 @@ class TurnRunner:
         message: Message,
         prepared: PreparedTurn,
         progress: TurnProgressReporter,
+        turn: TurnRow,
     ) -> None:
+        sidecar = turn.sidecar or ("admin" if session.is_admin else "guest")
         async with session.turn_lock:
             current = asyncio.current_task()
             session.current_turn_task = current
+            terminal: TurnStatus | None = None
+            terminal_error: tuple[str | None, str | None] = (None, None)
             try:
-                async with open_codex_turn(session.db_chat_id, is_admin=session.is_admin) as client:
-                    try:
-                        await stream_turn(client, session, message, prepared, progress)
-                    finally:
-                        # CAS-drop: silent miss — нормально після interrupt (вже стерто).
-                        await turn_registry.drop_if_matches(
-                            session.db_chat_id,
-                            client.current_thread_id or "",
-                            client.current_turn_id,
+                # Slot lock серіалізує доступ до codex sidecar між TG-handler-ом
+                # та web TaskIQ worker-ом. Без нього обидва шляхи можуть зайти
+                # у одну codex-cli одночасно.
+                async with turn_locks.hold_turn_locks(
+                    session.db_chat_id, sidecar, turn.id
+                ) as outcome:
+                    if outcome != LockAcquireOutcome.ACQUIRED:
+                        terminal = TurnStatus.FAILED
+                        terminal_error = (
+                            CodexErrorCode.TURN_BUSY,
+                            f"lock unavailable: {outcome.value}",
                         )
+                        await message.answer(
+                            tg_markdown.escape(
+                                "⏳ Codex sidecar зайнятий іншим chat-ом — спробуй через хвилину."
+                            )
+                        )
+                        return
+                    heartbeat_task = asyncio.create_task(
+                        heartbeat_loop(turn.id, session.db_chat_id, sidecar),
+                        name=f"tg-turn-heartbeat:{turn.id}",
+                    )
+                    try:
+                        async with open_codex_turn(
+                            session.db_chat_id, is_admin=session.is_admin
+                        ) as client:
+                            await stream_turn(
+                                client, session, message, prepared, progress, turn.id
+                            )
+                            # `stream_turn` ЗАВЖДИ raise-ить `CodexTurnTerminal`.
+                            # Цей рядок не повинен бути reachable; якщо ми тут —
+                            # це bug у stream_turn (відсутній terminal-raise).
+                            log.error(
+                                "tg_stream_turn_no_terminal",
+                                turn_id=turn.id,
+                            )
+                            terminal = TurnStatus.FAILED
+                            terminal_error = (
+                                CodexErrorCode.STREAM_DROPPED,
+                                "stream_turn returned without raising terminal",
+                            )
+                    finally:
+                        heartbeat_task.cancel()
+                        try:
+                            await heartbeat_task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            log.exception(
+                                "tg_heartbeat_task_failed", turn_id=turn.id
+                            )
+            except CodexTurnTerminal as exc:
+                terminal = exc.status
+                if exc.status != TurnStatus.COMPLETED:
+                    terminal_error = (exc.error_code, exc.detail)
             except TimeoutError:
+                terminal = TurnStatus.FAILED
+                terminal_error = (
+                    CodexErrorCode.TURN_TIMEOUT,
+                    f"idle>{settings.TG_TURN_TIMEOUT_SECONDS}s",
+                )
                 await self._on_timeout(session, message, progress)
             except asyncio.CancelledError:
+                terminal = TurnStatus.CANCELLED
                 progress.mark_outcome(TurnOutcome.INTERRUPTED)
                 raise
             except Exception as exc:
+                terminal = TurnStatus.FAILED
+                terminal_error = (CodexErrorCode.CODEX_ERROR, str(exc))
                 await self._on_unexpected(session, message, progress, exc)
             finally:
                 if session.current_turn_task is current:
                     session.current_turn_task = None
+                if terminal is not None:
+                    async with SessionLocal() as db:
+                        await turn_service.finalize_once(
+                            db,
+                            turn.id,
+                            terminal,
+                            error_code=terminal_error[0],
+                            error_detail=terminal_error[1],
+                        )
+                        await db.commit()
 
     @staticmethod
     async def _on_timeout(
@@ -189,11 +267,20 @@ class TurnRunner:
 
 
 async def _try_auto_steer(session: ChatSession, prepared: PreparedTurn) -> bool:
-    record = await turn_registry.get(session.db_chat_id)
-    if record is None:
+    async with SessionLocal() as db:
+        active = await turn_service.get_active_for_chat(db, session.db_chat_id)
+    if active is not None and await reconcile_if_stale(active):
+        return False
+    if active is None or active.codex_turn_id is None:
         return False
     try:
-        accepted = await turn_registry.send_steer(session.db_chat_id, record, prepared.text)
+        accepted = await codex_remote.send_steer_by_ids(
+            chat_id=session.db_chat_id,
+            is_admin=(active.sidecar or "admin") == "admin",
+            thread_id=active.codex_thread_id,
+            codex_turn_id=active.codex_turn_id,
+            text=prepared.text,
+        )
     except _STEER_RPC_ERRORS as exc:
         log.warning("tg_auto_steer_failed", error=str(exc))
         return False

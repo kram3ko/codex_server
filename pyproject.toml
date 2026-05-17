@@ -5,7 +5,7 @@ description = "Personal Codex server: FastAPI + Telegram bot + web chat"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.136.1",
-    "uvicorn>=0.46.0",
+    "uvicorn>=0.47.0",
     "gunicorn>=26.0.0",
     "httpx>=0.28.1",
     "websockets>=16.0",
@@ -23,11 +23,13 @@ dependencies = [
     "alembic>=1.18.4",
     "connectrpc>=0.10.0",
     "orjson>=3.11.9",
-    "fastmcp>=3.2.4",
+    "fastmcp>=3.3.1",
     "markdown-it-py>=4.2.0",
     "langid>=1.1.6",
-    "uv>=0.11.13",
-    "sentry-sdk[fastapi]>=2.59.0",
+    "uv>=0.11.14",
+    "sentry-sdk[fastapi]>=2.60.0",
+    "taskiq>=0.12.4",
+    "taskiq-redis>=1.2.2",
 ]
 
 [dependency-groups]

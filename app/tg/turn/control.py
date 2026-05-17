@@ -1,53 +1,58 @@
-"""Control-plane операції турну: cancel, auto-reset thread, emit_failure.
-
-Per-turn CodexClient живе у `runner._run_locked` як context-manager; для
-interrupt ззовні runner'а — Redis-registry lookup + one-shot WS до sidecar.
-"""
+"""Control-plane: cancel, auto-reset, emit_failure. State source — `turns` table."""
 
 import contextlib
 
 import structlog
 
 from app.db.base import SessionLocal
-from app.models import EventKind
-from app.services.codex import turn_registry
+from app.models import EventKind, TurnStatus
+from app.services.codex import codex_remote
 from app.services.codex.runner import quarantine_thread
 from app.services.events.default import event_service
-from app.services.sessions.store import (
-    ChatSession,
-    cancel_session_turn,
-)
+from app.services.sessions.store import ChatSession, cancel_session_turn
+from app.services.turns.default import turn_service
 
 log = structlog.get_logger(__name__)
 
 
 async def cancel_turn(session: ChatSession) -> bool:
-    """Stop button — interrupt running Codex turn + cancel local task."""
-    record = await turn_registry.get(session.db_chat_id)
-    if record is not None and record.turn_id is None:
-        # CAS-drop pending — owner у `promote_pending` побачить None і скасує turn.
-        await turn_registry.drop_if_matches(session.db_chat_id, record.thread_id, None)
-    elif record is not None:
+    """Stop button — interrupt codex active turn + cancel local task + finalize."""
+    async with SessionLocal() as db:
+        active = await turn_service.get_active_for_chat(db, session.db_chat_id)
+    if active is not None and active.codex_turn_id is not None:
         with contextlib.suppress(Exception):
-            await turn_registry.send_interrupt(record)
+            await codex_remote.send_interrupt_turn_id(
+                (active.sidecar or "admin") == "admin",
+                active.codex_turn_id,
+            )
     if not await cancel_session_turn(session):
         return False
-    async with SessionLocal() as db:
-        await event_service.emit(
-            db,
-            EventKind.TURN_INTERRUPTED,
-            chat_id=session.db_chat_id,
-            user_id=session.db_user_id,
-        )
-        await db.commit()
+    if active is not None:
+        async with SessionLocal() as db:
+            finalized = await turn_service.finalize_once(
+                db,
+                active.id,
+                TurnStatus.CANCELLED,
+                error_code="user_cancelled",
+            )
+            # Journal-event пишемо тільки якщо ми реально transition-нули turn.
+            # Інакше runner вже finalize-нув і запис буде дублем.
+            if finalized:
+                await event_service.emit(
+                    db,
+                    EventKind.TURN_INTERRUPTED,
+                    chat_id=session.db_chat_id,
+                    user_id=session.db_user_id,
+                )
+            await db.commit()
     return True
 
 
 async def auto_reset_thread(session: ChatSession) -> None:
-    """Idle-timeout → quarantine current thread. Наступний turn натомість
-    відкриє свіжий thread (orphan tool_call resume вішає sidecar, codex#14824)."""
-    record = await turn_registry.get(session.db_chat_id)
-    broken_id = record.thread_id if record else None
+    """Idle-timeout → quarantine current codex thread. Наступний turn відкриє свіжий."""
+    async with SessionLocal() as db:
+        active = await turn_service.get_active_for_chat(db, session.db_chat_id)
+    broken_id = active.codex_thread_id if active else None
     await quarantine_thread(broken_id)
     async with SessionLocal() as db:
         await event_service.emit(
@@ -70,11 +75,7 @@ async def emit_failure(
 ) -> None:
     payload = {
         k: v
-        for k, v in (
-            ("code", code),
-            ("detail", detail),
-            ("exc_type", exc_type),
-        )
+        for k, v in (("code", code), ("detail", detail), ("exc_type", exc_type))
         if v
     }
     async with SessionLocal() as db:

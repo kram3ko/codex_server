@@ -80,6 +80,7 @@ class _Method(StrEnum):
     INITIALIZED = "initialized"
     THREAD_START = "thread/start"
     THREAD_RESUME = "thread/resume"
+    THREAD_READ = "thread/read"
     THREAD_INJECT_ITEMS = "thread/inject_items"
     TURN_START = "turn/start"
     TURN_STEER = "turn/steer"
@@ -332,7 +333,7 @@ class CodexClient:
         on_item_boundary: Callable[[str], Awaitable[None]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """Stream ChatEvent'и. `on_started(turn_id, thread_id)` fires як тільки
-        sidecar повернув turn/start — caller пише запис у Redis turn_registry.
+        sidecar повернув turn/start — caller робить `mark_running` у `turns`.
 
         `idle_s` ставить watchdog на notification-и поточного turn'а (не на
         ChatEvent). Чужі leftover-и з попереднього turn не мають скидати таймер
@@ -376,10 +377,65 @@ class CodexClient:
             self._idle_deadline = None
             # Не чистимо _current_turn_id — callers у власному finally читають його для CAS-drop.
 
+    async def read_thread(
+        self,
+        thread_id: str | None = None,
+        *,
+        include_turns: bool = True,
+    ) -> dict[str, Any] | None:
+        """`thread/read` — отримати поточний стан thread-а у sidecar-і. Caller
+        використовує для status probe-у на idle (codex реально вмирає або
+        просто чекає MCP-tool у tool-call-у?). Невідомий метод (`-32601`)
+        мапиться на `None` щоб caller fallback-нув на idle-timeout."""
+        target = thread_id or self._thread_id
+        if not target:
+            return None
+        try:
+            result = await self._transport.request(
+                _Method.THREAD_READ,
+                {"threadId": target, "includeTurns": include_turns},
+            )
+        except AppServerError as exc:
+            if exc.code == -32601:
+                log.info("codex_thread_read_unsupported", thread_id=target)
+                return None
+            log.warning(
+                "codex_thread_read_failed",
+                thread_id=target,
+                code=exc.code,
+                msg=str(exc),
+            )
+            return None
+        if not isinstance(result, dict):
+            return None
+        return result
+
+    async def probe_turn_status(
+        self,
+        thread_id: str,
+        codex_turn_id: str,
+    ) -> str | None:
+        """Витягує `turn.status` raw-літерал для конкретного turn-а через
+        `thread/read(includeTurns=true)`. Returns `None` якщо thread/turn
+        не знайдені або status відсутній — caller (idle probe) трактує
+        як `mismatch/stale` і йде stale_sidecar path."""
+        thread_data = await self.read_thread(thread_id, include_turns=True)
+        if thread_data is None:
+            return None
+        turns = thread_data.get("turns")
+        if not isinstance(turns, list):
+            return None
+        for turn in turns:
+            if not isinstance(turn, dict):
+                continue
+            if turn.get("id") == codex_turn_id:
+                status = turn.get("status")
+                return status if isinstance(status, str) else None
+        return None
+
     async def interrupt(self, turn_id: str | None = None) -> bool:
-        """Send turn/interrupt. `turn_id` override дозволяє іншому воркеру
-        перервати turn запущений на цьому ж sidecar'і — координати беруться
-        з Redis turn_registry, не з in-memory state."""
+        """Send turn/interrupt. `turn_id` override → cross-worker interrupt
+        через координати з `turns` table, не з in-memory state."""
         target = turn_id or self._current_turn_id
         if not target:
             return False
@@ -388,7 +444,7 @@ class CodexClient:
         except AppServerError as exc:
             stale = _stale_sidecar_turn_error(exc)
             if stale is not None:
-                raise stale
+                raise stale from exc
             if exc.code == -32601:
                 log.info("codex_interrupt_unsupported", turn_id=target)
             else:
@@ -421,7 +477,7 @@ class CodexClient:
         except AppServerError as exc:
             stale = _stale_sidecar_turn_error(exc)
             if stale is not None:
-                raise stale
+                raise stale from exc
             log.warning("codex_steer_failed", turn_id=target_turn, code=exc.code, msg=str(exc))
             return False
         self.extend_idle_deadline()

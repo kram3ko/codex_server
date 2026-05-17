@@ -41,6 +41,34 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  # Durable turn execution: TaskIQ worker слухає Redis-broker, виконує
+  # `execute_turn` task-и (`app/services/turns/tasks.py`). 2 workers безпечні
+  # завдяки `codex:slot:*` locks і partial unique у `turns`.
+  codex-worker:
+    build:
+      context: ..
+      dockerfile: docker/server/Dockerfile
+    container_name: codex-worker
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+      DATABASE_URL: postgresql+asyncpg://codex:codex@postgres:5432/codex
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: /minio
+      CODEX_CLI_URL: ws://codex-cli:4500
+      CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+    volumes:
+      - ..:/home/codex/workspace
+      - ../.codex/generated_images:/home/codex/.codex/generated_images:ro
+    command: taskiq worker app.worker:broker app.services.turns.tasks --workers 2 --ack-type when_executed
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   # Vite dev server з HMR. Source live-mount, node_modules — named volume
   # (linux binaries, не конфліктує з host'овими). /api proxy → codex-server.
   # Production nginx + static `dist/` build — окремою компоновкою при cloud deploy.

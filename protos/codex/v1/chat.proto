@@ -71,10 +71,17 @@ message ChatEvent {
     ToolResultEvent tool_result = 3;
     DoneEvent done = 4;
     ErrorEvent error = 5;
+    TurnStartedEvent turn_started = 7;
   }
   // Redis Stream ID (`<ms>-<seq>`); client передає у `TailTurnRequest.after_id`
   // для resume-on-reconnect. Empty для in-process events що не пройшли через stream.
   string event_id = 6;
+}
+
+// First event у RunTurn stream — несе local `turn_id` для per-turn reconnect.
+// Client зберігає до DoneEvent/ErrorEvent і шле у TailTurnRequest.turn_id.
+message TurnStartedEvent {
+  int64 turn_id = 1;
 }
 
 message TokenEvent {
@@ -121,13 +128,18 @@ message InterruptTurnRequest {
 
 message InterruptTurnResponse {}
 
-// Resume mid-turn stream після reconnect. Server XREADає Redis Stream
-// `chat:{chat_id}:events` з після-`after_id`, потім BLOCK на нові події
-// доки турн не завершиться. Якщо турн уже finished — повертає одразу.
+// Resume mid-turn stream після reconnect. Server XREADає per-turn Redis stream
+// `turn:{turn_id}:events`. Якщо turn вже terminal — повертає synthetic
+// terminal event з `turns.status` і закривається.
 message TailTurnRequest {
+  // Legacy: lookup latest/active turn for chat. Залишено для backwards-compat
+  // зі старими client-білдами. Нові client'и шлють `turn_id`.
   int64 chat_id = 1;
-  // Останній event_id який клієнт встиг отримати ("" = з початку наявного буфера).
+  // Останній event_id який клієнт встиг отримати ("" = з початку буфера).
   string after_id = 2;
+  // Per-turn primary handle: server tail-ить саме цей `turns.id`. Якщо set,
+  // `chat_id` ігнорується.
+  optional int64 turn_id = 3;
 }
 
 // Append text to the currently running turn (codex's `turn/steer` RPC).

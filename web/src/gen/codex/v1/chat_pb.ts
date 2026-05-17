@@ -16,7 +16,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file codex/v1/chat.proto.
  */
 export const file_codex_v1_chat: GenFile = /*@__PURE__*/
-  fileDesc("ChNjb2RleC92MS9jaGF0LnByb3RvEghjb2RleC52MSKiAgoEQ2hhdBIKCgJpZBgBIAEoAxIPCgd1c2VyX2lkGAIgASgDEiQKBnNvdXJjZRgDIAEoDjIULmNvZGV4LnYxLkNoYXRTb3VyY2USFwoKdGdfY2hhdF9pZBgEIAEoA0gAiAEBEhwKD2NvZGV4X3RocmVhZF9pZBgFIAEoCUgBiAEBEhIKBXRpdGxlGAYgASgJSAKIAQESLgoKY3JlYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLbGFzdF9tc2dfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg0KC190Z19jaGF0X2lkQhIKEF9jb2RleF90aHJlYWRfaWRCCAoGX3RpdGxlIjwKEExpc3RDaGF0c1JlcXVlc3QSKAoKcGFnaW5hdGlvbhgBIAEoCzIULmNvZGV4LnYxLlBhZ2luYXRpb24iMgoRTGlzdENoYXRzUmVzcG9uc2USHQoFY2hhdHMYASADKAsyDi5jb2RleC52MS5DaGF0IiEKDkdldENoYXRSZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMiMwoRUmVuYW1lQ2hhdFJlcXVlc3QSDwoHY2hhdF9pZBgBIAEoAxINCgV0aXRsZRgCIAEoCSIkChFEZWxldGVDaGF0UmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDImcKDlJ1blR1cm5SZXF1ZXN0EhQKB2NoYXRfaWQYASABKANIAIgBARIMCgR0ZXh0GAIgASgJEhIKCnVwbG9hZF9pZHMYAyADKAMSEQoJY2xpZW50X2lkGAQgASgJQgoKCF9jaGF0X2lkIvgBCglDaGF0RXZlbnQSJQoFdG9rZW4YASABKAsyFC5jb2RleC52MS5Ub2tlbkV2ZW50SAASLAoJdG9vbF9jYWxsGAIgASgLMhcuY29kZXgudjEuVG9vbENhbGxFdmVudEgAEjAKC3Rvb2xfcmVzdWx0GAMgASgLMhkuY29kZXgudjEuVG9vbFJlc3VsdEV2ZW50SAASIwoEZG9uZRgEIAEoCzITLmNvZGV4LnYxLkRvbmVFdmVudEgAEiUKBWVycm9yGAUgASgLMhQuY29kZXgudjEuRXJyb3JFdmVudEgAEhAKCGV2ZW50X2lkGAYgASgJQgYKBGtpbmQiGwoKVG9rZW5FdmVudBINCgVkZWx0YRgBIAEoCSJECg1Ub29sQ2FsbEV2ZW50EgwKBG5hbWUYASABKAkSJQoEYXJncxgCIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QiOwoKQXR0YWNobWVudBIMCgRraW5kGAEgASgJEg4KBnNvdXJjZRgCIAEoCRIPCgdjYXB0aW9uGAMgASgJInYKD1Rvb2xSZXN1bHRFdmVudBIMCgRuYW1lGAEgASgJEgwKBHRleHQYAiABKAkSKQoLYXR0YWNobWVudHMYAyADKAsyFC5jb2RleC52MS5BdHRhY2htZW50EhIKBWVycm9yGAQgASgJSACIAQFCCAoGX2Vycm9yIm4KCURvbmVFdmVudBIPCgdjaGF0X2lkGAEgASgDEhIKCmZpbmFsX3RleHQYAiABKAkSIgoHbWVzc2FnZRgDIAEoCzIRLmNvZGV4LnYxLk1lc3NhZ2USGAoQc3RlZXJlZF9mYWxsYmFjaxgEIAEoCCI6CgpFcnJvckV2ZW50EgwKBGNvZGUYASABKAkSEwoGZGV0YWlsGAIgASgJSACIAQFCCQoHX2RldGFpbCInChRJbnRlcnJ1cHRUdXJuUmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDIhcKFUludGVycnVwdFR1cm5SZXNwb25zZSI0Cg9UYWlsVHVyblJlcXVlc3QSDwoHY2hhdF9pZBgBIAEoAxIQCghhZnRlcl9pZBgCIAEoCSIxChBTdGVlclR1cm5SZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMSDAoEdGV4dBgCIAEoCSIlChFTdGVlclR1cm5SZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCCIWChRHZXRDb2RleFVzYWdlUmVxdWVzdCJ9CgtVc2FnZVdpbmRvdxIUCgx1c2VkX3BlcmNlbnQYASABKAESFgoOd2luZG93X21pbnV0ZXMYAiABKAUSMgoJcmVzZXRzX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgAiAEBQgwKCl9yZXNldHNfYXQiqAEKCkNvZGV4VXNhZ2USFgoJcGxhbl90eXBlGAEgASgJSACIAQESKwoHcHJpbWFyeRgCIAEoCzIVLmNvZGV4LnYxLlVzYWdlV2luZG93SAGIAQESLQoJc2Vjb25kYXJ5GAMgASgLMhUuY29kZXgudjEuVXNhZ2VXaW5kb3dIAogBAUIMCgpfcGxhbl90eXBlQgoKCF9wcmltYXJ5QgwKCl9zZWNvbmRhcnkqWAoKQ2hhdFNvdXJjZRIbChdDSEFUX1NPVVJDRV9VTlNQRUNJRklFRBAAEhMKD0NIQVRfU09VUkNFX1dFQhABEhgKFENIQVRfU09VUkNFX1RFTEVHUkFNEAIy2AQKC0NoYXRTZXJ2aWNlEkQKCUxpc3RDaGF0cxIaLmNvZGV4LnYxLkxpc3RDaGF0c1JlcXVlc3QaGy5jb2RleC52MS5MaXN0Q2hhdHNSZXNwb25zZRIzCgdHZXRDaGF0EhguY29kZXgudjEuR2V0Q2hhdFJlcXVlc3QaDi5jb2RleC52MS5DaGF0EjkKClJlbmFtZUNoYXQSGy5jb2RleC52MS5SZW5hbWVDaGF0UmVxdWVzdBoOLmNvZGV4LnYxLkNoYXQSOgoKRGVsZXRlQ2hhdBIbLmNvZGV4LnYxLkRlbGV0ZUNoYXRSZXF1ZXN0Gg8uY29kZXgudjEuRW1wdHkSOgoHUnVuVHVybhIYLmNvZGV4LnYxLlJ1blR1cm5SZXF1ZXN0GhMuY29kZXgudjEuQ2hhdEV2ZW50MAESPAoIVGFpbFR1cm4SGS5jb2RleC52MS5UYWlsVHVyblJlcXVlc3QaEy5jb2RleC52MS5DaGF0RXZlbnQwARJQCg1JbnRlcnJ1cHRUdXJuEh4uY29kZXgudjEuSW50ZXJydXB0VHVyblJlcXVlc3QaHy5jb2RleC52MS5JbnRlcnJ1cHRUdXJuUmVzcG9uc2USRAoJU3RlZXJUdXJuEhouY29kZXgudjEuU3RlZXJUdXJuUmVxdWVzdBobLmNvZGV4LnYxLlN0ZWVyVHVyblJlc3BvbnNlEkUKDUdldENvZGV4VXNhZ2USHi5jb2RleC52MS5HZXRDb2RleFVzYWdlUmVxdWVzdBoULmNvZGV4LnYxLkNvZGV4VXNhZ2ViBnByb3RvMw", [file_google_protobuf_timestamp, file_google_protobuf_struct, file_codex_v1_common, file_codex_v1_message]);
+  fileDesc("ChNjb2RleC92MS9jaGF0LnByb3RvEghjb2RleC52MSKiAgoEQ2hhdBIKCgJpZBgBIAEoAxIPCgd1c2VyX2lkGAIgASgDEiQKBnNvdXJjZRgDIAEoDjIULmNvZGV4LnYxLkNoYXRTb3VyY2USFwoKdGdfY2hhdF9pZBgEIAEoA0gAiAEBEhwKD2NvZGV4X3RocmVhZF9pZBgFIAEoCUgBiAEBEhIKBXRpdGxlGAYgASgJSAKIAQESLgoKY3JlYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLbGFzdF9tc2dfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg0KC190Z19jaGF0X2lkQhIKEF9jb2RleF90aHJlYWRfaWRCCAoGX3RpdGxlIjwKEExpc3RDaGF0c1JlcXVlc3QSKAoKcGFnaW5hdGlvbhgBIAEoCzIULmNvZGV4LnYxLlBhZ2luYXRpb24iMgoRTGlzdENoYXRzUmVzcG9uc2USHQoFY2hhdHMYASADKAsyDi5jb2RleC52MS5DaGF0IiEKDkdldENoYXRSZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMiMwoRUmVuYW1lQ2hhdFJlcXVlc3QSDwoHY2hhdF9pZBgBIAEoAxINCgV0aXRsZRgCIAEoCSIkChFEZWxldGVDaGF0UmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDImcKDlJ1blR1cm5SZXF1ZXN0EhQKB2NoYXRfaWQYASABKANIAIgBARIMCgR0ZXh0GAIgASgJEhIKCnVwbG9hZF9pZHMYAyADKAMSEQoJY2xpZW50X2lkGAQgASgJQgoKCF9jaGF0X2lkIqwCCglDaGF0RXZlbnQSJQoFdG9rZW4YASABKAsyFC5jb2RleC52MS5Ub2tlbkV2ZW50SAASLAoJdG9vbF9jYWxsGAIgASgLMhcuY29kZXgudjEuVG9vbENhbGxFdmVudEgAEjAKC3Rvb2xfcmVzdWx0GAMgASgLMhkuY29kZXgudjEuVG9vbFJlc3VsdEV2ZW50SAASIwoEZG9uZRgEIAEoCzITLmNvZGV4LnYxLkRvbmVFdmVudEgAEiUKBWVycm9yGAUgASgLMhQuY29kZXgudjEuRXJyb3JFdmVudEgAEjIKDHR1cm5fc3RhcnRlZBgHIAEoCzIaLmNvZGV4LnYxLlR1cm5TdGFydGVkRXZlbnRIABIQCghldmVudF9pZBgGIAEoCUIGCgRraW5kIiMKEFR1cm5TdGFydGVkRXZlbnQSDwoHdHVybl9pZBgBIAEoAyIbCgpUb2tlbkV2ZW50Eg0KBWRlbHRhGAEgASgJIkQKDVRvb2xDYWxsRXZlbnQSDAoEbmFtZRgBIAEoCRIlCgRhcmdzGAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCI7CgpBdHRhY2htZW50EgwKBGtpbmQYASABKAkSDgoGc291cmNlGAIgASgJEg8KB2NhcHRpb24YAyABKAkidgoPVG9vbFJlc3VsdEV2ZW50EgwKBG5hbWUYASABKAkSDAoEdGV4dBgCIAEoCRIpCgthdHRhY2htZW50cxgDIAMoCzIULmNvZGV4LnYxLkF0dGFjaG1lbnQSEgoFZXJyb3IYBCABKAlIAIgBAUIICgZfZXJyb3IibgoJRG9uZUV2ZW50Eg8KB2NoYXRfaWQYASABKAMSEgoKZmluYWxfdGV4dBgCIAEoCRIiCgdtZXNzYWdlGAMgASgLMhEuY29kZXgudjEuTWVzc2FnZRIYChBzdGVlcmVkX2ZhbGxiYWNrGAQgASgIIjoKCkVycm9yRXZlbnQSDAoEY29kZRgBIAEoCRITCgZkZXRhaWwYAiABKAlIAIgBAUIJCgdfZGV0YWlsIicKFEludGVycnVwdFR1cm5SZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMiFwoVSW50ZXJydXB0VHVyblJlc3BvbnNlIlYKD1RhaWxUdXJuUmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDEhAKCGFmdGVyX2lkGAIgASgJEhQKB3R1cm5faWQYAyABKANIAIgBAUIKCghfdHVybl9pZCIxChBTdGVlclR1cm5SZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMSDAoEdGV4dBgCIAEoCSIlChFTdGVlclR1cm5SZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCCIWChRHZXRDb2RleFVzYWdlUmVxdWVzdCJ9CgtVc2FnZVdpbmRvdxIUCgx1c2VkX3BlcmNlbnQYASABKAESFgoOd2luZG93X21pbnV0ZXMYAiABKAUSMgoJcmVzZXRzX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEgAiAEBQgwKCl9yZXNldHNfYXQiqAEKCkNvZGV4VXNhZ2USFgoJcGxhbl90eXBlGAEgASgJSACIAQESKwoHcHJpbWFyeRgCIAEoCzIVLmNvZGV4LnYxLlVzYWdlV2luZG93SAGIAQESLQoJc2Vjb25kYXJ5GAMgASgLMhUuY29kZXgudjEuVXNhZ2VXaW5kb3dIAogBAUIMCgpfcGxhbl90eXBlQgoKCF9wcmltYXJ5QgwKCl9zZWNvbmRhcnkqWAoKQ2hhdFNvdXJjZRIbChdDSEFUX1NPVVJDRV9VTlNQRUNJRklFRBAAEhMKD0NIQVRfU09VUkNFX1dFQhABEhgKFENIQVRfU09VUkNFX1RFTEVHUkFNEAIy2AQKC0NoYXRTZXJ2aWNlEkQKCUxpc3RDaGF0cxIaLmNvZGV4LnYxLkxpc3RDaGF0c1JlcXVlc3QaGy5jb2RleC52MS5MaXN0Q2hhdHNSZXNwb25zZRIzCgdHZXRDaGF0EhguY29kZXgudjEuR2V0Q2hhdFJlcXVlc3QaDi5jb2RleC52MS5DaGF0EjkKClJlbmFtZUNoYXQSGy5jb2RleC52MS5SZW5hbWVDaGF0UmVxdWVzdBoOLmNvZGV4LnYxLkNoYXQSOgoKRGVsZXRlQ2hhdBIbLmNvZGV4LnYxLkRlbGV0ZUNoYXRSZXF1ZXN0Gg8uY29kZXgudjEuRW1wdHkSOgoHUnVuVHVybhIYLmNvZGV4LnYxLlJ1blR1cm5SZXF1ZXN0GhMuY29kZXgudjEuQ2hhdEV2ZW50MAESPAoIVGFpbFR1cm4SGS5jb2RleC52MS5UYWlsVHVyblJlcXVlc3QaEy5jb2RleC52MS5DaGF0RXZlbnQwARJQCg1JbnRlcnJ1cHRUdXJuEh4uY29kZXgudjEuSW50ZXJydXB0VHVyblJlcXVlc3QaHy5jb2RleC52MS5JbnRlcnJ1cHRUdXJuUmVzcG9uc2USRAoJU3RlZXJUdXJuEhouY29kZXgudjEuU3RlZXJUdXJuUmVxdWVzdBobLmNvZGV4LnYxLlN0ZWVyVHVyblJlc3BvbnNlEkUKDUdldENvZGV4VXNhZ2USHi5jb2RleC52MS5HZXRDb2RleFVzYWdlUmVxdWVzdBoULmNvZGV4LnYxLkNvZGV4VXNhZ2ViBnByb3RvMw", [file_google_protobuf_timestamp, file_google_protobuf_struct, file_codex_v1_common, file_codex_v1_message]);
 
 /**
  * @generated from message codex.v1.Chat
@@ -241,6 +241,12 @@ export type ChatEvent = Message<"codex.v1.ChatEvent"> & {
      */
     value: ErrorEvent;
     case: "error";
+  } | {
+    /**
+     * @generated from field: codex.v1.TurnStartedEvent turn_started = 7;
+     */
+    value: TurnStartedEvent;
+    case: "turnStarted";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -260,6 +266,26 @@ export const ChatEventSchema: GenMessage<ChatEvent> = /*@__PURE__*/
   messageDesc(file_codex_v1_chat, 7);
 
 /**
+ * First event у RunTurn stream — несе local `turn_id` для per-turn reconnect.
+ * Client зберігає до DoneEvent/ErrorEvent і шле у TailTurnRequest.turn_id.
+ *
+ * @generated from message codex.v1.TurnStartedEvent
+ */
+export type TurnStartedEvent = Message<"codex.v1.TurnStartedEvent"> & {
+  /**
+   * @generated from field: int64 turn_id = 1;
+   */
+  turnId: bigint;
+};
+
+/**
+ * Describes the message codex.v1.TurnStartedEvent.
+ * Use `create(TurnStartedEventSchema)` to create a new message.
+ */
+export const TurnStartedEventSchema: GenMessage<TurnStartedEvent> = /*@__PURE__*/
+  messageDesc(file_codex_v1_chat, 8);
+
+/**
  * @generated from message codex.v1.TokenEvent
  */
 export type TokenEvent = Message<"codex.v1.TokenEvent"> & {
@@ -274,7 +300,7 @@ export type TokenEvent = Message<"codex.v1.TokenEvent"> & {
  * Use `create(TokenEventSchema)` to create a new message.
  */
 export const TokenEventSchema: GenMessage<TokenEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 8);
+  messageDesc(file_codex_v1_chat, 9);
 
 /**
  * @generated from message codex.v1.ToolCallEvent
@@ -296,7 +322,7 @@ export type ToolCallEvent = Message<"codex.v1.ToolCallEvent"> & {
  * Use `create(ToolCallEventSchema)` to create a new message.
  */
 export const ToolCallEventSchema: GenMessage<ToolCallEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 9);
+  messageDesc(file_codex_v1_chat, 10);
 
 /**
  * @generated from message codex.v1.Attachment
@@ -323,7 +349,7 @@ export type Attachment = Message<"codex.v1.Attachment"> & {
  * Use `create(AttachmentSchema)` to create a new message.
  */
 export const AttachmentSchema: GenMessage<Attachment> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 10);
+  messageDesc(file_codex_v1_chat, 11);
 
 /**
  * @generated from message codex.v1.ToolResultEvent
@@ -355,7 +381,7 @@ export type ToolResultEvent = Message<"codex.v1.ToolResultEvent"> & {
  * Use `create(ToolResultEventSchema)` to create a new message.
  */
 export const ToolResultEventSchema: GenMessage<ToolResultEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 11);
+  messageDesc(file_codex_v1_chat, 12);
 
 /**
  * @generated from message codex.v1.DoneEvent
@@ -393,7 +419,7 @@ export type DoneEvent = Message<"codex.v1.DoneEvent"> & {
  * Use `create(DoneEventSchema)` to create a new message.
  */
 export const DoneEventSchema: GenMessage<DoneEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 12);
+  messageDesc(file_codex_v1_chat, 13);
 
 /**
  * @generated from message codex.v1.ErrorEvent
@@ -415,7 +441,7 @@ export type ErrorEvent = Message<"codex.v1.ErrorEvent"> & {
  * Use `create(ErrorEventSchema)` to create a new message.
  */
 export const ErrorEventSchema: GenMessage<ErrorEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 13);
+  messageDesc(file_codex_v1_chat, 14);
 
 /**
  * @generated from message codex.v1.InterruptTurnRequest
@@ -432,7 +458,7 @@ export type InterruptTurnRequest = Message<"codex.v1.InterruptTurnRequest"> & {
  * Use `create(InterruptTurnRequestSchema)` to create a new message.
  */
 export const InterruptTurnRequestSchema: GenMessage<InterruptTurnRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 14);
+  messageDesc(file_codex_v1_chat, 15);
 
 /**
  * @generated from message codex.v1.InterruptTurnResponse
@@ -445,27 +471,38 @@ export type InterruptTurnResponse = Message<"codex.v1.InterruptTurnResponse"> & 
  * Use `create(InterruptTurnResponseSchema)` to create a new message.
  */
 export const InterruptTurnResponseSchema: GenMessage<InterruptTurnResponse> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 15);
+  messageDesc(file_codex_v1_chat, 16);
 
 /**
- * Resume mid-turn stream після reconnect. Server XREADає Redis Stream
- * `chat:{chat_id}:events` з після-`after_id`, потім BLOCK на нові події
- * доки турн не завершиться. Якщо турн уже finished — повертає одразу.
+ * Resume mid-turn stream після reconnect. Server XREADає per-turn Redis stream
+ * `turn:{turn_id}:events`. Якщо turn вже terminal — повертає synthetic
+ * terminal event з `turns.status` і закривається.
  *
  * @generated from message codex.v1.TailTurnRequest
  */
 export type TailTurnRequest = Message<"codex.v1.TailTurnRequest"> & {
   /**
+   * Legacy: lookup latest/active turn for chat. Залишено для backwards-compat
+   * зі старими client-білдами. Нові client'и шлють `turn_id`.
+   *
    * @generated from field: int64 chat_id = 1;
    */
   chatId: bigint;
 
   /**
-   * Останній event_id який клієнт встиг отримати ("" = з початку наявного буфера).
+   * Останній event_id який клієнт встиг отримати ("" = з початку буфера).
    *
    * @generated from field: string after_id = 2;
    */
   afterId: string;
+
+  /**
+   * Per-turn primary handle: server tail-ить саме цей `turns.id`. Якщо set,
+   * `chat_id` ігнорується.
+   *
+   * @generated from field: optional int64 turn_id = 3;
+   */
+  turnId?: bigint | undefined;
 };
 
 /**
@@ -473,7 +510,7 @@ export type TailTurnRequest = Message<"codex.v1.TailTurnRequest"> & {
  * Use `create(TailTurnRequestSchema)` to create a new message.
  */
 export const TailTurnRequestSchema: GenMessage<TailTurnRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 16);
+  messageDesc(file_codex_v1_chat, 17);
 
 /**
  * Append text to the currently running turn (codex's `turn/steer` RPC).
@@ -499,7 +536,7 @@ export type SteerTurnRequest = Message<"codex.v1.SteerTurnRequest"> & {
  * Use `create(SteerTurnRequestSchema)` to create a new message.
  */
 export const SteerTurnRequestSchema: GenMessage<SteerTurnRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 17);
+  messageDesc(file_codex_v1_chat, 18);
 
 /**
  * @generated from message codex.v1.SteerTurnResponse
@@ -516,7 +553,7 @@ export type SteerTurnResponse = Message<"codex.v1.SteerTurnResponse"> & {
  * Use `create(SteerTurnResponseSchema)` to create a new message.
  */
 export const SteerTurnResponseSchema: GenMessage<SteerTurnResponse> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 18);
+  messageDesc(file_codex_v1_chat, 19);
 
 /**
  * @generated from message codex.v1.GetCodexUsageRequest
@@ -529,7 +566,7 @@ export type GetCodexUsageRequest = Message<"codex.v1.GetCodexUsageRequest"> & {
  * Use `create(GetCodexUsageRequestSchema)` to create a new message.
  */
 export const GetCodexUsageRequestSchema: GenMessage<GetCodexUsageRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 19);
+  messageDesc(file_codex_v1_chat, 20);
 
 /**
  * @generated from message codex.v1.UsageWindow
@@ -556,7 +593,7 @@ export type UsageWindow = Message<"codex.v1.UsageWindow"> & {
  * Use `create(UsageWindowSchema)` to create a new message.
  */
 export const UsageWindowSchema: GenMessage<UsageWindow> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 20);
+  messageDesc(file_codex_v1_chat, 21);
 
 /**
  * Sidecar may not expose `account/rateLimits/read` — in that case all fields
@@ -586,7 +623,7 @@ export type CodexUsage = Message<"codex.v1.CodexUsage"> & {
  * Use `create(CodexUsageSchema)` to create a new message.
  */
 export const CodexUsageSchema: GenMessage<CodexUsage> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 21);
+  messageDesc(file_codex_v1_chat, 22);
 
 /**
  * @generated from enum codex.v1.ChatSource
