@@ -289,6 +289,15 @@ async def stream_turn(
             )
         )
 
+    log.info(
+        "web_done_yielded",
+        turn_id=turn_id,
+        client_id=client_id,
+        assistant_msg_id=assistant_msg.id,
+        final_text_len=len(state.collector.final_text),
+        buffer_len=len(state.collector.buffer),
+        partials_deleted=len(state.partial_msg_ids) > 0,
+    )
     yield chat_pb2.ChatEvent(
         done=chat_pb2.DoneEvent(
             chat_id=persisted_chat_id,
