@@ -48,5 +48,3 @@ async def _finalize_orphan(db, turn: TurnRow) -> None:
     )
     log.warning("turn_reconcile_finalized", turn_id=turn.id)
     await locks.release_active(turn.chat_id, turn.id)
-    if turn.sidecar:
-        await locks.release_slot(turn.sidecar, turn.id)
