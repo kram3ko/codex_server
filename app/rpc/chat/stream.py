@@ -268,6 +268,7 @@ async def stream_turn(
     # до turn + DELETE partials + TURN_COMPLETED emit). На crash будь-якого
     # кроку все rollback-иться — БД лишається consistent.
     final_text = state.collector.final_text or state.collector.buffer
+    partials_count = len(state.partial_msg_ids)
     assistant_msg = await _finalize_turn_persist(
         persisted_chat_id,
         user_pk,
@@ -296,7 +297,7 @@ async def stream_turn(
         assistant_msg_id=assistant_msg.id,
         final_text_len=len(state.collector.final_text),
         buffer_len=len(state.collector.buffer),
-        partials_deleted=len(state.partial_msg_ids) > 0,
+        partials_deleted=partials_count,
     )
     yield chat_pb2.ChatEvent(
         done=chat_pb2.DoneEvent(

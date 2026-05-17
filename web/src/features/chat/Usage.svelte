@@ -39,7 +39,10 @@
     }
     loading = false;
     if (destroyed) return;
-    const delay = Math.min(30_000, 1_000 * 2 ** attempt);
+    // Backoff з ±20% jitter — без нього N вкладок після server-restart
+    // reconnect-нуться одночасно і дадуть spike навантаження.
+    const base = Math.min(30_000, 1_000 * 2 ** attempt);
+    const delay = base * (0.8 + Math.random() * 0.4);
     reconnectTimer = setTimeout(() => consumeStream(attempt + 1), delay);
   }
 

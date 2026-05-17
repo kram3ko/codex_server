@@ -207,17 +207,27 @@
               messages = messages.map((m) =>
                 clientIdOf(m) === clientId ? persisted : m
               );
-            } else if (!placeholderAdded && persisted) {
+            } else if (persisted) {
               // Turn був майже finalized до того як ми приєднались — нема
               // tokens, додаємо persisted у кінець.
               messages = [...messages, persisted];
+            } else if (selected?.id === chat.id) {
+              // Synthetic terminal (turn вже у БД до того як resume почав tail).
+              // Можливо turn finalize-нувся між loadChatMessages та tail RPC —
+              // reload щоб підтягти final assistant row що поки не у `messages`.
+              const refreshed = await messageClient.listMessages({
+                chatId: chat.id,
+                pagination: { limit: PAGE_SIZE }
+              });
+              messages = [...refreshed.messages];
+              hasMoreOlder = refreshed.messages.length >= PAGE_SIZE;
             }
-            cleanupResumeState();
+            cleanupResumeState(clientId);
             return;
           }
           case "error":
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
-            cleanupResumeState();
+            cleanupResumeState(clientId);
             return;
         }
         await tick();
@@ -225,11 +235,14 @@
     } catch {
       // network drop / abort на switch chat — cleanup.
       messages = messages.filter((m) => clientIdOf(m) !== clientId);
-      cleanupResumeState();
+      cleanupResumeState(clientId);
     }
   }
 
-  function cleanupResumeState() {
+  function cleanupResumeState(clientId: string) {
+    // Чистимо global state ТІЛЬКИ якщо він усе ще наш — інакше aborted
+    // resume міг би перетерти живий send() що почався пізніше.
+    if (streamingClientId !== clientId) return;
     streamingClientId = null;
     draftStartedAt = undefined;
     lastActivityAt = undefined;
@@ -277,6 +290,11 @@
   }
 
   async function send(text: string, imageIds: bigint[] = [], audioIds: bigint[] = []) {
+    // Відмінити resume-stream що ще тримається з попереднього mount —
+    // інакше його `ensurePlaceholder()`/cleanup міг би перетерти state
+    // нового send-у (streamingClientId/typer/tools/busy).
+    resumeAbort?.abort();
+    resumeAbort = null;
     const uploadIds = [...imageIds, ...audioIds];
     // Busy + no uploads → пробуємо steer running turn. Reject = turn закінчився
     // між нашим busy=true і RPC; просто відкриваємо новий turn без interrupt.
@@ -453,15 +471,6 @@
             }
             await typer.drained();
             const persisted = done.message;
-            console.log("[chat] done", {
-              clientId,
-              hasMsg: !!persisted,
-              persistedCid: persisted ? clientIdOf(persisted) : null,
-              persistedId: persisted?.id?.toString(),
-              finalLen: done.finalText.length,
-              streamedPrefixLen: streamedPrefix.length,
-              typerLen: typer.displayed.length,
-            });
             if (persisted) {
               // ID swap: streaming placeholder → real DB message by client_id.
               // Same key (client_id) keeps DOM instance stable, no remount.
@@ -594,6 +603,8 @@
     if (!selected) {
       return;
     }
+    resumeAbort?.abort();
+    resumeAbort = null;
     activeTurnId += 1;
     // Snapshot partial streamed text into committed message so user sees the
     // partial reply instead of empty hole. Same client_id key keeps DOM stable.
