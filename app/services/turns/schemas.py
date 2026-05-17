@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import TurnStatus
+from app.services.codex.sidecar import SidecarName
 
 __all__ = ["TurnCreate", "TurnRow", "TurnStatus"]
 
@@ -15,7 +16,7 @@ class TurnCreate(BaseModel):
     chat_id: int = Field(description="FK до chats.id")
     user_id: int = Field(description="Власник turn-а (FK users.id)")
     user_message_id: int = Field(description="Persisted USER message що тригернув turn")
-    sidecar: str = Field(description="Slot id codex-cli sidecar (наприклад 'admin')")
+    sidecar: SidecarName = Field(description="Codex CLI sidecar (admin/guest)")
 
 
 class TurnRow(BaseModel):
@@ -33,7 +34,7 @@ class TurnRow(BaseModel):
     status: TurnStatus = Field(description="Lifecycle state machine")
     codex_thread_id: str | None = Field(description="Codex thread id; None до turn/start")
     codex_turn_id: str | None = Field(description="Codex turn id; None до turn/start")
-    sidecar: str | None = Field(description="Slot id codex-cli sidecar (admin/guest/...)")
+    sidecar: SidecarName | None = Field(description="Codex CLI sidecar (admin/guest)")
     stream_key: str = Field(description="Redis stream key для live events (turn:{id}:events)")
     error_code: str | None = Field(description="Domain error code на terminal failed/cancelled")
     error_detail: str | None = Field(description="Free-form error context для debug")

@@ -9,9 +9,13 @@ erDiagram
     USERS ||--o{ NOTES    : "owns"
     USERS ||--o{ EVENTS   : "actor (nullable)"
     USERS ||--o{ INVITES  : "creator"
+    USERS ||--o{ TURNS    : "actor"
     CHATS ||--o{ MESSAGES : "contains"
     CHATS ||--o{ EVENTS   : "scope (nullable)"
     CHATS ||--o{ UPLOADS  : "scope (SET NULL)"
+    CHATS ||--o{ TURNS    : "scope"
+    MESSAGES ||--o| TURNS : "user_message (1:1)"
+    MESSAGES ||--o| TURNS : "assistant_message (0..1, SET NULL)"
 
     USERS {
         bigint   id PK
@@ -90,3 +94,29 @@ erDiagram
         tstz     created_at
         tstz     updated_at
     }
+
+    TURNS {
+        bigint     id PK
+        bigint     chat_id              FK "→ chats.id CASCADE, indexed"
+        bigint     user_id              FK "→ users.id CASCADE, indexed"
+        bigint     user_message_id      FK "→ messages.id SET NULL, NOT NULL on insert"
+        bigint     assistant_message_id FK "→ messages.id SET NULL, nullable (lazy bind)"
+        TurnStatus status               "ENUM(STARTING,RUNNING,COMPLETED,FAILED,CANCELLED)"
+        string     codex_thread_id      "nullable — set by mark_running"
+        string     codex_turn_id        "nullable — set by mark_running"
+        string     sidecar              "nullable ('admin'|'guest')"
+        string     stream_key           "nullable — `turn:{id}:events`"
+        string     error_code           "nullable — CodexErrorCode"
+        text       error_detail         "nullable"
+        string     last_event_id        "nullable — Redis stream cursor"
+        tstz       heartbeat_at         "indexed (turns_stale_heartbeat)"
+        tstz       completed_at         "nullable; set by finalize_once"
+        tstz       created_at
+        tstz       updated_at
+    }
+
+    %% Indexes
+    %% turns_active_per_chat — UNIQUE PARTIAL (chat_id) WHERE status IN ('STARTING','RUNNING')
+    %% turns_stale_heartbeat — INDEX (heartbeat_at) WHERE status IN ('STARTING','RUNNING')
+    %% turns_by_chat         — INDEX (chat_id, created_at DESC)
+    %% turns_by_user         — INDEX (user_id, created_at DESC)

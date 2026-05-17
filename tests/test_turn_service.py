@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.dialects import postgresql
 
 from app.models import Turn, TurnStatus
+from app.services.codex.sidecar import SidecarName
 from app.services.turns.schemas import TurnCreate
 from app.services.turns.service import TurnService
 
@@ -75,6 +76,21 @@ class _FakeSession:
 
     async def get(self, _entity: Any, _pk: Any) -> Any:
         return self._get_row
+
+    async def refresh(self, obj: Any) -> None:
+        # No-op — у реальному SessionLocal це підтягне server_default-и
+        # (`created_at`/`updated_at`); у тесті об'єкт уже має значення які
+        # модель валідує через Pydantic.
+        if isinstance(obj, Turn):
+            from datetime import UTC, datetime
+
+            now = datetime.now(UTC)
+            if obj.created_at is None:
+                obj.created_at = now
+            if obj.updated_at is None:
+                obj.updated_at = now
+            if obj.heartbeat_at is None:
+                obj.heartbeat_at = now
 
 
 def _sql(statement: Any) -> str:
@@ -170,7 +186,19 @@ async def test_heartbeat_updates_starting_or_running_rows() -> None:
 
 
 async def test_get_active_for_chat_filters_by_live_statuses() -> None:
-    live = Turn(id=5, chat_id=1)
+    now = datetime.now(UTC)
+    live = Turn(
+        id=5,
+        chat_id=1,
+        user_id=1,
+        user_message_id=1,
+        status=TurnStatus.RUNNING,
+        stream_key="turn:5:events",
+        sidecar=SidecarName.ADMIN.value,
+        heartbeat_at=now,
+        created_at=now,
+        updated_at=now,
+    )
     session = _FakeSession(get_row=None)
 
     async def execute(statement: Any) -> _Result:
@@ -191,7 +219,19 @@ async def test_get_active_for_chat_filters_by_live_statuses() -> None:
 async def test_find_stale_active_uses_threshold() -> None:
     threshold = timedelta(minutes=2)
     now = datetime.now(UTC)
-    stale = Turn(id=8, chat_id=3, heartbeat_at=now - timedelta(minutes=5))
+    stale_at = now - timedelta(minutes=5)
+    stale = Turn(
+        id=8,
+        chat_id=3,
+        user_id=1,
+        user_message_id=1,
+        status=TurnStatus.RUNNING,
+        stream_key="turn:8:events",
+        sidecar=SidecarName.ADMIN.value,
+        heartbeat_at=stale_at,
+        created_at=stale_at,
+        updated_at=stale_at,
+    )
     session = _FakeSession(rows=[stale])
     service = TurnService()
 

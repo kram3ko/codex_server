@@ -6,10 +6,11 @@
 
 import asyncio
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
+from sqlalchemy import delete
 
 from app.config import settings
 from app.db.base import SessionLocal
@@ -35,6 +36,8 @@ from app.services.codex.events import (
     ToolCallRecord,
 )
 from app.services.codex.runner import quarantine_thread
+from app.services.codex.sidecar import SidecarName
+from app.services.codex_usage import poller as usage_poller
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.turns.default import turn_service
@@ -50,11 +53,24 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class _StreamState:
+    """Steer-boundary segmentation state. Partial rows — transient live
+    snapshots (тільки для streaming chronology); на successful done
+    видаляються, лишається single final assistant row як source of truth.
+    На error/cancel/timeout — partial-rows зберігаються як "що встигло
+    прийти до обриву" (`persist_visible_partial`).
+    """
+
     collector: StreamCollector
-    partial_msg_id: int | None = None
-    assistant_attached: bool = False
     events_count: int = 0
     last_event_type: str = "none"
+    segment_buffer_offset: int = 0
+    segment_tool_count: int = 0
+    seen_steer_count: int = 0
+    partial_msg_ids: list[int] = field(default_factory=list)
+
+    def cut_segment(self) -> None:
+        self.segment_buffer_offset = len(self.collector.buffer)
+        self.segment_tool_count = len(self.collector.tool_calls)
 
 
 async def stream_turn(
@@ -67,6 +83,7 @@ async def stream_turn(
     voice_reply: bool = False,
     client_id: str | None = None,
     turn_id: int | None = None,
+    sidecar: SidecarName | None = None,
 ) -> AsyncIterator[chat_pb2.ChatEvent]:
     state = _StreamState(collector=StreamCollector())
 
@@ -82,15 +99,24 @@ async def stream_turn(
             last_event_type=state.last_event_type,
         )
 
-    async def _on_item_boundary(item_type: str) -> None:
-        del item_type
-        await _persist_boundary(
+    async def _check_steer_boundary() -> None:
+        if turn_id is None:
+            return
+        cur = await codex_remote.peek_steer_count(turn_id)
+        if cur <= state.seen_steer_count:
+            return
+        state.seen_steer_count = cur
+        await _persist_segment(
             state,
             persisted_chat_id,
             user_pk,
-            client_id=client_id,
             turn_id=turn_id,
         )
+
+    async def _on_usage_signal() -> None:
+        # Sidecar шле `thread/tokenUsage/updated` → fan-out у pub/sub.
+        if sidecar is not None:
+            usage_poller.schedule_refresh(sidecar)
 
     stream = client.run_turn(
         text,
@@ -98,7 +124,7 @@ async def stream_turn(
         on_started=_on_started,
         idle_s=settings.WEB_TURN_TIMEOUT_SECONDS,
         on_idle=_on_idle,
-        on_item_boundary=_on_item_boundary,
+        on_usage_signal=_on_usage_signal,
     )
 
     # Coalesce TokenEvent deltas щоб зменшити кількість HTTP/2 DATA фреймів і
@@ -142,6 +168,11 @@ async def stream_turn(
                     flushed = _flush_token_buffer()
                     if flushed is not None:
                         yield flushed
+                    # Якщо steer прилетів між останнім boundary-check і done
+                    # (нема ані non-Token event, ані coalesce-flush) —
+                    # pre-steer контент попав би у final одним blob. Flush
+                    # тут гарантує pre/post steer rows розділені.
+                    await _check_steer_boundary()
                     break
                 case TokenEvent(delta=delta) if coalesce_bytes > 0:
                     pending_text.append(delta)
@@ -150,11 +181,17 @@ async def stream_turn(
                         flushed = _flush_token_buffer()
                         if flushed is not None:
                             yield flushed
+                        # Steer-boundary check на flush — амортизовано рідко
+                        # (раз на ~`coalesce_bytes` токенів), не на кожен token.
+                        await _check_steer_boundary()
                 case _:
                     flushed = _flush_token_buffer()
                     if flushed is not None:
                         yield flushed
                     yield chat_event_to_pb(ev)
+                    # Non-Token події рідкі (tool calls, attachments) — check без
+                    # амортизації, latency Redis GET ~0.5ms прийнятна.
+                    await _check_steer_boundary()
     except CodexTurnTerminal as exc:
         event = await _event_from_probe_terminal(
             state,
@@ -227,16 +264,21 @@ async def stream_turn(
         )
         return
 
-    assistant_msg = await _persist_assistant_turn(
+    # Final-of-turn persist: single atomic transaction (INSERT final + attach
+    # до turn + DELETE partials + TURN_COMPLETED emit). На crash будь-якого
+    # кроку все rollback-иться — БД лишається consistent.
+    final_text = state.collector.final_text or state.collector.buffer
+    assistant_msg = await _finalize_turn_persist(
         persisted_chat_id,
         user_pk,
-        state.collector.final_text,
-        state.collector.tool_calls,
-        state.collector.attachments,
+        final_text,
+        list(state.collector.tool_calls),
+        list(state.collector.attachments),
         client_id=client_id,
-        msg_id=state.partial_msg_id,
+        turn_id=turn_id,
+        partial_msg_ids=state.partial_msg_ids,
     )
-    await _attach_assistant_to_turn(state, turn_id, assistant_msg.id)
+    state.partial_msg_ids.clear()
 
     # TTS off the hot path — finalize turn for client first, attach audio коли
     # synth закінчиться. Codex flagged the prior blocking flow.
@@ -295,7 +337,6 @@ async def _handle_idle(
     )
     await interrupt_best_effort(client, reason="web_idle_timeout")
     return False
-    return False
 
 
 async def _event_from_probe_terminal(
@@ -309,22 +350,32 @@ async def _event_from_probe_terminal(
     turn_id: int | None,
 ) -> chat_pb2.ChatEvent:
     if status == TurnStatus.COMPLETED:
-        text = state.collector.final_text or state.collector.buffer
+        # Same архітектура що й normal-done path: INSERT final + bind + DELETE
+        # partials. Skip persist на абсолютно пустий результат — нема що
+        # commit-ити; partial-rows вже видалені у попередніх sweep-ах не
+        # будуть, бо їх теж нема.
+        full_text = state.collector.final_text or state.collector.buffer
         message = None
-        if _has_visible_content(state):
-            message = await _persist_assistant_turn(
+        has_content = bool(
+            full_text
+            or state.collector.tool_calls
+            or state.collector.attachments
+        )
+        if has_content:
+            message = await _finalize_turn_persist(
                 persisted_chat_id,
                 user_pk,
-                text,
-                state.collector.tool_calls,
-                state.collector.attachments,
+                full_text,
+                list(state.collector.tool_calls),
+                list(state.collector.attachments),
                 client_id=client_id,
-                msg_id=state.partial_msg_id,
+                turn_id=turn_id,
+                partial_msg_ids=state.partial_msg_ids,
             )
-            await _attach_assistant_to_turn(state, turn_id, message.id)
+            state.partial_msg_ids.clear()
         done = chat_pb2.DoneEvent(
             chat_id=persisted_chat_id,
-            final_text=final_text_for_done_frame(text, state.collector.buffer),
+            final_text=final_text_for_done_frame(full_text, state.collector.buffer),
         )
         if message is not None:
             done.message.CopyFrom(message_to_pb(message))
@@ -334,31 +385,6 @@ async def _event_from_probe_terminal(
     return error_event(f"codex_reported_{raw_status}", raw_status)
 
 
-async def _persist_boundary(
-    state: _StreamState,
-    persisted_chat_id: int,
-    user_pk: int,
-    *,
-    client_id: str | None,
-    turn_id: int | None,
-) -> None:
-    if not _has_visible_content(state):
-        return
-    msg = await _persist_assistant_turn(
-        persisted_chat_id,
-        user_pk,
-        state.collector.buffer,
-        state.collector.tool_calls,
-        [],
-        partial=True,
-        client_id=client_id,
-        msg_id=state.partial_msg_id,
-        emit_journal=False,
-    )
-    state.partial_msg_id = msg.id
-    await _attach_assistant_to_turn(state, turn_id, msg.id)
-
-
 async def _persist_visible_partial(
     state: _StreamState,
     persisted_chat_id: int,
@@ -366,35 +392,125 @@ async def _persist_visible_partial(
     *,
     client_id: str | None,
 ) -> None:
-    if not _has_visible_content(state):
+    """Error/cancel/timeout path: INSERT delta-segment з прапором partial=true.
+    Partial-rows цього turn-у НЕ видаляються (Variant A: на successful done
+    final overrides все, але на abort partial-rows є snapshot обриву —
+    єдина наявна інформація). Якщо delta пуста — нема що зберігати."""
+    text_delta, tools_delta = _segment_delta(state)
+    if not (text_delta or tools_delta):
         return
-    await _persist_assistant_turn(
+    msg = await _persist_assistant_turn(
         persisted_chat_id,
         user_pk,
-        state.collector.buffer,
-        state.collector.tool_calls,
-        state.collector.attachments,
+        text_delta,
+        tools_delta,
+        [],  # attachments persist-яться на final; abort → губимо їх (acceptable)
         partial=True,
         client_id=client_id,
-        msg_id=state.partial_msg_id,
     )
+    state.partial_msg_ids.append(msg.id)
+    state.cut_segment()
 
 
-def _has_visible_content(state: _StreamState) -> bool:
-    return bool(state.collector.buffer or state.collector.tool_calls or state.collector.attachments)
-
-
-async def _attach_assistant_to_turn(
+async def _persist_segment(
     state: _StreamState,
+    persisted_chat_id: int,
+    user_pk: int,
+    *,
     turn_id: int | None,
-    message_id: int,
 ) -> None:
-    if turn_id is None or state.assistant_attached:
+    """Steer-boundary partial snapshot: live chronology підказка під час
+    streaming. На successful done усі partial-rows цього turn-у видаляються
+    у `_finalize_turn_persist` (final assistant row є source of truth).
+    Tools-only boundary (text_delta пустий) пропускаємо — інакше UI рендерить
+    empty-text partial як false-positive 'Codex was thinking — interrupted'.
+    `turn_id` приймаємо для сигнатурної симетрії з caller-ом; bind до turn-у
+    робиться на final-persist, не тут."""
+    del turn_id
+    text_delta, tools_delta = _segment_delta(state)
+    if not text_delta:
         return
+    msg = await _persist_assistant_turn(
+        persisted_chat_id,
+        user_pk,
+        text_delta,
+        tools_delta,
+        [],  # attachments persist-яться тільки на final у одному row
+        partial=True,
+        client_id=None,
+        emit_journal=False,
+    )
+    state.partial_msg_ids.append(msg.id)
+    state.cut_segment()
+
+
+def _segment_delta(
+    state: _StreamState,
+) -> tuple[str, list[ToolCallRecord]]:
+    """Delta text+tools з останнього `cut_segment` — лише для PARTIAL
+    snapshot-ів. Final-path не використовує (там повний INSERT + DELETE
+    partials атомарно у `_finalize_turn_persist`)."""
+    text_delta = state.collector.buffer[state.segment_buffer_offset :]
+    tools_delta = list(state.collector.tool_calls[state.segment_tool_count :])
+    return text_delta, tools_delta
+
+
+async def _finalize_turn_persist(
+    persisted_chat_id: int,
+    user_pk: int,
+    text: str,
+    tool_calls: list[ToolCallRecord],
+    tool_attachments: list[Attachment],
+    *,
+    client_id: str | None,
+    turn_id: int | None,
+    partial_msg_ids: list[int],
+) -> Message:
+    """All-or-nothing final-of-turn persist: INSERT final assistant + attach
+    до turn + DELETE transient partials + emit TURN_COMPLETED — все у одній
+    транзакції. Якщо DELETE впаде, final/attach теж rollback (інакше БД
+    залишилася б з final+partial duplicates або orphan attach)."""
     async with SessionLocal() as db:
-        await turn_service.attach_assistant_message(db, turn_id, message_id)
+        upload_ids = await upload_service.persist_attachments(
+            db,
+            chat_id=persisted_chat_id,
+            user_id=user_pk,
+            attachments=tool_attachments,
+        )
+        meta: dict[str, Any] = {}
+        if tool_calls:
+            meta["calls"] = tool_calls
+        if upload_ids:
+            meta["upload_ids"] = upload_ids
+        if client_id:
+            meta["client_id"] = client_id
+        assistant_msg = await message_service.append(
+            db,
+            persisted_chat_id,
+            MessageRole.ASSISTANT,
+            text,
+            meta=meta or None,
+        )
+        if turn_id is not None:
+            await turn_service.attach_assistant_message(db, turn_id, assistant_msg.id)
+        if partial_msg_ids:
+            await db.execute(
+                delete(Message).where(Message.id.in_(partial_msg_ids))
+            )
+        await event_service.emit(
+            db,
+            EventKind.TURN_COMPLETED,
+            chat_id=persisted_chat_id,
+            user_id=user_pk,
+            payload={
+                "final_text_len": len(text),
+                "tool_calls": len(tool_calls),
+                "uploads": len(upload_ids),
+            },
+        )
         await db.commit()
-    state.assistant_attached = True
+        await db.refresh(assistant_msg)
+        return assistant_msg
 
 
 async def _persist_assistant_turn(
@@ -406,15 +522,18 @@ async def _persist_assistant_turn(
     *,
     partial: bool = False,
     client_id: str | None = None,
-    msg_id: int | None = None,
     emit_journal: bool = True,
 ) -> Message:
-    """Insert (msg_id=None) or update assistant message + emit journal event.
+    """INSERT новий assistant row + (опційно) emit journal event.
 
-    Update-mode use:ється для streaming-persist — на кожному item/completed
-    boundary'і ми UPDATE'имо існуючий row замість INSERT'у. На terminal-вибір
-    (done/cancel/timeout) знов update'имо з фінальним станом.
-    `partial=True` → meta.partial=true для UI badge "interrupted/streaming".
+    `partial=True` → `meta.partial=true` → UI рендерить badge
+    "interrupted/streaming". На final partial-flag НЕ ставимо.
+    `client_id` — anchor для live streaming placeholder swap у Chat.svelte;
+    пишеться тільки коли `not partial` (partial-rows ключуються по
+    autoincrement id, інакше дубль ключа у Svelte keyed `{#each}` крашить
+    компонент).
+    `emit_journal=False` → пропустити TURN_COMPLETED/TURN_FAILED event у
+    журналі (для partial-сегментів — final сам емітить термінальну подію).
     """
     async with SessionLocal() as db:
         upload_ids = await upload_service.persist_attachments(
@@ -430,23 +549,15 @@ async def _persist_assistant_turn(
             meta["calls"] = tool_calls
         if upload_ids:
             meta["upload_ids"] = upload_ids
-        if client_id:
+        if client_id and not partial:
             meta["client_id"] = client_id
-        if msg_id is None:
-            assistant_msg = await message_service.append(
-                db,
-                persisted_chat_id,
-                MessageRole.ASSISTANT,
-                text,
-                meta=meta or None,
-            )
-        else:
-            await message_service.update_text(db, msg_id, text, meta=meta if meta else None)
-            assistant_msg = await db.get(Message, msg_id)
-            if assistant_msg is None:
-                # msg_id має існувати — щойно update'нули. None означає race
-                # з DELETE chat'у; кидаємо щоб caller обробив як stream_dropped.
-                raise LookupError(f"message {msg_id} disappeared mid-turn")
+        assistant_msg = await message_service.append(
+            db,
+            persisted_chat_id,
+            MessageRole.ASSISTANT,
+            text,
+            meta=meta or None,
+        )
         payload: dict[str, Any] = {
             "final_text_len": len(text),
             "tool_calls": len(tool_calls),
