@@ -13,6 +13,8 @@ message User {
   optional string email = 3;
   optional string display_name = 4;
   google.protobuf.Timestamp created_at = 5;
+  // StrEnum value: "USER" або "ADMIN" — frontend conditionally renders Admin tab.
+  string role = 6;
 }
 
 message MeRequest {}

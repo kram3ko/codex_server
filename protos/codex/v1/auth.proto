@@ -5,10 +5,14 @@ package codex.v1;
 // Email + password JWT auth.
 //
 // Flow:
-//   1) Client posts email+password до Login() → отримує access_token (JWT, HS256).
-//   2) Усі наступні Connect-RPC дзвінки передають access_token у Authorization
-//      header як `Bearer <token>`.
-//   3) Refresh() бере поточний валідний Bearer і повертає свіжий JWT.
+//   1) Client posts email+password → Login() / Register(). Server підписує JWT
+//      (HS256, sub=email, exp) і ставить `Set-Cookie: codex_jwt=<jwt>;
+//      HttpOnly; SameSite=Lax; Secure (prod)` — browser шле автоматично.
+//   2) Усі наступні Connect-RPC дзвінки супроводжуються cookie (через
+//      `credentials: 'include'` у fetch). JavaScript НЕ бачить токен
+//      (HttpOnly) — XSS-захист (CLAUDE.md §5).
+//   3) Refresh() переоформляє cookie без перелогіну.
+//   4) Logout() віддає Set-Cookie з Max-Age=0 — клієнт стирає cookie.
 
 message LoginRequest {
   string email    = 1;
@@ -16,7 +20,9 @@ message LoginRequest {
 }
 
 message LoginResponse {
-  // JWT з claims: sub="codex-user", iat, exp.
+  // access_token + token_type лишаються у body для не-browser клієнтів
+  // (CLI / тестів). Browser-флоу спирається на HttpOnly cookie і body
+  // ігнорує — `expires_in` потрібен для proactive Refresh-таймеру.
   string access_token = 1;
   string token_type   = 2;  // "Bearer"
   int64  expires_in   = 3;  // seconds
@@ -24,7 +30,24 @@ message LoginResponse {
 
 message RefreshRequest {}
 
+// Self-signup via invite token (admin issues invites via AdminService).
+// On success, server immediately issues a JWT — UX same as Login.
+message RegisterRequest {
+  string email         = 1;
+  string password      = 2;
+  string display_name  = 3;  // optional, empty → null у DB
+  // Single-use invite token from AdminService.CreateInvite. ADMIN_EMAIL з env
+  // — єдиний виняток (не потребує invite, upsert на існуючий запис).
+  string invite_token  = 4;
+}
+
+message LogoutRequest {}
+
+message LogoutResponse {}
+
 service AuthService {
   rpc Login(LoginRequest) returns (LoginResponse);
+  rpc Register(RegisterRequest) returns (LoginResponse);
   rpc Refresh(RefreshRequest) returns (LoginResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
 }

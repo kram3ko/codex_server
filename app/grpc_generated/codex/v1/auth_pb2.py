@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x63odex/v1/auth.proto\x12\x08\x63odex.v1\"/\n\x0cLoginRequest\x12\r\n\x05\x65mail\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\"M\n\rLoginResponse\x12\x14\n\x0c\x61\x63\x63\x65ss_token\x18\x01 \x01(\t\x12\x12\n\ntoken_type\x18\x02 \x01(\t\x12\x12\n\nexpires_in\x18\x03 \x01(\x03\"\x10\n\x0eRefreshRequest2\x85\x01\n\x0b\x41uthService\x12\x38\n\x05Login\x12\x16.codex.v1.LoginRequest\x1a\x17.codex.v1.LoginResponse\x12<\n\x07Refresh\x12\x18.codex.v1.RefreshRequest\x1a\x17.codex.v1.LoginResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13\x63odex/v1/auth.proto\x12\x08\x63odex.v1\"/\n\x0cLoginRequest\x12\r\n\x05\x65mail\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\"M\n\rLoginResponse\x12\x14\n\x0c\x61\x63\x63\x65ss_token\x18\x01 \x01(\t\x12\x12\n\ntoken_type\x18\x02 \x01(\t\x12\x12\n\nexpires_in\x18\x03 \x01(\x03\"\x10\n\x0eRefreshRequest\"^\n\x0fRegisterRequest\x12\r\n\x05\x65mail\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x03 \x01(\t\x12\x14\n\x0cinvite_token\x18\x04 \x01(\t\"\x0f\n\rLogoutRequest\"\x10\n\x0eLogoutResponse2\x82\x02\n\x0b\x41uthService\x12\x38\n\x05Login\x12\x16.codex.v1.LoginRequest\x1a\x17.codex.v1.LoginResponse\x12>\n\x08Register\x12\x19.codex.v1.RegisterRequest\x1a\x17.codex.v1.LoginResponse\x12<\n\x07Refresh\x12\x18.codex.v1.RefreshRequest\x1a\x17.codex.v1.LoginResponse\x12;\n\x06Logout\x12\x17.codex.v1.LogoutRequest\x1a\x18.codex.v1.LogoutResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,6 +37,12 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LOGINRESPONSE']._serialized_end=159
   _globals['_REFRESHREQUEST']._serialized_start=161
   _globals['_REFRESHREQUEST']._serialized_end=177
-  _globals['_AUTHSERVICE']._serialized_start=180
-  _globals['_AUTHSERVICE']._serialized_end=313
+  _globals['_REGISTERREQUEST']._serialized_start=179
+  _globals['_REGISTERREQUEST']._serialized_end=273
+  _globals['_LOGOUTREQUEST']._serialized_start=275
+  _globals['_LOGOUTREQUEST']._serialized_end=290
+  _globals['_LOGOUTRESPONSE']._serialized_start=292
+  _globals['_LOGOUTRESPONSE']._serialized_end=308
+  _globals['_AUTHSERVICE']._serialized_start=311
+  _globals['_AUTHSERVICE']._serialized_end=569
 # @@protoc_insertion_point(module_scope)

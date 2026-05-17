@@ -24,13 +24,14 @@ class NotesRPC(NotesProtocol):
         request: notes_pb2.SaveNoteRequest,
         ctx: RequestContext,
     ) -> notes_pb2.Note:
-        await require_user(ctx)
+        user = await require_user(ctx)
         note_id = request.id if request.HasField("id") else None
         async with SessionLocal() as db:
             try:
                 note = await note_service.upsert(
                     db,
                     note_id=note_id,
+                    user_id=user.id,
                     title=request.title,
                     body=request.body,
                     tags=list(request.tags),
@@ -47,9 +48,9 @@ class NotesRPC(NotesProtocol):
         request: notes_pb2.GetNoteRequest,
         ctx: RequestContext,
     ) -> notes_pb2.Note:
-        await require_user(ctx)
+        user = await require_user(ctx)
         async with SessionLocal() as db:
-            note = await note_service.get(db, request.id)
+            note = await note_service.get(db, request.id, user_id=user.id)
         if note is None:
             raise ConnectError(Code.NOT_FOUND, f"note {request.id} not found")
         return note_to_pb(note)
@@ -60,11 +61,12 @@ class NotesRPC(NotesProtocol):
         request: notes_pb2.SearchNotesRequest,
         ctx: RequestContext,
     ) -> notes_pb2.SearchNotesResponse:
-        await require_user(ctx)
+        user = await require_user(ctx)
         limit, offset = _resolve_page(request.pagination)
         async with SessionLocal() as db:
             results = await note_service.search(
                 db,
+                user_id=user.id,
                 query=request.query,
                 tags=list(request.tags) or None,
                 limit=limit,
@@ -80,11 +82,12 @@ class NotesRPC(NotesProtocol):
         request: notes_pb2.ListNotesRequest,
         ctx: RequestContext,
     ) -> notes_pb2.ListNotesResponse:
-        await require_user(ctx)
+        user = await require_user(ctx)
         limit, offset = _resolve_page(request.pagination)
         async with SessionLocal() as db:
             notes = await note_service.list(
                 db,
+                user_id=user.id,
                 tags=list(request.tags) or None,
                 limit=limit,
                 offset=offset,
@@ -97,9 +100,9 @@ class NotesRPC(NotesProtocol):
         request: notes_pb2.DeleteNoteRequest,
         ctx: RequestContext,
     ) -> common_pb2.Empty:
-        await require_user(ctx)
+        user = await require_user(ctx)
         async with SessionLocal() as db:
-            removed = await note_service.delete(db, request.id)
+            removed = await note_service.delete(db, request.id, user_id=user.id)
             if not removed:
                 raise ConnectError(Code.NOT_FOUND, f"note {request.id} not found")
             await db.commit()

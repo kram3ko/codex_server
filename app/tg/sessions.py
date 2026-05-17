@@ -1,6 +1,6 @@
 """Telegram-specific bootstrap for shared Codex chat sessions."""
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.base import SessionLocal
 from app.models import EventKind, UserRole
@@ -16,10 +16,11 @@ from app.services.sessions.store import (
 from app.services.users.default import user_service
 
 
-@dataclass(frozen=True, slots=True)
-class TGSessionBootstrap:
-    tg_user_id: int
-    display_name: str | None = None
+class TGSessionBootstrap(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tg_user_id: int = Field(description="Telegram-side user id (для admin-role lookup).")
+    display_name: str | None = Field(default=None, description="Display name з aiogram message.")
 
 
 class ChatSessionStore(BaseChatSessionStore[int, TGSessionBootstrap]):

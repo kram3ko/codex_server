@@ -2,9 +2,11 @@ from app.tg.markdown import tg_markdown
 
 
 def test_render_inline_formatting() -> None:
-    out = "".join(tg_markdown.render_html(
-        "**bold** *italic* `code` ~~strike~~ [link](https://x.com)",
-    ))
+    out = "".join(
+        tg_markdown.render_html(
+            "**bold** *italic* `code` ~~strike~~ [link](https://x.com)",
+        )
+    )
     assert "<b>bold</b>" in out
     assert "<i>italic</i>" in out
     assert "<code>code</code>" in out
@@ -64,8 +66,7 @@ def test_chunking_keeps_each_chunk_balanced() -> None:
 
 def test_to_plain_strips_markdown_for_tts() -> None:
     plain = tg_markdown.to_plain(
-        "# Title\n\n**bold** *italic* `code` ~~strike~~ [link](https://x.com)\n\n"
-        "```py\nx=1\n```",
+        "# Title\n\n**bold** *italic* `code` ~~strike~~ [link](https://x.com)\n\n```py\nx=1\n```",
     )
     assert "**" not in plain
     assert "`" not in plain

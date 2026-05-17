@@ -31,9 +31,6 @@
   let recording = $state(false);
   let transcribing = $state(false);
   let audioUploadIds = $state<bigint[]>([]);
-  let recordingStartedAt = $state<number | null>(null);
-  let recordingElapsed = $state(0);
-
   // Якщо компонент знесли під час запису — стрім лишається активним і
   // browser mic-індикатор горить. Закриваємо явно.
   onDestroy(() => {
@@ -44,24 +41,6 @@
     activeStream = null;
   });
 
-  $effect(() => {
-    if (!recording || !recordingStartedAt) {
-      recordingElapsed = 0;
-      return;
-    }
-    const start = recordingStartedAt;
-    recordingElapsed = Math.floor((Date.now() - start) / 1000);
-    const id = setInterval(() => {
-      recordingElapsed = Math.floor((Date.now() - start) / 1000);
-    }, 500);
-    return () => clearInterval(id);
-  });
-
-  function fmtRec(s: number): string {
-    const m = Math.floor(s / 60);
-    const r = s % 60;
-    return `${m}:${r.toString().padStart(2, "0")}`;
-  }
   const uploadingNow = $derived(pending.some((p) => p.status === "uploading"));
   const canSend = $derived(
     !uploadingNow &&
@@ -201,13 +180,11 @@
       activeStream = null;
       recording = false;
       recorder = null;
-      recordingStartedAt = null;
       const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
       await processAudio(blob);
     };
     recorder = mr;
     recording = true;
-    recordingStartedAt = Date.now();
     mr.start();
   }
 

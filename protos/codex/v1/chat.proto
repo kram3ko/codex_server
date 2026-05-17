@@ -72,6 +72,9 @@ message ChatEvent {
     DoneEvent done = 4;
     ErrorEvent error = 5;
   }
+  // Redis Stream ID (`<ms>-<seq>`); client передає у `TailTurnRequest.after_id`
+  // для resume-on-reconnect. Empty для in-process events що не пройшли через stream.
+  string event_id = 6;
 }
 
 message TokenEvent {
@@ -118,6 +121,15 @@ message InterruptTurnRequest {
 
 message InterruptTurnResponse {}
 
+// Resume mid-turn stream після reconnect. Server XREADає Redis Stream
+// `chat:{chat_id}:events` з після-`after_id`, потім BLOCK на нові події
+// доки турн не завершиться. Якщо турн уже finished — повертає одразу.
+message TailTurnRequest {
+  int64 chat_id = 1;
+  // Останній event_id який клієнт встиг отримати ("" = з початку наявного буфера).
+  string after_id = 2;
+}
+
 // Append text to the currently running turn (codex's `turn/steer` RPC).
 // If no turn is running, server returns accepted=false and the client should
 // fall back to RunTurn.
@@ -152,6 +164,7 @@ service ChatService {
   rpc RenameChat(RenameChatRequest) returns (Chat);
   rpc DeleteChat(DeleteChatRequest) returns (Empty);
   rpc RunTurn(RunTurnRequest) returns (stream ChatEvent);
+  rpc TailTurn(TailTurnRequest) returns (stream ChatEvent);
   rpc InterruptTurn(InterruptTurnRequest) returns (InterruptTurnResponse);
   rpc SteerTurn(SteerTurnRequest) returns (SteerTurnResponse);
   rpc GetCodexUsage(GetCodexUsageRequest) returns (CodexUsage);

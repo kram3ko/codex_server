@@ -12,10 +12,10 @@ crashed worker не лишав зомбі-запис.
 """
 
 import contextlib
-from dataclasses import dataclass
 
 import orjson
 import structlog
+from pydantic import BaseModel, ConfigDict, Field
 from redis.exceptions import RedisError
 
 from app.config import settings
@@ -40,11 +40,25 @@ def _ttl_s() -> int:
     return int(max(settings.WEB_TURN_TIMEOUT_SECONDS, settings.TG_TURN_TIMEOUT_SECONDS)) + 60
 
 
-@dataclass(frozen=True, slots=True)
-class ActiveTurn:
-    thread_id: str
-    turn_id: str | None  # None = pending (turn/start ще не повернув)
-    is_admin: bool
+class ActiveTurn(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    thread_id: str | None = Field(
+        default=None,
+        description=(
+            "Codex thread id який зараз володіє турном. None = handler-side "
+            "pre-lock, codex ще не resumed → cross-worker interrupt/steer noop "
+            "(нема чого interrupt-ити)."
+        ),
+    )
+    turn_id: str | None = Field(
+        default=None, description="None = pending (turn/start ще не повернув)."
+    )
+    is_admin: bool = Field(description="Який sidecar обслуговує турн (admin vs guest).")
+
+
+class TurnOwnershipLost(RuntimeError):
+    """Expected control-flow: pending record disappeared or changed before promote."""
 
 
 def _encode(turn: ActiveTurn) -> str:
@@ -63,13 +77,16 @@ def _decode(raw: str | bytes) -> ActiveTurn | None:
             turn_id=data["turn_id"],
             is_admin=data["is_admin"],
         )
-    except (orjson.JSONDecodeError, KeyError, TypeError):
+    except (orjson.JSONDecodeError, KeyError, TypeError, ValueError):
         return None
 
 
-async def try_register_pending(chat_id: int, thread_id: str, is_admin: bool) -> bool:
+async def try_register_pending(
+    chat_id: int, thread_id: str | None, is_admin: bool
+) -> bool:
     """Atomic NX-register pending turn. False якщо запис вже існує — caller
-    MUST cancel turn (інший воркер вже володіє цим chat'ом)."""
+    MUST cancel turn (інший воркер вже володіє цим chat'ом). `thread_id=None`
+    дозволяє handler-у захопити slot до того як codex resume відомий."""
     payload = _encode(ActiveTurn(thread_id=thread_id, turn_id=None, is_admin=is_admin))
     try:
         result = await cache.set(_key(chat_id), payload, ex=_ttl_s(), nx=True)
@@ -93,11 +110,14 @@ async def promote_pending(chat_id: int, thread_id: str, turn_id: str) -> bool:
     if not raw:
         return False
     rec = _decode(raw)
-    if rec is None or rec.thread_id != thread_id or rec.turn_id is not None:
+    if rec is None or rec.turn_id is not None:
         return False
-    new_payload = _encode(
-        ActiveTurn(thread_id=thread_id, turn_id=turn_id, is_admin=rec.is_admin)
-    )
+    # Pending із placeholder thread_id (handler pre-lock) → promote приймає
+    # реальний thread_id з codex. Якщо вже був explicit thread_id, він має
+    # збігатися (захист від cross-worker confusion).
+    if rec.thread_id is not None and rec.thread_id != thread_id:
+        return False
+    new_payload = _encode(ActiveTurn(thread_id=thread_id, turn_id=turn_id, is_admin=rec.is_admin))
     # SET ... IFEQ <raw> EX <ttl> — server байт-порівнює поточне значення з `raw`.
     # redis-py SET response callback парсить відповідь: match → True, mismatch → None.
     try:
@@ -110,10 +130,12 @@ async def promote_pending(chat_id: int, thread_id: str, turn_id: str) -> bool:
     return bool(result)
 
 
-async def drop_if_matches(chat_id: int, thread_id: str, turn_id: str | None) -> bool:
+async def drop_if_matches(
+    chat_id: int, thread_id: str | None, turn_id: str | None
+) -> bool:
     """CAS-delete лише якщо record == (thread_id, turn_id). `turn_id=None` →
-    match pending. False якщо record зник/змінено — caller лише логить
-    `registry_cas_drop_miss`, без паніки."""
+    match pending. `thread_id=None` match'ить тільки handler-side placeholder,
+    не будь-який pending record. False якщо record зник/змінено."""
     try:
         raw = await cache.get(_key(chat_id))
     except RedisError as exc:
@@ -178,13 +200,18 @@ async def consume_steer(chat_id: int, turn_id: str | None) -> bool:
         return False
 
 
-async def send_interrupt(turn: ActiveTurn) -> None:
+async def send_interrupt(turn: ActiveTurn) -> bool:
     """Best-effort cross-worker interrupt: open one-shot WS → turn/interrupt → close.
     Pre-condition: `turn.turn_id` is set (not pending)."""
     if turn.turn_id is None:
-        return
-    async with _one_shot_client(turn.is_admin) as client:
-        await client.interrupt(turn_id=turn.turn_id)
+        return False
+    return await send_interrupt_turn_id(turn.is_admin, turn.turn_id)
+
+
+async def send_interrupt_turn_id(is_admin: bool, turn_id: str) -> bool:
+    """Best-effort interrupt for a sidecar-reported active turn id."""
+    async with _one_shot_client(is_admin) as client:
+        return await client.interrupt(turn_id=turn_id)
 
 
 async def send_steer(chat_id: int, turn: ActiveTurn, text: str) -> bool:
@@ -207,6 +234,11 @@ async def _one_shot_client(is_admin: bool):
         approval_policy=settings.CODEX_APPROVAL_POLICY,
         sandbox=settings.CODEX_SANDBOX,
         request_timeout=settings.CODEX_REQUEST_TIMEOUT_SECONDS,
+        notification_queue_max=(
+            settings.CODEX_NOTIFICATION_QUEUE_MAX_ADMIN
+            if is_admin
+            else settings.CODEX_NOTIFICATION_QUEUE_MAX_GUEST
+        ),
     )
     await client.connect()
     try:

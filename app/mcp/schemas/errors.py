@@ -4,6 +4,10 @@
 сирий Bugsink JSON (`calculated_type` → `type`, …) на парсингу через
 `model_validate(...)`. Output JSON-schema і dump'и йдуть з короткими іменами
 (field names), не з alias'ами.
+
+**`extra="ignore"`** (а не `forbid`) — навмисно: input — це JSON від чужого
+сервера (Bugsink API), ми не контролюємо їхній schema і не хочемо ламатись
+коли вони додадуть нове поле. Whitelist'имо тільки потрібні нам поля.
 """
 
 from typing import Any

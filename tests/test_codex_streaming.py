@@ -2,13 +2,13 @@ import asyncio
 
 import pytest
 
+from app.services.codex.client import CodexClient, StaleTurnStreamError, _TurnDiagnostics
 from app.services.codex.events import (
     CodexItem,
     CodexNotif,
     TokenEvent,
     iterate_with_idle_timeout,
 )
-from app.services.codex.client import CodexClient, _TurnDiagnostics
 from app.services.codex.transport import Notification
 
 
@@ -107,6 +107,39 @@ async def test_current_turn_idle_ignores_stale_turn_notifications(monkeypatch) -
     assert called is True
     assert diagnostics["raw_count"] == 0
     assert diagnostics["stale_raw_count"] == 5
+
+
+@pytest.mark.asyncio
+async def test_stale_turn_storm_resets_before_idle_timeout(monkeypatch) -> None:
+    client = CodexClient(
+        url="ws://unused",
+        cwd="/tmp",
+        approval_policy="never",
+        sandbox="danger-full-access",
+    )
+    client._current_turn_id = "new-turn"
+    client._turn_diagnostics = _TurnDiagnostics(thread_id="thread", turn_id="new-turn")
+
+    from app.config import settings
+
+    threshold = settings.CODEX_STALE_STORM_THRESHOLD
+
+    async def stale_notes():
+        for _ in range(threshold):
+            yield Notification(
+                method=CodexNotif.ITEM_STARTED,
+                params={"item": {"type": CodexItem.COMMAND_EXECUTION}},
+                turn_id="old-turn",
+            )
+
+    monkeypatch.setattr(client._transport, "notifications", stale_notes)
+
+    with pytest.raises(StaleTurnStreamError) as raised:
+        async for _ in client._current_turn_notifications(999, None):
+            pass
+
+    assert raised.value.diagnostics["raw_count"] == 0
+    assert raised.value.diagnostics["stale_raw_count"] == threshold
 
 
 def test_turn_diagnostics_keeps_shell_active_under_reasoning() -> None:

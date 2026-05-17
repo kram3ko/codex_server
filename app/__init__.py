@@ -9,10 +9,10 @@ loggers or service singletons.
 import os
 import sys
 
+from app.log_config import configure_logging
+
 _GRPC_GENERATED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "grpc_generated")
 if os.path.isdir(_GRPC_GENERATED) and _GRPC_GENERATED not in sys.path:
     sys.path.insert(0, _GRPC_GENERATED)
-
-from app.log_config import configure_logging  # noqa: E402
 
 configure_logging()

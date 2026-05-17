@@ -14,6 +14,9 @@ ENV:
 import os
 import sys
 
+import httpx
+from connectrpc.errors import ConnectError
+
 from app.grpc_generated.codex.v1 import common_pb2
 from app.grpc_generated.codex.v1.common_connect import HealthServiceClientSync
 
@@ -25,7 +28,7 @@ def main() -> int:
     client = HealthServiceClientSync(address=address, timeout_ms=timeout_ms)
     try:
         response = client.check(common_pb2.HealthCheckRequest())
-    except Exception as exc:  # noqa: BLE001 — healthcheck must never raise
+    except (ConnectError, httpx.HTTPError, OSError, TimeoutError) as exc:
         print(f"healthcheck error: {exc!r}", file=sys.stderr)
         return 1
 

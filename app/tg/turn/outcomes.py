@@ -88,8 +88,7 @@ async def handle_dropped_stream(
     await persist_assistant_turn(session, tail, attachments, tool_calls, partial=True)
     await message.answer(
         tg_markdown.escape(
-            "⚠ Codex обірвав turn посеред відповіді — те що встигло, лишається. "
-            "Можеш писати далі.",
+            "⚠ Codex обірвав turn посеред відповіді — те що встигло, лишається. Можеш писати далі.",
         ),
     )
 

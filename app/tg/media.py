@@ -11,13 +11,15 @@ Media bytes — і зображення, і голос — стрімяться 
 import base64
 import mimetypes
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import structlog
 from aiogram.types import Message
+from botocore.exceptions import BotoCoreError, ClientError
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.base import SessionLocal
 from app.services.stt.base import STTBackend
@@ -26,12 +28,17 @@ from app.services.uploads.default import upload_service
 log = structlog.get_logger(__name__)
 
 
-@dataclass(slots=True)
-class PreparedTurn:
-    text: str
-    attachments: tuple[str, ...]  # data: URIs forwarded to codex (images only)
-    upload_ids: tuple[int, ...]  # MinIO refs persisted in message.meta
-    had_voice_input: bool = False
+class PreparedTurn(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    text: str = Field(description="Текст (з caption/text або транскрипт).")
+    attachments: tuple[str, ...] = Field(description="`data:` URIs для зображень → codex.")
+    upload_ids: tuple[int, ...] = Field(
+        description="MinIO uploads.id (зберігається у message.meta)."
+    )
+    had_voice_input: bool = Field(
+        default=False, description="True якщо текст з voice/video_note STT."
+    )
 
 
 async def prepare_turn(
@@ -160,7 +167,7 @@ async def _transcribe_and_persist(
         upload_id = await _persist_buf(
             buf, filename=filename, mime=mime, user_id=user_id, chat_id=chat_id
         )
-    except Exception as exc:  # noqa: BLE001 — log + continue, transcript still useful
+    except (OSError, SQLAlchemyError, BotoCoreError, ClientError) as exc:
         log.warning("tg_media_persist_failed", filename=filename, error=str(exc))
         upload_id = None
     transcript = await transcriber.transcribe(buf, filename)

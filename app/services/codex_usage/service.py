@@ -3,30 +3,41 @@
 Fetched on-demand from the sidecar — no filesystem coupling.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.codex.client import CodexClient
 
 
-@dataclass(frozen=True, slots=True)
-class UsageWindow:
-    used_percent: float
-    window_minutes: int
-    resets_at: datetime | None
+class UsageWindow(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    used_percent: float = Field(description="Скільки квоти вже витрачено у цьому вікні (0-100).")
+    window_minutes: int = Field(description="Тривалість rate-limit вікна у хвилинах.")
+    resets_at: datetime | None = Field(
+        default=None, description="Коли вікно ресетне; None якщо невідомо."
+    )
 
     @property
     def left_percent(self) -> float:
         return max(0.0, 100.0 - self.used_percent)
 
 
-@dataclass(frozen=True, slots=True)
-class CodexUsage:
-    updated_at: datetime | None
-    plan_type: str | None
-    primary: UsageWindow | None
-    secondary: UsageWindow | None
+class CodexUsage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    updated_at: datetime | None = Field(
+        default=None, description="Коли snapshot прийшов від sidecar."
+    )
+    plan_type: str | None = Field(
+        default=None, description="`plan_type` з `account/rateLimits/read` (напр. `pro`)."
+    )
+    primary: UsageWindow | None = Field(
+        default=None, description="Основне rate-limit вікно (зазвичай 5 hours)."
+    )
+    secondary: UsageWindow | None = Field(default=None, description="Додаткове вікно (weekly).")
 
 
 class CodexUsageService:

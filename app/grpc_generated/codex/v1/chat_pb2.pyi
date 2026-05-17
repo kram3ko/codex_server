@@ -87,18 +87,20 @@ class RunTurnRequest(_message.Message):
     def __init__(self, chat_id: _Optional[int] = ..., text: _Optional[str] = ..., upload_ids: _Optional[_Iterable[int]] = ..., client_id: _Optional[str] = ...) -> None: ...
 
 class ChatEvent(_message.Message):
-    __slots__ = ("token", "tool_call", "tool_result", "done", "error")
+    __slots__ = ("token", "tool_call", "tool_result", "done", "error", "event_id")
     TOKEN_FIELD_NUMBER: _ClassVar[int]
     TOOL_CALL_FIELD_NUMBER: _ClassVar[int]
     TOOL_RESULT_FIELD_NUMBER: _ClassVar[int]
     DONE_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
+    EVENT_ID_FIELD_NUMBER: _ClassVar[int]
     token: TokenEvent
     tool_call: ToolCallEvent
     tool_result: ToolResultEvent
     done: DoneEvent
     error: ErrorEvent
-    def __init__(self, token: _Optional[_Union[TokenEvent, _Mapping]] = ..., tool_call: _Optional[_Union[ToolCallEvent, _Mapping]] = ..., tool_result: _Optional[_Union[ToolResultEvent, _Mapping]] = ..., done: _Optional[_Union[DoneEvent, _Mapping]] = ..., error: _Optional[_Union[ErrorEvent, _Mapping]] = ...) -> None: ...
+    event_id: str
+    def __init__(self, token: _Optional[_Union[TokenEvent, _Mapping]] = ..., tool_call: _Optional[_Union[ToolCallEvent, _Mapping]] = ..., tool_result: _Optional[_Union[ToolResultEvent, _Mapping]] = ..., done: _Optional[_Union[DoneEvent, _Mapping]] = ..., error: _Optional[_Union[ErrorEvent, _Mapping]] = ..., event_id: _Optional[str] = ...) -> None: ...
 
 class TokenEvent(_message.Message):
     __slots__ = ("delta",)
@@ -165,6 +167,14 @@ class InterruptTurnRequest(_message.Message):
 class InterruptTurnResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class TailTurnRequest(_message.Message):
+    __slots__ = ("chat_id", "after_id")
+    CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    AFTER_ID_FIELD_NUMBER: _ClassVar[int]
+    chat_id: int
+    after_id: str
+    def __init__(self, chat_id: _Optional[int] = ..., after_id: _Optional[str] = ...) -> None: ...
 
 class SteerTurnRequest(_message.Message):
     __slots__ = ("chat_id", "text")

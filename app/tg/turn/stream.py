@@ -5,16 +5,17 @@
 idle watchdog, match-by-type, виклик outcomes.
 """
 
-import asyncio
 import contextlib
 
 import structlog
 from aiogram.types import Message
 
 from app.config import settings
+from app.db.base import SessionLocal
+from app.models import EventKind
 from app.services.bus.default import event_bus
 from app.services.codex import turn_registry
-from app.services.codex.client import CodexClient
+from app.services.codex.client import CodexClient, StaleTurnStreamError
 from app.services.codex.collector import StreamCollector
 from app.services.codex.events import (
     DoneEvent,
@@ -23,12 +24,15 @@ from app.services.codex.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
+from app.services.codex.runner import quarantine_thread
+from app.services.events.default import event_service
 from app.services.sessions.store import ChatSession
 from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn
-from app.tg.progress import TurnProgressReporter
+from app.tg.progress import TurnOutcome, TurnProgressReporter
 from app.tg.turn.control import emit_failure
 from app.tg.turn.outcomes import handle_done, handle_dropped_stream
+from app.tg.turn.persistence import persist_assistant_turn
 
 log = structlog.get_logger(__name__)
 
@@ -48,16 +52,12 @@ async def stream_turn(
         )
         if not registered:
             await message.answer(
-                tg_markdown.escape(
-                    "⚠ Інший turn у цьому чаті ще активний — почекай завершення."
-                )
+                tg_markdown.escape("⚠ Інший turn у цьому чаті ще активний — почекай завершення.")
             )
             return
 
     async def _on_started(turn_id: str, thread_id: str) -> None:
-        promoted = await turn_registry.promote_pending(
-            session.db_chat_id, thread_id, turn_id
-        )
+        promoted = await turn_registry.promote_pending(session.db_chat_id, thread_id, turn_id)
         if not promoted:
             log.warning(
                 "registry_promote_lost",
@@ -67,7 +67,7 @@ async def stream_turn(
             )
             with contextlib.suppress(Exception):
                 await client.interrupt(turn_id=turn_id)
-            raise asyncio.CancelledError
+            raise turn_registry.TurnOwnershipLost
 
     events_count = 0
     last_event_type = "none"
@@ -97,40 +97,77 @@ async def stream_turn(
         on_idle=_on_idle,
     )
 
-    async for ev in stream:
-        events_count += 1
-        last_event_type = type(ev).__name__
-        await event_bus.publish(session.db_chat_id, ev)
-        collector.absorb(ev)
-        match ev:
-            case TokenEvent():
-                if not prepared.had_voice_input:
-                    await progress.note_partial(collector.buffer)
-            case ToolCallEvent(name=name):
-                await progress.note_tool(name)
-            case ToolResultEvent(name=name, error=error):
-                await progress.mark_tool_done(name, error=bool(error))
-            case ErrorEvent(code=code, detail=detail):
-                progress.mark_outcome("failed")
-                await message.answer(
-                    tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
-                )
-                await emit_failure(session, code=code, detail=detail)
-                return
-            case DoneEvent():
-                await handle_done(
-                    session,
-                    message,
-                    prepared,
-                    collector.final_text or collector.buffer,
-                    collector.attachments,
-                    collector.tool_calls,
-                    progress.committed_text,
-                )
-                return
+    try:
+        async for ev in stream:
+            events_count += 1
+            last_event_type = type(ev).__name__
+            await event_bus.publish(session.db_chat_id, ev)
+            collector.absorb(ev)
+            match ev:
+                case TokenEvent():
+                    if not prepared.had_voice_input:
+                        await progress.note_partial(collector.buffer)
+                case ToolCallEvent(name=name):
+                    await progress.note_tool(name)
+                case ToolResultEvent(name=name, error=error):
+                    await progress.mark_tool_done(name, error=bool(error))
+                case ErrorEvent(code=code, detail=detail):
+                    progress.mark_outcome(TurnOutcome.FAILED)
+                    await message.answer(
+                        tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
+                    )
+                    await emit_failure(session, code=code, detail=detail)
+                    return
+                case DoneEvent():
+                    await handle_done(
+                        session,
+                        message,
+                        prepared,
+                        collector.final_text or collector.buffer,
+                        collector.attachments,
+                        collector.tool_calls,
+                        progress.committed_text,
+                    )
+                    return
+    except turn_registry.TurnOwnershipLost:
+        progress.mark_outcome(TurnOutcome.INTERRUPTED)
+        await message.answer(
+            tg_markdown.escape("Інший turn у цьому чаті вже активний — почекай завершення.")
+        )
+        return
+    except StaleTurnStreamError as exc:
+        progress.mark_outcome(TurnOutcome.FAILED)
+        with contextlib.suppress(Exception):
+            await client.interrupt()
+        await quarantine_thread(client.current_thread_id)
+        if collector.buffer or collector.tool_calls or collector.attachments:
+            await persist_assistant_turn(
+                session,
+                collector.buffer,
+                collector.attachments,
+                collector.tool_calls,
+                partial=True,
+            )
+        async with SessionLocal() as db:
+            await event_service.emit(
+                db,
+                EventKind.THREAD_RESET,
+                chat_id=session.db_chat_id,
+                user_id=session.db_user_id,
+                payload={"reason": "stale_turn_stream", "diagnostics": exc.diagnostics},
+            )
+            await db.commit()
+        await message.answer(
+            tg_markdown.escape(
+                "Codex завис — thread скинуто, історію (20 останніх "
+                "повідомлень) буде відновлено на наступному turn'і. "
+                "Повтори запит."
+            )
+        )
+        return
 
     if not collector.done_seen:
-        progress.mark_outcome("failed")
+        progress.mark_outcome(TurnOutcome.FAILED)
         await handle_dropped_stream(
             session,
             message,

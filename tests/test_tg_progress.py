@@ -1,6 +1,6 @@
 import pytest
 
-from app.tg.progress import TurnProgressReporter
+from app.tg.progress import TurnOutcome, TurnProgressReporter
 
 
 class _StubChat:
@@ -11,24 +11,11 @@ class _StubBot:
     pass
 
 
-class _OriginatorMessage:
-    message_id = 42
-    bot = _StubBot()
-    chat = _StubChat()
-
-    def __init__(self) -> None:
-        self.answers: list[tuple[str, object | None]] = []
-
-    async def answer(self, text: str, *, reply_markup=None) -> _StatusMessage:
-        self.answers.append((text, reply_markup))
-        return _StatusMessage()
-
-
 class _StatusMessage:
     def __init__(self) -> None:
         self.deleted = False
         self.edited_text: str | None = None
-        self.reply_markup = object()
+        self.reply_markup: object | None = object()
 
     async def delete(self) -> None:
         self.deleted = True
@@ -38,11 +25,42 @@ class _StatusMessage:
         self.reply_markup = reply_markup
 
 
+class _OriginatorMessage:
+    message_id = 42
+    bot = _StubBot()
+    chat = _StubChat()
+
+    def __init__(self) -> None:
+        self.answers: list[tuple[str, object | None]] = []
+        self._next_status: _StatusMessage | None = None
+
+    def stub_next_status(self, status: _StatusMessage) -> None:
+        self._next_status = status
+
+    async def answer(self, text: str, *, reply_markup=None) -> _StatusMessage:
+        self.answers.append((text, reply_markup))
+        status = self._next_status or _StatusMessage()
+        self._next_status = None
+        return status
+
+
+async def _setup_reporter_with_status() -> tuple[
+    TurnProgressReporter, _OriginatorMessage, _StatusMessage
+]:
+    """Прокручує public-flow: refresh_status() створює status message через
+    `originator.answer()`, що повертає підкинутий `_StatusMessage`. Без
+    poking приватного state."""
+    originator = _OriginatorMessage()
+    status = _StatusMessage()
+    originator.stub_next_status(status)
+    reporter = TurnProgressReporter(originator)
+    await reporter.refresh_status()
+    return reporter, originator, status
+
+
 @pytest.mark.asyncio
 async def test_stop_marks_status_as_completed_and_drops_controls() -> None:
-    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
-    status = _StatusMessage()
-    reporter._status_message = status  # type: ignore[attr-defined]
+    reporter, _originator, status = await _setup_reporter_with_status()
 
     await reporter.stop()
 
@@ -55,25 +73,9 @@ async def test_stop_marks_status_as_completed_and_drops_controls() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stop_skips_duplicate_completed_marker_edit() -> None:
-    """Якщо composed text вже == _last_status_text, edit пропускається —
-    Telegram повертає 400 message not modified, а ми не хочемо марних log'ів."""
-    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
-    status = _StatusMessage()
-    reporter._status_message = status  # type: ignore[attr-defined]
-    reporter._last_status_text = reporter._compose_status_text(done=True)  # type: ignore[attr-defined]
-
-    await reporter.stop()
-
-    assert status.edited_text is None
-
-
-@pytest.mark.asyncio
 async def test_stop_marks_failed_outcome_when_set() -> None:
-    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
-    status = _StatusMessage()
-    reporter._status_message = status  # type: ignore[attr-defined]
-    reporter.mark_outcome("failed")
+    reporter, _originator, status = await _setup_reporter_with_status()
+    reporter.mark_outcome(TurnOutcome.FAILED)
 
     await reporter.stop()
 
@@ -83,9 +85,9 @@ async def test_stop_marks_failed_outcome_when_set() -> None:
 
 
 def test_status_message_contains_progress_bar() -> None:
-    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
+    reporter = TurnProgressReporter(_OriginatorMessage())
 
-    text = reporter._compose_status_text()  # type: ignore[attr-defined]
+    text = reporter.compose_status_text()
 
     assert text.startswith("⏳ Thinking…")
     assert any(line.startswith("▓") or line.startswith("░") for line in text.splitlines())
@@ -94,9 +96,9 @@ def test_status_message_contains_progress_bar() -> None:
 @pytest.mark.asyncio
 async def test_refresh_status_creates_message_without_tools() -> None:
     originator = _OriginatorMessage()
-    reporter = TurnProgressReporter(originator)  # type: ignore[arg-type]
+    reporter = TurnProgressReporter(originator)
 
-    await reporter._refresh_status()  # type: ignore[attr-defined]
+    await reporter.refresh_status()
 
     assert len(originator.answers) == 1
     assert originator.answers[0][0].startswith("⏳ Thinking…")
@@ -105,7 +107,7 @@ async def test_refresh_status_creates_message_without_tools() -> None:
 
 @pytest.mark.asyncio
 async def test_note_partial_holds_back_short_buffer() -> None:
-    reporter = TurnProgressReporter(_OriginatorMessage())  # type: ignore[arg-type]
+    reporter = TurnProgressReporter(_OriginatorMessage())
     short = "теж замало щоб публікувати окремою бульбашкою"
 
     await reporter.note_partial(short)
@@ -116,7 +118,7 @@ async def test_note_partial_holds_back_short_buffer() -> None:
 @pytest.mark.asyncio
 async def test_note_partial_publishes_chunk_when_buffer_grows_past_threshold() -> None:
     originator = _OriginatorMessage()
-    reporter = TurnProgressReporter(originator)  # type: ignore[arg-type]
+    reporter = TurnProgressReporter(originator)
     chunk = "Привіт. " * 40  # > _STREAM_MIN_CHARS
 
     await reporter.note_partial(chunk)
@@ -128,7 +130,7 @@ async def test_note_partial_publishes_chunk_when_buffer_grows_past_threshold() -
 @pytest.mark.asyncio
 async def test_note_partial_throttles_consecutive_calls() -> None:
     originator = _OriginatorMessage()
-    reporter = TurnProgressReporter(originator)  # type: ignore[arg-type]
+    reporter = TurnProgressReporter(originator)
     big = "Привіт. " * 40
 
     await reporter.note_partial(big)

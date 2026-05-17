@@ -11,7 +11,9 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import structlog
+from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.db.base import SessionLocal
@@ -31,7 +33,7 @@ async def attach_tts_to_message(
 ) -> None:
     try:
         tts_upload_id = await _synthesize_reply(final_text, chat_id, user_id)
-    except Exception as exc:  # noqa: BLE001 — TTS is optional
+    except (OSError, SQLAlchemyError, BotoCoreError, ClientError) as exc:
         log.warning("web_tts_attach_failed", message_id=message_id, error=str(exc))
         return
     if tts_upload_id is None:

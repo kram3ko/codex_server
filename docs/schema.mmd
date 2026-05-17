@@ -1,0 +1,92 @@
+%% codex_server — Postgres schema ER diagram
+%% Source-of-truth. Регенерувати картинку:
+%%   1) Скопіювати у https://mermaid.live → Export SVG → docs/schema.svg
+%%   2) Або: npx -p @mermaid-js/mermaid-cli mmdc -i docs/schema.mmd -o docs/schema.svg
+
+erDiagram
+    USERS ||--o{ CHATS    : "owns"
+    USERS ||--o{ UPLOADS  : "owns"
+    USERS ||--o{ NOTES    : "owns"
+    USERS ||--o{ EVENTS   : "actor (nullable)"
+    USERS ||--o{ INVITES  : "creator"
+    CHATS ||--o{ MESSAGES : "contains"
+    CHATS ||--o{ EVENTS   : "scope (nullable)"
+    CHATS ||--o{ UPLOADS  : "scope (SET NULL)"
+
+    USERS {
+        bigint   id PK
+        bigint   tg_user_id      "UQ, nullable, indexed"
+        string   email           "UQ, nullable, indexed (255)"
+        string   password_hash   "nullable (argon2, 255)"
+        string   display_name    "nullable (255)"
+        UserRole role            "ENUM(USER, ADMIN), default USER"
+        tstz     created_at
+        tstz     updated_at
+    }
+
+    CHATS {
+        bigint     id PK
+        bigint     user_id          FK "→ users.id CASCADE, indexed"
+        ChatSource source           "ENUM(WEB, TELEGRAM)"
+        bigint     tg_chat_id       "nullable; UQ(source, tg_chat_id)"
+        string     codex_thread_id  "nullable (255) — in-RAM sidecar id"
+        string     title            "nullable (255)"
+        tstz       last_msg_at      "default now()"
+        tstz       created_at
+        tstz       updated_at
+    }
+
+    MESSAGES {
+        bigint      id PK
+        bigint      chat_id  FK   "→ chats.id CASCADE, indexed"
+        MessageRole role          "ENUM(USER, ASSISTANT, TOOL, SYSTEM)"
+        text        text          "default '', append-only"
+        jsonb       meta          "nullable (client_id, upload_ids, calls)"
+        tstz        created_at
+        tstz        updated_at
+    }
+
+    EVENTS {
+        bigint    id PK
+        bigint    chat_id  FK "→ chats.id CASCADE, nullable, indexed"
+        bigint    user_id  FK "→ users.id CASCADE, nullable, indexed"
+        EventKind kind        "ENUM (10 values), indexed"
+        jsonb     payload     "nullable"
+        tstz      created_at
+        tstz      updated_at
+    }
+
+    UPLOADS {
+        bigint id PK
+        bigint user_id        FK "→ users.id CASCADE, indexed"
+        bigint chat_id        FK "→ chats.id SET NULL, nullable, indexed"
+        string filename          "NOT NULL (512)"
+        string mime              "NOT NULL (127)"
+        int    size              "bytes"
+        string s3_path           "NOT NULL (1024) — S3/MinIO key"
+        text   extracted_text    "nullable (OCR/STT)"
+        tstz   created_at
+        tstz   updated_at
+    }
+
+    NOTES {
+        bigint   id PK
+        bigint   user_id      FK "→ users.id CASCADE, indexed"
+        string   title           "NOT NULL (255)"
+        text     body            "NOT NULL"
+        string[] tags            "ARRAY, default '{}', GIN-indexed"
+        tsvector search_vector   "GENERATED, GIN-indexed"
+        tstz     created_at
+        tstz     updated_at
+    }
+
+    INVITES {
+        bigint   id PK
+        string   token              "UQ (64) — url-safe, single-use"
+        bigint   created_by_user_id FK "→ users.id CASCADE"
+        bigint   used_by_user_id    FK "→ users.id SET NULL, nullable"
+        tstz     expires_at         "ix_invites_active partial index"
+        tstz     used_at            "nullable; set on Register"
+        tstz     created_at
+        tstz     updated_at
+    }

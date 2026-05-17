@@ -11,12 +11,12 @@ from app.services.auth.service import AuthService, InvalidToken
 
 def test_settings_rejects_short_jwt_secret() -> None:
     with pytest.raises(ValueError, match="JWT_SECRET must be ≥32 chars"):
-        Settings(JWT_SECRET="too-short")  # type: ignore[arg-type]
+        Settings(JWT_SECRET="too-short")
 
 
 def test_settings_rejects_empty_jwt_secret() -> None:
     with pytest.raises(ValueError, match="JWT_SECRET must be ≥32 chars"):
-        Settings(JWT_SECRET="   ")  # type: ignore[arg-type]
+        Settings(JWT_SECRET="   ")
 
 
 def _service(**overrides: object) -> AuthService:
@@ -26,30 +26,30 @@ def _service(**overrides: object) -> AuthService:
         "JWT_TTL_HOURS": 1,
     }
     base.update(overrides)
-    return AuthService(Settings(**base))  # type: ignore[arg-type]
+    return AuthService(Settings(**base))
 
 
-def test_hash_and_verify_password_round_trip() -> None:
+async def test_hash_and_verify_password_round_trip() -> None:
     svc = _service()
-    hashed = svc.hash_password("hunter2")
-    assert svc.verify_password("hunter2", hashed) is True
+    hashed = await svc.hash_password("hunter2")
+    assert await svc.verify_password("hunter2", hashed) is True
 
 
-def test_verify_password_rejects_wrong_password() -> None:
+async def test_verify_password_rejects_wrong_password() -> None:
     svc = _service()
-    hashed = svc.hash_password("hunter2")
-    assert svc.verify_password("wrong", hashed) is False
+    hashed = await svc.hash_password("hunter2")
+    assert await svc.verify_password("wrong", hashed) is False
 
 
-def test_verify_password_rejects_none_hash() -> None:
+async def test_verify_password_rejects_none_hash() -> None:
     """TG-only юзер (без паролю) не повинен пройти password login."""
     svc = _service()
-    assert svc.verify_password("any", None) is False
+    assert await svc.verify_password("any", None) is False
 
 
-def test_verify_password_rejects_malformed_hash() -> None:
+async def test_verify_password_rejects_malformed_hash() -> None:
     svc = _service()
-    assert svc.verify_password("any", "not-a-real-hash") is False
+    assert await svc.verify_password("any", "not-a-real-hash") is False
 
 
 def test_needs_rehash_handles_none() -> None:

@@ -14,6 +14,10 @@ class UserService:
     async def get(self, session: AsyncSession, user_id: int) -> User | None:
         return await session.get(User, user_id)
 
+    async def list_all(self, session: AsyncSession) -> list[User]:
+        rows = await session.execute(select(User).order_by(User.id))
+        return list(rows.scalars())
+
     async def get_or_create_by_tg(
         self,
         session: AsyncSession,

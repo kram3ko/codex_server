@@ -37,21 +37,23 @@ _STATUS_ICONS: dict[_ToolStatus, str] = {
 }
 
 
-class _TurnOutcome(StrEnum):
+class TurnOutcome(StrEnum):
+    """Public — використовується callers'ами `mark_outcome`."""
+
     SUCCESS = "success"
     FAILED = "failed"
     INTERRUPTED = "interrupted"
 
 
-_OUTCOME_ICON: dict[_TurnOutcome, str] = {
-    _TurnOutcome.SUCCESS: "✓",
-    _TurnOutcome.FAILED: "✗",
-    _TurnOutcome.INTERRUPTED: "⏸",
+_OUTCOME_ICON: dict[TurnOutcome, str] = {
+    TurnOutcome.SUCCESS: "✓",
+    TurnOutcome.FAILED: "✗",
+    TurnOutcome.INTERRUPTED: "⏸",
 }
-_OUTCOME_LABEL: dict[_TurnOutcome, str] = {
-    _TurnOutcome.SUCCESS: "Завершено",
-    _TurnOutcome.FAILED: "Помилка",
-    _TurnOutcome.INTERRUPTED: "Зупинено",
+_OUTCOME_LABEL: dict[TurnOutcome, str] = {
+    TurnOutcome.SUCCESS: "Завершено",
+    TurnOutcome.FAILED: "Помилка",
+    TurnOutcome.INTERRUPTED: "Зупинено",
 }
 
 _DRAFT_TEXT_MAX = 4000
@@ -68,7 +70,7 @@ _STREAM_THROTTLE_S = 1.2
 @dataclass(slots=True)
 class _ToolEntry:
     name: str
-    status: _ToolStatus = "running"
+    status: _ToolStatus = _ToolStatus.RUNNING
 
 
 def _turn_controls() -> InlineKeyboardMarkup:
@@ -106,7 +108,7 @@ class TurnProgressReporter:
         self._last_draft_at: float = 0.0
         self._status_message: Message | None = None
         self._last_status_text: str = ""
-        self._outcome: _TurnOutcome = "success"
+        self._outcome: TurnOutcome = TurnOutcome.SUCCESS
         self._committed_text: str = ""
         self._stream_throttle_at: float = 0.0
         self._status_paused_until: float = 0.0
@@ -120,7 +122,7 @@ class TurnProgressReporter:
         """Text already published as separate bubbles via `note_partial`."""
         return self._committed_text
 
-    def mark_outcome(self, outcome: _TurnOutcome) -> None:
+    def mark_outcome(self, outcome: TurnOutcome) -> None:
         """Caller signals final state; reflected у stop()'s edit."""
         self._outcome = outcome
 
@@ -135,7 +137,7 @@ class TurnProgressReporter:
             self._task = None
         if self._status_message is None:
             return
-        text = self._compose_status_text(done=True)
+        text = self.compose_status_text(done=True)
         # Skip edit якщо текст той самий — Telegram повертає `400 message
         # not modified` і ми отримаємо марний log.warning.
         if text != self._last_status_text:
@@ -146,15 +148,15 @@ class TurnProgressReporter:
 
     async def note_tool(self, name: str) -> None:
         self._tools.append(_ToolEntry(name=name))
-        await self._refresh_status()
+        await self.refresh_status()
         await self._render_draft(force=True)
 
     async def mark_tool_done(self, name: str, *, error: bool = False) -> None:
         for entry in reversed(self._tools):
-            if entry.name == name and entry.status == "running":
-                entry.status = "error" if error else "done"
+            if entry.name == name and entry.status == _ToolStatus.RUNNING:
+                entry.status = _ToolStatus.ERROR if error else _ToolStatus.DONE
                 break
-        await self._refresh_status()
+        await self.refresh_status()
         await self._render_draft(force=True)
 
     async def note_partial(self, full_text: str) -> None:
@@ -200,7 +202,7 @@ class TurnProgressReporter:
                 return
             last_chat_action_at = 0.0
             while True:
-                await self._refresh_status()
+                await self.refresh_status()
                 now = time.monotonic()
                 if now - last_chat_action_at >= self._chat_action_period_s:
                     with contextlib.suppress(Exception):
@@ -213,8 +215,8 @@ class TurnProgressReporter:
         except asyncio.CancelledError:
             raise
 
-    async def _refresh_status(self) -> None:
-        text = self._compose_status_text()
+    async def refresh_status(self) -> None:
+        text = self.compose_status_text()
         if text == self._last_status_text:
             return
         now = time.monotonic()
@@ -242,7 +244,7 @@ class TurnProgressReporter:
                 return
         self._last_status_text = text
 
-    def _compose_status_text(self, *, done: bool = False) -> str:
+    def compose_status_text(self, *, done: bool = False) -> str:
         elapsed = int(time.monotonic() - self._started_at)
         if done:
             icon = _OUTCOME_ICON[self._outcome]

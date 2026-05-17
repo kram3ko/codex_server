@@ -58,7 +58,7 @@ async def test_get_or_create_by_tg_seeds_admin_role_when_id_in_env(
     monkeypatch.setattr(service_module.settings, "TG_ADMIN_USER_IDS", {12345})
     session = _Session()
 
-    user = await UserService().get_or_create_by_tg(session, tg_user_id=12345)  # type: ignore[arg-type]
+    user = await UserService().get_or_create_by_tg(session, tg_user_id=12345)
 
     assert user.role is UserRole.ADMIN
     assert user.tg_user_id == 12345
@@ -73,7 +73,7 @@ async def test_get_or_create_by_tg_seeds_default_user_role_for_unlisted_id(
     monkeypatch.setattr(service_module.settings, "TG_ADMIN_USER_IDS", {12345})
     session = _Session()
 
-    user = await UserService().get_or_create_by_tg(session, tg_user_id=99999)  # type: ignore[arg-type]
+    user = await UserService().get_or_create_by_tg(session, tg_user_id=99999)
 
     assert user.role is UserRole.USER
 
@@ -88,7 +88,7 @@ async def test_get_or_create_by_tg_does_not_demote_existing_admin(
     existing = User(tg_user_id=12345, role=UserRole.ADMIN, display_name="me")
     session = _Session(existing=existing)
 
-    user = await UserService().get_or_create_by_tg(session, tg_user_id=12345)  # type: ignore[arg-type]
+    user = await UserService().get_or_create_by_tg(session, tg_user_id=12345)
 
     assert user is existing
     assert user.role is UserRole.ADMIN
@@ -103,7 +103,7 @@ async def test_ensure_admin_roles_no_op_when_env_empty(
     monkeypatch.setattr(service_module.settings, "TG_ADMIN_USER_IDS", set())
     session = _Session(update_rowcount=42)  # rowcount ignored, бо ми exit'имо раніше
 
-    promoted = await UserService().ensure_admin_roles(session)  # type: ignore[arg-type]
+    promoted = await UserService().ensure_admin_roles(session)
 
     assert promoted == 0
     assert session.statements == []  # SQL не виконується коли admin set пустий
@@ -117,7 +117,7 @@ async def test_ensure_admin_roles_promotes_only_unpromoted_listed_users(
     monkeypatch.setattr(service_module.settings, "TG_ADMIN_USER_IDS", {12345, 67890})
     session = _Session(update_rowcount=2)
 
-    promoted = await UserService().ensure_admin_roles(session)  # type: ignore[arg-type]
+    promoted = await UserService().ensure_admin_roles(session)
 
     assert promoted == 2
     assert len(session.statements) == 1

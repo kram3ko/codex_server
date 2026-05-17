@@ -5,7 +5,7 @@ LLM пізніше читає це через MCP `get_error` — будь-як�
 user prompts у breadcrumb'ах) бачить codex-cli sidecar.
 """
 
-from typing import Any
+from sentry_sdk.types import Event, Hint
 
 _REDACTED = "[redacted]"
 _SENSITIVE_HEADERS = frozenset(
@@ -23,12 +23,16 @@ _SENSITIVE_HEADERS = frozenset(
 # /dev/shm` вони мають бути рідкими, тож якщо знов прилетять — це regression
 # signal, треба бачити в Bugsink.
 _DROP_LOG_PATTERNS = (
-    "Failed to fetch updates",   # aiogram polling-blip до Telegram, true noise
+    "Failed to fetch updates",  # aiogram polling-blip до Telegram, true noise
 )
 
 
-def scrub_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
-    msg = (event.get("logentry") or {}).get("message") or event.get("message") or ""
+def scrub_event(event: Event, _hint: Hint) -> Event | None:
+    logentry = event.get("logentry")
+    raw_msg = (logentry or {}).get("message") if isinstance(logentry, dict) else None
+    if not raw_msg:
+        raw_msg = event.get("message")
+    msg = raw_msg if isinstance(raw_msg, str) else ""
     if any(p in msg for p in _DROP_LOG_PATTERNS):
         return None
 
@@ -42,7 +46,9 @@ def scrub_event(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] 
         if isinstance(env, dict):
             _scrub_headers(env)
 
-    for breadcrumb in event.get("breadcrumbs", {}).get("values", []) or []:
+    breadcrumbs = event.get("breadcrumbs")
+    crumbs_values = breadcrumbs.get("values", []) if isinstance(breadcrumbs, dict) else []
+    for breadcrumb in crumbs_values or []:
         if not isinstance(breadcrumb, dict):
             continue
         data = breadcrumb.get("data")

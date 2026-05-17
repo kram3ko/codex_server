@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.redis import RedisIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
@@ -38,9 +39,11 @@ if settings.SENTRY_DSN:
             FastApiIntegration(),
             AsyncioIntegration(),
             SqlalchemyIntegration(),
+            RedisIntegration(),
         ],
     )
 from app.db.base import SessionLocal, engine
+from app.grpc_generated.codex.v1.admin_connect import AdminServiceASGIApplication
 from app.grpc_generated.codex.v1.auth_connect import AuthServiceASGIApplication
 from app.grpc_generated.codex.v1.chat_connect import ChatServiceASGIApplication
 from app.grpc_generated.codex.v1.common_connect import HealthServiceASGIApplication
@@ -51,6 +54,7 @@ from app.grpc_generated.codex.v1.uploads_connect import UploadsServiceASGIApplic
 from app.grpc_generated.codex.v1.user_connect import UserServiceASGIApplication
 from app.mcp import mcp_http_app
 from app.models import UserRole
+from app.rpc.admin import AdminRPC
 from app.rpc.auth import AuthRPC
 from app.rpc.chat import ChatRPC
 from app.rpc.event import EventRPC
@@ -62,6 +66,7 @@ from app.rpc.uploads import UploadsRPC
 from app.rpc.user import UserRPC
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
+from app.services.chats import turn_runner
 from app.services.errors.default import bugsink_client
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
@@ -81,6 +86,9 @@ async def lifespan(_app: FastAPI):
         cancelled = await tg_bot_service.interrupt_active_turns()
         if cancelled:
             log.info("app_shutdown_turns_interrupted", count=cancelled)
+        bg = await turn_runner.cancel_all()
+        if bg:
+            log.info("app_shutdown_bg_turns_cancelled", count=bg)
         await tg_bot_service.stop()
         await bugsink_client.aclose()
         await cache.aclose()
@@ -102,9 +110,9 @@ async def _sync_admin_account(db) -> None:
     if not email or not settings.ADMIN_PASSWORD:
         return
     admin = await user_service.get_or_create_by_email(db, email)
-    if not auth_service.verify_password(settings.ADMIN_PASSWORD, admin.password_hash):
+    if not await auth_service.verify_password(settings.ADMIN_PASSWORD, admin.password_hash):
         await user_service.set_password_hash(
-            db, admin, auth_service.hash_password(settings.ADMIN_PASSWORD)
+            db, admin, await auth_service.hash_password(settings.ADMIN_PASSWORD)
         )
         log.info("admin_password_synced", email=admin.email)
     if admin.role != UserRole.ADMIN:
@@ -117,9 +125,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS — empty list = same-origin only; cloud deploy виставляє у env.
+if settings.CORS_ALLOWED_ORIGINS:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 connect_router = ConnectRouter(
     services=[
         AuthServiceASGIApplication(AuthRPC()),
+        AdminServiceASGIApplication(AdminRPC()),
         HealthServiceASGIApplication(HealthRPC()),
         UserServiceASGIApplication(UserRPC()),
         ChatServiceASGIApplication(ChatRPC()),

@@ -13,6 +13,7 @@ fail → відкриває новий thread + повідомляє через 
 """
 
 import asyncio
+import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from enum import StrEnum
@@ -21,6 +22,7 @@ from urllib.parse import urlparse
 
 import structlog
 
+from app.config import settings
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
     ChatEvent,
@@ -52,6 +54,25 @@ _PERSIST_BOUNDARY_ITEMS: frozenset[str] = frozenset(
         CodexItem.IMAGE_GENERATION,
     }
 )
+
+
+class StaleTurnStreamError(RuntimeError):
+    """Raised when a resumed thread only emits events for an older turn."""
+
+    def __init__(self, diagnostics: dict[str, Any]) -> None:
+        super().__init__("stale turn notification storm")
+        self.diagnostics = diagnostics
+
+
+class StaleSidecarTurnError(RuntimeError):
+    """Codex sidecar reports another turn as active for this thread."""
+
+    def __init__(self, *, expected_turn_id: str, actual_turn_id: str) -> None:
+        super().__init__(
+            f"sidecar active turn mismatch: expected {expected_turn_id}, found {actual_turn_id}"
+        )
+        self.expected_turn_id = expected_turn_id
+        self.actual_turn_id = actual_turn_id
 
 
 class _Method(StrEnum):
@@ -204,13 +225,17 @@ class CodexClient:
         initial_thread_id: str | None = None,
         on_thread_change: ThreadChangeCallback | None = None,
         reasoning_effort: str | None = None,
+        notification_queue_max: int | None = None,
     ) -> None:
         self._url = url
         self._cwd = cwd
         self._approval_policy = approval_policy
         self._sandbox = sandbox
         self._reasoning_effort = reasoning_effort
-        self._transport = AppServerClient(url=url, request_timeout=request_timeout)
+        transport_kwargs: dict[str, Any] = {"url": url, "request_timeout": request_timeout}
+        if notification_queue_max is not None:
+            transport_kwargs["notification_queue_max"] = notification_queue_max
+        self._transport = AppServerClient(**transport_kwargs)
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
         self._thread_resumed_or_started = False
@@ -351,20 +376,25 @@ class CodexClient:
             self._idle_deadline = None
             # Не чистимо _current_turn_id — callers у власному finally читають його для CAS-drop.
 
-    async def interrupt(self, turn_id: str | None = None) -> None:
+    async def interrupt(self, turn_id: str | None = None) -> bool:
         """Send turn/interrupt. `turn_id` override дозволяє іншому воркеру
         перервати turn запущений на цьому ж sidecar'і — координати беруться
         з Redis turn_registry, не з in-memory state."""
         target = turn_id or self._current_turn_id
         if not target:
-            return
+            return False
         try:
             await self._transport.request(_Method.TURN_INTERRUPT, {"turnId": target})
         except AppServerError as exc:
+            stale = _stale_sidecar_turn_error(exc)
+            if stale is not None:
+                raise stale
             if exc.code == -32601:
                 log.info("codex_interrupt_unsupported", turn_id=target)
             else:
                 log.warning("codex_interrupt_failed", turn_id=target, code=exc.code)
+            return False
+        return True
 
     async def steer(
         self,
@@ -389,6 +419,9 @@ class CodexClient:
                 },
             )
         except AppServerError as exc:
+            stale = _stale_sidecar_turn_error(exc)
+            if stale is not None:
+                raise stale
             log.warning("codex_steer_failed", turn_id=target_turn, code=exc.code, msg=str(exc))
             return False
         self.extend_idle_deadline()
@@ -496,10 +529,17 @@ class CodexClient:
         if self._turn_diagnostics is None:
             return
         self._turn_diagnostics.absorb_stale_raw(note)
+        diagnostics = self._turn_diagnostics.snapshot(self._transport)
         log.warning(
             "codex_stale_turn_notification_ignored",
-            **self._turn_diagnostics.snapshot(self._transport),
+            **diagnostics,
         )
+        if (
+            self._turn_diagnostics.raw_count == 0
+            and self._turn_diagnostics.stale_raw_count >= settings.CODEX_STALE_STORM_THRESHOLD
+        ):
+            log.error("codex_stale_turn_storm", **diagnostics)
+            raise StaleTurnStreamError(diagnostics)
 
     def _record_noise_raw_note(self, note: Notification) -> None:
         if self._turn_diagnostics is None:
@@ -606,7 +646,7 @@ class CodexClient:
             return
         try:
             await self._on_thread_change(new_thread_id)
-        except Exception as exc:  # noqa: BLE001 — user-supplied callback, isolate
+        except Exception as exc:
             log.warning(
                 "codex_on_thread_change_failed",
                 new=new_thread_id,
@@ -617,6 +657,23 @@ class CodexClient:
 def _is_thread_not_found(exc: AppServerError) -> bool:
     """Sidecar restarted → stored thread_id stale, retry with fresh thread."""
     return exc.code == -32600 and "thread not found" in str(exc).lower()
+
+
+_STALE_ACTIVE_TURN_RE = re.compile(
+    r"expected active turn id `(?P<expected>[^`]+)` but found `(?P<actual>[^`]+)`"
+)
+
+
+def _stale_sidecar_turn_error(exc: AppServerError) -> StaleSidecarTurnError | None:
+    if exc.code != -32600:
+        return None
+    match = _STALE_ACTIVE_TURN_RE.search(str(exc))
+    if match is None:
+        return None
+    return StaleSidecarTurnError(
+        expected_turn_id=match.group("expected"),
+        actual_turn_id=match.group("actual"),
+    )
 
 
 def _extract_turn_id(result: dict[str, Any]) -> str:

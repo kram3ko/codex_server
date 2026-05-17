@@ -2,7 +2,7 @@
 FastMCP не побачить @mcp.tool на момент створення routes."""
 
 from app.mcp.core import build_mcp_http_app, mcp
-from app.mcp.tools import *  # noqa: F401,F403 — register @mcp.tool decorators
+from app.mcp.tools import *
 
 mcp_http_app = build_mcp_http_app()
 

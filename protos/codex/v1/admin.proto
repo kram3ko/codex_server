@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package codex.v1;
+
+import "google/protobuf/timestamp.proto";
+import "codex/v1/common.proto";
+
+// AdminService — управління запрошеннями і користувачами. Всі методи
+// доступні тільки `UserRole.ADMIN` (перевірка через `require_admin`).
+
+enum UserRolePb {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_USER        = 1;
+  USER_ROLE_ADMIN       = 2;
+}
+
+message Invite {
+  int64 id = 1;
+  string token = 2;                          // url-safe, single-use
+  int64 created_by_user_id = 3;
+  optional int64 used_by_user_id = 4;        // set після успішного Register
+  google.protobuf.Timestamp expires_at = 5;
+  optional google.protobuf.Timestamp used_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message AdminUser {
+  int64 id = 1;
+  optional string email = 2;
+  optional int64 tg_user_id = 3;
+  optional string display_name = 4;
+  UserRolePb role = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message CreateInviteRequest {
+  // 1-30 днів; default 7 якщо unset/0.
+  int32 ttl_days = 1;
+}
+
+message CreateInviteResponse {
+  Invite invite = 1;
+}
+
+message ListInvitesRequest {
+  bool include_used = 1;  // false (default) → тільки активні
+}
+
+message ListInvitesResponse {
+  repeated Invite invites = 1;
+}
+
+message RevokeInviteRequest {
+  int64 invite_id = 1;
+}
+
+// Прямий create без invite — admin створює аккаунт руками (для self або
+// для друзів, без email-сесії).
+message CreateUserRequest {
+  string email         = 1;
+  string password      = 2;
+  string display_name  = 3;
+  UserRolePb role      = 4;  // USER_ROLE_UNSPECIFIED → USER
+}
+
+message ListUsersRequest {}
+
+message ListUsersResponse {
+  repeated AdminUser users = 1;
+}
+
+service AdminService {
+  rpc CreateInvite(CreateInviteRequest) returns (CreateInviteResponse);
+  rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
+  rpc RevokeInvite(RevokeInviteRequest) returns (Empty);
+  rpc CreateUser(CreateUserRequest) returns (AdminUser);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+}

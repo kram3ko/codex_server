@@ -25,3 +25,23 @@ class LoginResponse(_message.Message):
 class RefreshRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class RegisterRequest(_message.Message):
+    __slots__ = ("email", "password", "display_name", "invite_token")
+    EMAIL_FIELD_NUMBER: _ClassVar[int]
+    PASSWORD_FIELD_NUMBER: _ClassVar[int]
+    DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
+    INVITE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    email: str
+    password: str
+    display_name: str
+    invite_token: str
+    def __init__(self, email: _Optional[str] = ..., password: _Optional[str] = ..., display_name: _Optional[str] = ..., invite_token: _Optional[str] = ...) -> None: ...
+
+class LogoutRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class LogoutResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...

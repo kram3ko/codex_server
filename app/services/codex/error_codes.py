@@ -13,4 +13,6 @@ class CodexErrorCode(StrEnum):
     CODEX_ERROR = "codex_error"
     TURN_TIMEOUT = "turn_timeout"
     TURN_BUSY = "turn_busy"
+    STALE_ACTIVE_TURN = "stale_active_turn"
     STREAM_DROPPED = "stream_dropped"
+    RATE_LIMITED = "rate_limited"

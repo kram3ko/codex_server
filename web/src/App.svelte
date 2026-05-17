@@ -1,36 +1,86 @@
 <script lang="ts">
-  import { LogOut, MessageSquareText, Monitor, Moon, NotebookTabs, Sparkles, Sun } from "lucide-svelte";
+  import { LogOut, MessageSquareText, Monitor, Moon, NotebookTabs, ShieldUser, Sparkles, Sun } from "lucide-svelte";
 
+  import AdminPanel from "./features/admin/AdminPanel.svelte";
   import { auth } from "./features/auth/auth";
   import Login from "./features/auth/Login.svelte";
+  import Signup from "./features/auth/Signup.svelte";
   import Chat from "./features/chat/Chat.svelte";
   import Notes from "./features/notes/Notes.svelte";
+  import { userClient } from "./shared/lib/clients";
   import { theme } from "./shared/lib/theme.svelte";
 
-  type Route = "chat" | "notes";
+  type Route = "chat" | "notes" | "admin";
+  type AuthView = "login" | "signup";
+
+  // URL `?invite=XYZ` → одразу signup-форма з префілленим токеном.
+  const inviteFromUrl = new URLSearchParams(window.location.search).get("invite") ?? "";
 
   let signedIn = $state(auth.signedIn);
   let route = $state<Route>("chat");
+  let authView = $state<AuthView>(inviteFromUrl ? "signup" : "login");
+  let isAdmin = $state(false);
+
+  async function refreshRole() {
+    try {
+      const me = await userClient.me({});
+      isAdmin = me.role === "ADMIN";
+    } catch {
+      isAdmin = false;
+    }
+  }
 
   $effect(() => {
-    const handler = () => { signedIn = false; };
-    window.addEventListener("auth:logout", handler);
-    return () => window.removeEventListener("auth:logout", handler);
+    const onLoginEvent = () => {
+      signedIn = true;
+      void refreshRole();
+    };
+    const onLogoutEvent = () => {
+      signedIn = false;
+      isAdmin = false;
+    };
+    window.addEventListener("auth:login", onLoginEvent);
+    window.addEventListener("auth:logout", onLogoutEvent);
+    if (signedIn) void refreshRole();
+    return () => {
+      window.removeEventListener("auth:login", onLoginEvent);
+      window.removeEventListener("auth:logout", onLogoutEvent);
+    };
   });
 
   function onLogin() {
     signedIn = true;
     route = "chat";
+    if (inviteFromUrl) {
+      // Чистимо `?invite=...` з URL після успішного signup, щоб f5 не подразнював.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("invite");
+      window.history.replaceState({}, "", url.toString());
+    }
+    void refreshRole();
   }
 
   function logout() {
-    auth.logout();
+    void auth.logout();
     signedIn = false;
+    isAdmin = false;
+    authView = "login";
   }
 </script>
 
 {#if !signedIn}
-  <Login onlogin={onLogin} />
+  {#if authView === "signup"}
+    <Signup
+      onlogin={onLogin}
+      onswitch={() => (authView = "login")}
+      initialInvite={inviteFromUrl}
+    />
+  {:else}
+    <Login
+      onlogin={onLogin}
+      onswitch={() => (authView = "signup")}
+    />
+  {/if}
 {:else}
   <div class="min-h-screen text-[var(--color-text)]">
     <header class="glass sticky top-0 z-20 flex h-14 items-center justify-between px-4">
@@ -63,6 +113,17 @@
           <NotebookTabs size={15} />
           Notes
         </button>
+        {#if isAdmin}
+          <button
+            class="flex h-8 items-center gap-2 rounded-md px-3 text-sm transition-colors {route === 'admin' ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-text-muted)] hover:bg-[oklch(96%_0.01_100/0.06)] hover:text-[var(--color-text)]'}"
+            type="button"
+            title="Admin"
+            onclick={() => (route = "admin")}
+          >
+            <ShieldUser size={15} />
+            Admin
+          </button>
+        {/if}
       </nav>
 
       <div class="flex items-center gap-2">
@@ -93,8 +154,10 @@
 
     {#if route === "chat"}
       <Chat />
-    {:else}
+    {:else if route === "notes"}
       <Notes />
+    {:else if route === "admin" && isAdmin}
+      <AdminPanel />
     {/if}
   </div>
 {/if}

@@ -11,7 +11,7 @@
   import { create } from "@bufbuild/protobuf";
   import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 
-  import type { Attachment as ChatAttachment, Chat } from "../../gen/codex/v1/chat_pb";
+  import type { Attachment as ChatAttachment, Chat, ChatEvent } from "../../gen/codex/v1/chat_pb";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import { MessageSchema } from "../../gen/codex/v1/message_pb";
 
@@ -103,13 +103,14 @@
 
   async function loadOlderMessages() {
     if (loadingOlder || !hasMoreOlder || !selected || messages.length === 0) return;
+    const oldest = messages[0];
+    if (!oldest) return;
     loadingOlder = true;
     try {
-      const oldestId = messages[0].id;
       const response = await messageClient.listMessages({
         chatId: selected.id,
         pagination: { limit: PAGE_SIZE },
-        beforeId: oldestId
+        beforeId: oldest.id
       });
       messages = [...response.messages, ...messages];
       hasMoreOlder = response.messages.length >= PAGE_SIZE;
@@ -178,9 +179,9 @@
         const streamIdx = streamingClientId
           ? messages.findIndex((m) => clientIdOf(m) === streamingClientId)
           : -1;
-        if (streamIdx >= 0) {
+        const streaming = streamIdx >= 0 ? messages[streamIdx] : undefined;
+        if (streaming) {
           const before = messages.slice(0, streamIdx);
-          const streaming = messages[streamIdx];
           const after = messages.slice(streamIdx + 1);
           messages = partialAssistant
             ? [...before, partialAssistant, userMessage, streaming, ...after]
@@ -226,18 +227,15 @@
       createdAt: nowTimestamp()
     });
     messages = [...messages, userMessage, streamingPlaceholder];
+    let lastEventId = "";
 
-    try {
-      const stream = chatClient.runTurn({
-        chatId: selected?.id,
-        text,
-        uploadIds,
-        clientId
-      });
+    async function processStream(stream: AsyncIterable<ChatEvent>): Promise<boolean> {
+      let terminalSeen = false;
       for await (const event of stream) {
         if (turnId !== activeTurnId) {
           break;
         }
+        if (event.eventId) lastEventId = event.eventId;
         lastActivityAt = Date.now();
         switch (event.kind.case) {
           case "token":
@@ -338,25 +336,93 @@
             attachments = [];
             void loadChats(true);
             turnSignal.doneCount += 1;
+            terminalSeen = true;
             break;
           }
           case "error":
             if (turnId !== activeTurnId) {
               break;
             }
-            error = event.kind.value.detail || event.kind.value.code;
+            {
+              const code = event.kind.value.code;
+              const detail = event.kind.value.detail;
+              if (code === "turn_timeout" && detail === "stale-turn-notifications") {
+                error = "Codex завис — thread скинуто, історію (20 останніх повідомлень) буде відновлено на наступному turn'і. Повтори запит.";
+              } else if (code === "turn_busy") {
+                error = "Інший turn у цьому чаті вже активний — почекай завершення.";
+              } else {
+                error = detail || code;
+              }
+            }
             // Drop streaming placeholder on error.
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
             streamingClientId = null;
             streamedPrefix = "";
             lastActivityAt = undefined;
             draftStartedAt = undefined;
+            terminalSeen = true;
             break;
         }
         await tick();
       }
+      return terminalSeen;
+    }
+
+    // Stream EOF без `done`/`error` — backend turn міг штатно завершитися у БД,
+    // але terminal event до клієнта не дойшов (TTL Redis-стріму, transport
+    // drop without RST, etc). Reload з БД + reset streaming state, інакше UI
+    // зависає у "streaming" попри готовий assistant message.
+    async function recoverSilentEof() {
+      messages = messages.filter((m) => clientIdOf(m) !== clientId);
+      streamingClientId = null;
+      streamedPrefix = "";
+      lastActivityAt = undefined;
+      draftStartedAt = undefined;
+      typer.reset();
+      tools = [];
+      attachments = [];
+      if (selected) await loadChatMessages(selected);
+    }
+
+    try {
+      const ok = await processStream(chatClient.runTurn({
+        chatId: selected?.id,
+        text,
+        uploadIds,
+        clientId
+      }));
+      if (!ok && turnId === activeTurnId && selected) {
+        const tailOk = await processStream(chatClient.tailTurn({
+          chatId: selected.id,
+          afterId: lastEventId || "0"
+        }));
+        if (!tailOk && turnId === activeTurnId) {
+          await recoverSilentEof();
+        }
+      }
     } catch (exc) {
-      if (turnId === activeTurnId) {
+      // Mid-turn disconnect (network blip / page sleep) — one reconnect attempt
+      // via TailTurn replays missed events з server-side Redis Stream + далі live.
+      if (turnId === activeTurnId && selected) {
+        try {
+          const tailOk = await processStream(chatClient.tailTurn({
+            chatId: selected.id,
+            afterId: lastEventId || "0"
+          }));
+          if (!tailOk && turnId === activeTurnId) {
+            await recoverSilentEof();
+          }
+        } catch (tailExc) {
+          if (turnId === activeTurnId) {
+            error = tailExc instanceof Error ? tailExc.message : "Stream lost";
+            messages = messages.filter((m) => clientIdOf(m) !== clientId);
+            streamingClientId = null;
+            streamedPrefix = "";
+            lastActivityAt = undefined;
+            draftStartedAt = undefined;
+          }
+        }
+      } else if (turnId === activeTurnId) {
         error = exc instanceof Error ? exc.message : "Turn failed";
         messages = messages.filter((m) => clientIdOf(m) !== clientId);
         streamingClientId = null;

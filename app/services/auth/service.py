@@ -1,8 +1,12 @@
 """JWT issue / validate + Argon2id password hashing.
 
 Pure business logic — без HTTP/RPC/DB. DB-лукапи робить caller (AuthRPC).
+Argon2 hash/verify — CPU-bound (~50-100мс на дефолтних параметрах), тому
+обгорнуті у `asyncio.to_thread` щоб не блокувати event loop під час
+конкурентного login/signup.
 """
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -27,16 +31,16 @@ class AuthService:
 
     # --- passwords ---------------------------------------------------------
 
-    def hash_password(self, plain: str) -> str:
-        return self._hasher.hash(plain)
+    async def hash_password(self, plain: str) -> str:
+        return await asyncio.to_thread(self._hasher.hash, plain)
 
-    def verify_password(self, plain: str, stored_hash: str | None) -> bool:
+    async def verify_password(self, plain: str, stored_hash: str | None) -> bool:
         if not stored_hash:
             return False
         try:
-            self._hasher.verify(stored_hash, plain)
+            await asyncio.to_thread(self._hasher.verify, stored_hash, plain)
             return True
-        except (VerifyMismatchError, InvalidHashError):
+        except VerifyMismatchError, InvalidHashError:
             return False
 
     def needs_rehash(self, stored_hash: str | None) -> bool:

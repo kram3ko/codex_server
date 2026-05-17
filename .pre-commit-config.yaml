@@ -1,0 +1,42 @@
+# Pre-commit hooks для codex_server. Install:
+#   uv sync --group lint
+#   uv run pre-commit install
+#
+# Запуск вручну на всі файли:
+#   uv run pre-commit run --all-files
+#
+# Hooks бачать тільки staged файли (`git add` → `git commit`); ruff робить
+# autofix і повторно стейджить виправлене. pyright/pytest — read-only.
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff (lint --fix + format)
+        # Один прохід: check --fix → format. Файли вже автостейджаться
+        # pre-commit'ом якщо ruff їх змінив.
+        entry: bash -c 'uv run ruff check --fix "$@" && uv run ruff format "$@"' --
+        language: system
+        types_or: [python]
+        # Generated stubs excluded у [tool.ruff] extend-exclude.
+        pass_filenames: true
+
+      - id: pyright
+        name: pyright (typecheck app/)
+        entry: uv run pyright app/
+        language: system
+        types_or: [python]
+        # Pyright treat whole project as unit — не передаємо filenames,
+        # інакше cross-file refs ламаються.
+        pass_filenames: false
+        files: ^app/
+
+      - id: pytest
+        name: pytest (fast suite)
+        entry: uv run --group test pytest -q
+        language: system
+        types_or: [python]
+        pass_filenames: false
+        # Тести не залежать від конкретного файлу — ганяємо повний suite
+        # тільки якщо torknulis python-файли.
+        files: ^(app|tests)/
