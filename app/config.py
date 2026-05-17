@@ -97,6 +97,17 @@ class Settings(BaseSettings):
     # events/chunks → interrupt() і звільняємо turn_lock.
     TG_TURN_TIMEOUT_SECONDS: float = 300.0
     WEB_TURN_TIMEOUT_SECONDS: float = 300.0
+    # Per-turn Redis stream tunables (`app/services/turns/stream.py`).
+    # MAXLEN cap — sliding window поверх XADD; ~5000 events покриває довгий
+    # agentic turn з 50+ tool calls без втрати ранніх token-ів.
+    TURN_STREAM_MAX_EVENTS: int = 5000
+    # 24h — terminal event живе достатньо для будь-якого reasonable reconnect
+    # window-у (закрив лептоп, відкрив через день). Cleanup compress-ить до 60s
+    # після finalize.
+    TURN_STREAM_TTL_S: int = 86_400
+    # Short BLOCK у XREAD щоб tail-loop не висів довго на dead stream —
+    # caller повторно перевіряє `turn.status` між iterations.
+    TURN_STREAM_TAIL_BLOCK_MS: int = 2000
     TG_WEBHOOK_URL: str = ""
     TG_WEBHOOK_SECRET: str = ""
 

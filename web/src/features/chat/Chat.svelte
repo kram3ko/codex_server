@@ -228,6 +228,7 @@
     });
     messages = [...messages, userMessage, streamingPlaceholder];
     let lastEventId = "";
+    let serverTurnId: bigint | null = null;
 
     async function processStream(stream: AsyncIterable<ChatEvent>): Promise<boolean> {
       let terminalSeen = false;
@@ -238,6 +239,9 @@
         if (event.eventId) lastEventId = event.eventId;
         lastActivityAt = Date.now();
         switch (event.kind.case) {
+          case "turnStarted":
+            serverTurnId = event.kind.value.turnId;
+            break;
           case "token":
             typer.push(event.kind.value.delta);
             break;
@@ -394,20 +398,22 @@
       if (!ok && turnId === activeTurnId && selected) {
         const tailOk = await processStream(chatClient.tailTurn({
           chatId: selected.id,
-          afterId: lastEventId || "0"
+          afterId: lastEventId || "0",
+          ...(serverTurnId !== null ? { turnId: serverTurnId } : {})
         }));
         if (!tailOk && turnId === activeTurnId) {
           await recoverSilentEof();
         }
       }
     } catch (exc) {
-      // Mid-turn disconnect (network blip / page sleep) — one reconnect attempt
-      // via TailTurn replays missed events з server-side Redis Stream + далі live.
+      // Mid-turn disconnect → reconnect by `serverTurnId` якщо ми його встигли
+      // отримати; інакше fallback на chat-based lookup.
       if (turnId === activeTurnId && selected) {
         try {
           const tailOk = await processStream(chatClient.tailTurn({
             chatId: selected.id,
-            afterId: lastEventId || "0"
+            afterId: lastEventId || "0",
+            ...(serverTurnId !== null ? { turnId: serverTurnId } : {})
           }));
           if (!tailOk && turnId === activeTurnId) {
             await recoverSilentEof();

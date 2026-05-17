@@ -17,10 +17,11 @@ from app.services.uploads.default import upload_service
 from app.tg.media import PreparedTurn
 
 
-async def persist_user_turn(session: ChatSession, prepared: PreparedTurn) -> None:
+async def persist_user_turn(session: ChatSession, prepared: PreparedTurn) -> int:
+    """Returns USER message id — caller передає у `turn_service.create_starting`."""
     meta = {"upload_ids": list(prepared.upload_ids)} if prepared.upload_ids else None
     async with SessionLocal() as db:
-        await message_service.append(
+        msg = await message_service.append(
             db,
             session.db_chat_id,
             MessageRole.USER,
@@ -38,6 +39,7 @@ async def persist_user_turn(session: ChatSession, prepared: PreparedTurn) -> Non
             },
         )
         await db.commit()
+        return msg.id
 
 
 async def persist_assistant_turn(
