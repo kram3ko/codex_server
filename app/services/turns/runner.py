@@ -34,6 +34,7 @@ _HEARTBEAT_INTERVAL_S = 10.0
 
 async def heartbeat_loop(turn_id: int, chat_id: int, sidecar: str) -> None:
     """CAS-refresh False = ownership lost → loop exits; runner ловить далі."""
+    del sidecar  # legacy signature compat — slot lock прибрано
     while True:
         try:
             await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
@@ -47,9 +48,6 @@ async def heartbeat_loop(turn_id: int, chat_id: int, sidecar: str) -> None:
             return
         if not await locks.heartbeat_active(chat_id, turn_id):
             log.warning("turn_active_lock_lost", turn_id=turn_id)
-            return
-        if not await locks.heartbeat_slot(sidecar, turn_id):
-            log.warning("codex_slot_lock_lost", turn_id=turn_id, sidecar=sidecar)
             return
 
 

@@ -9,6 +9,7 @@ import asyncio
 import structlog
 import websockets
 from aiogram.types import Message
+from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db.base import SessionLocal
@@ -95,22 +96,34 @@ class TurnRunner:
             return
 
         try:
-            if prepared.text and await _try_auto_steer(session, prepared):
+            if await _handle_active_tg_turn(session, prepared, message):
                 return
 
             user_msg_id = await persist_user_turn(session, prepared)
             sidecar = "admin" if session.is_admin else "guest"
-            async with SessionLocal() as db:
-                turn = await turn_service.create_starting(
-                    db,
-                    TurnCreate(
-                        chat_id=session.db_chat_id,
-                        user_id=session.db_user_id,
-                        user_message_id=user_msg_id,
-                        sidecar=sidecar,
-                    ),
+            try:
+                async with SessionLocal() as db:
+                    turn = await turn_service.create_starting(
+                        db,
+                        TurnCreate(
+                            chat_id=session.db_chat_id,
+                            user_id=session.db_user_id,
+                            user_message_id=user_msg_id,
+                            sidecar=sidecar,
+                        ),
+                    )
+                    await db.commit()
+            except IntegrityError:
+                # Active turn у цьому chat ще не finalize-нувся (steer тільки
+                # що пройшов і відпустить slot за мить, або turn у STARTING
+                # без codex_turn_id ще). Просимо retry.
+                log.warning("tg_turn_create_race_lost", chat_id=session.db_chat_id)
+                await message.answer(
+                    tg_markdown.escape(
+                        "⏳ У цьому chat вже виконується turn — спробуй за мить."
+                    )
                 )
-                await db.commit()
+                return
 
             progress = TurnProgressReporter(message)
             await progress.start()
@@ -136,9 +149,8 @@ class TurnRunner:
             terminal: TurnStatus | None = None
             terminal_error: tuple[str | None, str | None] = (None, None)
             try:
-                # Slot lock серіалізує доступ до codex sidecar між TG-handler-ом
-                # та web TaskIQ worker-ом. Без нього обидва шляхи можуть зайти
-                # у одну codex-cli одночасно.
+                # Per-chat active lock — фізична гарантія "1 active turn per chat".
+                # Різні chat-и працюють паралельно (codex-cli тримає окремий thread/WS).
                 async with turn_locks.hold_turn_locks(
                     session.db_chat_id, sidecar, turn.id
                 ) as outcome:
@@ -148,9 +160,10 @@ class TurnRunner:
                             CodexErrorCode.TURN_BUSY,
                             f"lock unavailable: {outcome.value}",
                         )
+                        progress.mark_outcome(TurnOutcome.FAILED)
                         await message.answer(
                             tg_markdown.escape(
-                                "⏳ Codex sidecar зайнятий іншим chat-ом — спробуй через хвилину."
+                                "⏳ У цьому chat вже виконується turn — спробуй за мить."
                             )
                         )
                         return
@@ -260,25 +273,63 @@ class TurnRunner:
         await emit_failure(session, exc_type=type(exc).__name__, detail=str(exc))
 
 
-async def _try_auto_steer(session: ChatSession, prepared: PreparedTurn) -> bool:
+async def _handle_active_tg_turn(
+    session: ChatSession,
+    prepared: PreparedTurn,
+    message: Message,
+) -> bool:
+    """Симетрія до web `_handle_active_turn`: steer / interrupt / BUSY.
+    Returns True якщо handled (steer success або BUSY-message);
+    False = немає active turn-а, caller створює новий."""
     async with SessionLocal() as db:
         active = await turn_service.get_active_for_chat(db, session.db_chat_id)
     if active is not None and await reconcile_if_stale(active):
+        active = None
+    if active is None:
         return False
-    if active is None or active.codex_turn_id is None:
-        return False
+
+    if active.codex_turn_id is None:
+        log.warning("tg_active_pending_conflict", chat_id=session.db_chat_id)
+        await message.answer(
+            tg_markdown.escape("⏳ Turn ще запускається — спробуй за мить.")
+        )
+        return True
+
+    if prepared.attachments:
+        log.warning("tg_active_with_uploads", chat_id=session.db_chat_id)
+        await message.answer(
+            tg_markdown.escape("⏳ Попередній turn ще завершується — спробуй за мить.")
+        )
+        return True
+
+    if prepared.text:
+        try:
+            accepted = await codex_remote.send_steer_by_ids(
+                chat_id=session.db_chat_id,
+                is_admin=(active.sidecar or "admin") == "admin",
+                thread_id=active.codex_thread_id,
+                codex_turn_id=active.codex_turn_id,
+                text=prepared.text,
+            )
+        except _STEER_RPC_ERRORS as exc:
+            log.warning("tg_inline_steer_rpc_failed", error=str(exc))
+            accepted = False
+        if accepted:
+            await persist_user_turn(session, prepared)
+            return True
+
     try:
-        accepted = await codex_remote.send_steer_by_ids(
-            chat_id=session.db_chat_id,
-            is_admin=(active.sidecar or "admin") == "admin",
-            thread_id=active.codex_thread_id,
-            codex_turn_id=active.codex_turn_id,
-            text=prepared.text,
+        interrupted = await codex_remote.send_interrupt_turn_id(
+            (active.sidecar or "admin") == "admin",
+            active.codex_turn_id,
         )
     except _STEER_RPC_ERRORS as exc:
-        log.warning("tg_auto_steer_failed", error=str(exc))
-        return False
-    if not accepted:
-        return False
-    await persist_user_turn(session, prepared)
-    return True
+        log.warning("tg_inline_interrupt_rpc_failed", error=str(exc))
+        interrupted = False
+
+    if not interrupted:
+        await message.answer(
+            tg_markdown.escape("⏳ Попередній turn ще завершується — спробуй за мить.")
+        )
+        return True
+    return False

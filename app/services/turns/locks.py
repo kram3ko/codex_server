@@ -21,7 +21,6 @@ class LockAcquireOutcome(StrEnum):
     ACQUIRED = "acquired"
     REDELIVERY = "redelivery"  # same turn_id уже тримає active lock
     ACTIVE_BUSY = "active_busy"  # інший turn у тому ж chat
-    SLOT_BUSY = "slot_busy"  # codex sidecar slot зайнятий іншим chat-ом
 
 
 def _active_key(chat_id: int) -> str:
@@ -111,22 +110,18 @@ async def release_slot(sidecar: str, turn_id: int) -> bool:
 async def hold_turn_locks(
     chat_id: int, sidecar: str, turn_id: int
 ) -> AsyncIterator[LockAcquireOutcome]:
-    """Acquire both → release on exit. Yields typed `LockAcquireOutcome`."""
+    """Acquire per-chat active lock → release on exit. Sidecar slot lock
+    видалено: codex-cli тримає окремий thread/WS на chat, кілька активних
+    chat-ів у одному sidecar безпечні."""
+    del sidecar  # legacy signature compat — рознесемо у наступному cleanup-і
     active_acquired = await try_acquire_active(chat_id, turn_id)
     if not active_acquired:
-        # Розрізняємо TaskIQ redelivery vs cross-chat contention за value.
         if await active_lock_value(chat_id) == str(turn_id):
             yield LockAcquireOutcome.REDELIVERY
         else:
             yield LockAcquireOutcome.ACTIVE_BUSY
         return
-    slot_acquired = await try_acquire_slot(sidecar, turn_id)
-    if not slot_acquired:
-        await release_active(chat_id, turn_id)
-        yield LockAcquireOutcome.SLOT_BUSY
-        return
     try:
         yield LockAcquireOutcome.ACQUIRED
     finally:
-        await release_slot(sidecar, turn_id)
         await release_active(chat_id, turn_id)
