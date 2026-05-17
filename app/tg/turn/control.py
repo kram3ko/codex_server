@@ -73,11 +73,7 @@ async def emit_failure(
     detail: str | None = None,
     exc_type: str | None = None,
 ) -> None:
-    payload = {
-        k: v
-        for k, v in (("code", code), ("detail", detail), ("exc_type", exc_type))
-        if v
-    }
+    payload = {k: v for k, v in (("code", code), ("detail", detail), ("exc_type", exc_type)) if v}
     async with SessionLocal() as db:
         await event_service.emit(
             db,

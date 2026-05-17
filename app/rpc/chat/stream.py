@@ -381,11 +381,7 @@ async def _persist_visible_partial(
 
 
 def _has_visible_content(state: _StreamState) -> bool:
-    return bool(
-        state.collector.buffer
-        or state.collector.tool_calls
-        or state.collector.attachments
-    )
+    return bool(state.collector.buffer or state.collector.tool_calls or state.collector.attachments)
 
 
 async def _attach_assistant_to_turn(

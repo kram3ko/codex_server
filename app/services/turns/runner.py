@@ -127,17 +127,13 @@ async def execute_turn_inner(
                 ):
                     event.event_id = await turn_stream.publish(turn_id, event)
                     async with SessionLocal() as db:
-                        await turn_service.update_last_event(
-                            db, turn_id, event.event_id
-                        )
+                        await turn_service.update_last_event(db, turn_id, event.event_id)
                         await db.commit()
                     kind = event.WhichOneof("kind")
                     if kind in ("done", "error"):
                         terminal_published = True
                         terminal_status = (
-                            TurnStatus.COMPLETED
-                            if kind == "done"
-                            else TurnStatus.FAILED
+                            TurnStatus.COMPLETED if kind == "done" else TurnStatus.FAILED
                         )
                         if kind == "error":
                             terminal_error = (
@@ -156,9 +152,7 @@ async def execute_turn_inner(
         from app.rpc.chat.mappers import error_event as _error_event
 
         try:
-            crash = _error_event(
-                CodexErrorCode.CODEX_ERROR, f"background crashed: {exc}"
-            )
+            crash = _error_event(CodexErrorCode.CODEX_ERROR, f"background crashed: {exc}")
             crash.event_id = await turn_stream.publish(turn_id, crash)
             terminal_published = True
         except Exception:

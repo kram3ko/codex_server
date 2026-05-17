@@ -60,9 +60,7 @@ class TurnStatus(enum.StrEnum):
 
 
 # Termal статуси — single source of truth для finalize-once guard.
-TURN_TERMINAL_STATUSES = frozenset(
-    {TurnStatus.COMPLETED, TurnStatus.FAILED, TurnStatus.CANCELLED}
-)
+TURN_TERMINAL_STATUSES = frozenset({TurnStatus.COMPLETED, TurnStatus.FAILED, TurnStatus.CANCELLED})
 
 
 # Postgres ENUM type names — single source of truth для Alembic міграцій.

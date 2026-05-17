@@ -155,9 +155,7 @@ class ChatRPC(ChatProtocol):
                 return
             worker_owns_rate_limit = True
 
-            yield chat_pb2.ChatEvent(
-                turn_started=chat_pb2.TurnStartedEvent(turn_id=turn.id)
-            )
+            yield chat_pb2.ChatEvent(turn_started=chat_pb2.TurnStartedEvent(turn_id=turn.id))
 
             async for event in turn_stream.tail(turn.id, ""):
                 yield event
@@ -189,9 +187,7 @@ class ChatRPC(ChatProtocol):
         else:
             async with SessionLocal() as db:
                 await load_chat_owned(db, request.chat_id, user.id)
-                target_turn = await turn_service.get_active_for_chat(
-                    db, request.chat_id
-                )
+                target_turn = await turn_service.get_active_for_chat(db, request.chat_id)
             if target_turn is None:
                 async with SessionLocal() as db:
                     latest = await _latest_turn_for_chat(db, request.chat_id)
@@ -562,14 +558,10 @@ async def _handle_stale_turn(
 def _terminal_from_status(turn: TurnRow) -> chat_pb2.ChatEvent | None:
     """Synthesize terminal ChatEvent з `turn.status` для UI close-placeholder."""
     if turn.status == TurnStatus.COMPLETED:
-        return chat_pb2.ChatEvent(
-            done=chat_pb2.DoneEvent(chat_id=turn.chat_id, final_text="")
-        )
+        return chat_pb2.ChatEvent(done=chat_pb2.DoneEvent(chat_id=turn.chat_id, final_text=""))
     if turn.status in (TurnStatus.FAILED, TurnStatus.CANCELLED):
         code = turn.error_code or (
-            CodexErrorCode.STREAM_DROPPED
-            if turn.status == TurnStatus.FAILED
-            else "cancelled"
+            CodexErrorCode.STREAM_DROPPED if turn.status == TurnStatus.FAILED else "cancelled"
         )
         return error_event(code, turn.error_detail or turn.status.value.lower())
     return None

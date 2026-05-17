@@ -56,9 +56,7 @@ async def probe_or_extend_idle(client: CodexClient, turn_id: int) -> bool:
     if not (client.current_thread_id and client.current_turn_id):
         return False
     try:
-        raw = await client.probe_turn_status(
-            client.current_thread_id, client.current_turn_id
-        )
+        raw = await client.probe_turn_status(client.current_thread_id, client.current_turn_id)
     except Exception as exc:
         log.warning(
             "codex_probe_failed",

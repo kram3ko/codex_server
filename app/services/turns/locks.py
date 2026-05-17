@@ -19,9 +19,9 @@ _LOCK_TTL_S = 30
 
 class LockAcquireOutcome(StrEnum):
     ACQUIRED = "acquired"
-    REDELIVERY = "redelivery"      # same turn_id уже тримає active lock
-    ACTIVE_BUSY = "active_busy"    # інший turn у тому ж chat
-    SLOT_BUSY = "slot_busy"        # codex sidecar slot зайнятий іншим chat-ом
+    REDELIVERY = "redelivery"  # same turn_id уже тримає active lock
+    ACTIVE_BUSY = "active_busy"  # інший turn у тому ж chat
+    SLOT_BUSY = "slot_busy"  # codex sidecar slot зайнятий іншим chat-ом
 
 
 def _active_key(chat_id: int) -> str:
@@ -68,9 +68,7 @@ async def heartbeat_active(chat_id: int, turn_id: int) -> bool:
 async def release_active(chat_id: int, turn_id: int) -> bool:
     payload = str(turn_id)
     try:
-        deleted = await cache.execute_command(
-            "DELEX", _active_key(chat_id), "IFEQ", payload
-        )
+        deleted = await cache.execute_command("DELEX", _active_key(chat_id), "IFEQ", payload)
     except RedisError as exc:
         log.warning("turn_active_release_failed", chat_id=chat_id, error=str(exc))
         return False
@@ -102,9 +100,7 @@ async def heartbeat_slot(sidecar: str, turn_id: int) -> bool:
 async def release_slot(sidecar: str, turn_id: int) -> bool:
     payload = str(turn_id)
     try:
-        deleted = await cache.execute_command(
-            "DELEX", _slot_key(sidecar), "IFEQ", payload
-        )
+        deleted = await cache.execute_command("DELEX", _slot_key(sidecar), "IFEQ", payload)
     except RedisError as exc:
         log.warning("codex_slot_release_failed", sidecar=sidecar, error=str(exc))
         return False

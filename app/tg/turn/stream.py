@@ -102,9 +102,7 @@ async def stream_turn(
                 case ErrorEvent(code=code, detail=detail):
                     progress.mark_outcome(TurnOutcome.FAILED)
                     await message.answer(
-                        tg_markdown.escape(
-                            f"Codex error [{code}]: {detail or 'unknown error'}"
-                        ),
+                        tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
                     )
                     await emit_failure(session, code=code, detail=detail)
                     raise CodexTurnTerminal(

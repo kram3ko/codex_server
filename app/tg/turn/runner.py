@@ -58,9 +58,7 @@ class TurnRunner:
 
         display_name = message.from_user.full_name or message.from_user.username
         async with SessionLocal() as db:
-            user = await user_service.get_or_create_by_tg(
-                db, message.from_user.id, display_name
-            )
+            user = await user_service.get_or_create_by_tg(db, message.from_user.id, display_name)
             chat = await chat_service.get_or_create_for_tg(db, user.id, message.chat.id)
             db_user_id = user.id
             db_chat_id = chat.id
@@ -164,9 +162,7 @@ class TurnRunner:
                         async with open_codex_turn(
                             session.db_chat_id, is_admin=session.is_admin
                         ) as client:
-                            await stream_turn(
-                                client, session, message, prepared, progress, turn.id
-                            )
+                            await stream_turn(client, session, message, prepared, progress, turn.id)
                             # `stream_turn` ЗАВЖДИ raise-ить `CodexTurnTerminal`.
                             # Цей рядок не повинен бути reachable; якщо ми тут —
                             # це bug у stream_turn (відсутній terminal-raise).
@@ -186,9 +182,7 @@ class TurnRunner:
                         except asyncio.CancelledError:
                             pass
                         except Exception:
-                            log.exception(
-                                "tg_heartbeat_task_failed", turn_id=turn.id
-                            )
+                            log.exception("tg_heartbeat_task_failed", turn_id=turn.id)
             except CodexTurnTerminal as exc:
                 terminal = exc.status
                 if exc.status != TurnStatus.COMPLETED:

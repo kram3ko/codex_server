@@ -81,9 +81,7 @@ class TurnService:
         message_id: int,
     ) -> None:
         await session.execute(
-            update(Turn)
-            .where(Turn.id == turn_id)
-            .values(assistant_message_id=message_id)
+            update(Turn).where(Turn.id == turn_id).values(assistant_message_id=message_id)
         )
 
     async def update_last_event(
@@ -92,9 +90,7 @@ class TurnService:
         turn_id: int,
         event_id: str,
     ) -> None:
-        await session.execute(
-            update(Turn).where(Turn.id == turn_id).values(last_event_id=event_id)
-        )
+        await session.execute(update(Turn).where(Turn.id == turn_id).values(last_event_id=event_id))
 
     async def heartbeat(self, session: AsyncSession, turn_id: int) -> bool:
         """False = ownership lost; caller MUST stop і finalize FAILED.

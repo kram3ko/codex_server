@@ -54,12 +54,8 @@ class Turn(Base):
     last_event_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Окремий від `Base.updated_at` бо туди б'є кожен UPDATE — зашумило би liveness.
-    heartbeat_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index(
