@@ -154,7 +154,9 @@ message SteerTurnResponse {
   bool accepted = 1;
 }
 
-message GetCodexUsageRequest {}
+message StreamCodexUsageRequest {}
+
+message RefreshCodexUsageRequest {}
 
 message UsageWindow {
   double used_percent = 1;
@@ -179,5 +181,12 @@ service ChatService {
   rpc TailTurn(TailTurnRequest) returns (stream ChatEvent);
   rpc InterruptTurn(InterruptTurnRequest) returns (InterruptTurnResponse);
   rpc SteerTurn(SteerTurnRequest) returns (SteerTurnResponse);
-  rpc GetCodexUsage(GetCodexUsageRequest) returns (CodexUsage);
+  // Server-pushed Codex rate-limit snapshots. Bootstrap on connect (cache
+  // snapshot для instant first frame), далі pub/sub-driven (event на кожен
+  // `finalize_once`). Жодного periodic polling.
+  rpc StreamCodexUsage(StreamCodexUsageRequest) returns (stream CodexUsage);
+  // Force-fetch usage з sidecar (для manual refresh кнопки). Side effect:
+  // publish у pub/sub channel → всі підписані StreamCodexUsage клієнти теж
+  // отримають новий snapshot.
+  rpc RefreshCodexUsage(RefreshCodexUsageRequest) returns (CodexUsage);
 }

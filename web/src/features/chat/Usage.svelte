@@ -1,38 +1,55 @@
 <script lang="ts">
   import { RefreshCw, Sparkles } from "lucide-svelte";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
 
   import type { CodexUsage, UsageWindow } from "../../gen/codex/v1/chat_pb";
   import { chatClient } from "../../shared/lib/clients";
-  import { turnSignal } from "./turnSignal.svelte";
 
   let usage = $state<CodexUsage | null>(null);
   let loading = $state(false);
   let pulseKey = $state(0);
   let loadedAt = $state<Date | null>(null);
+  let abort: AbortController | null = null;
 
-  async function load() {
+  // Server-pushed event-driven stream: bootstrap frame з cache (instant),
+  // далі pub/sub push на кожен `thread/tokenUsage/updated` від sidecar.
+  async function consumeStream() {
+    abort?.abort();
+    abort = new AbortController();
     loading = true;
     try {
-      usage = await chatClient.getCodexUsage({});
-      loadedAt = new Date();
-      pulseKey += 1;
-    } catch {
-      usage = null;
-    } finally {
+      for await (const snapshot of chatClient.streamCodexUsage(
+        {},
+        { signal: abort.signal }
+      )) {
+        usage = snapshot;
+        loadedAt = new Date();
+        pulseKey += 1;
+        loading = false;
+      }
+    } catch (exc) {
+      if ((exc as { name?: string })?.name === "AbortError") return;
       loading = false;
     }
   }
 
-  onMount(load);
+  onMount(consumeStream);
+  onDestroy(() => abort?.abort());
 
-  // Auto-refresh после кожного завершеного turn'а — Codex плата за turn'и,
-  // тож rate-limit вікно змінюється саме у моменти done.
-  $effect(() => {
-    if (turnSignal.doneCount > 0) {
-      void load();
+  // Server-side force-refresh: fetch у sidecar + publish у pub/sub. Stream
+  // нашого вікна теж отримає snapshot через канал, але unary response повертає
+  // його одразу — швидший visual feedback ніж round-trip через pub/sub.
+  async function refresh() {
+    loading = true;
+    try {
+      const snapshot = await chatClient.refreshCodexUsage({});
+      usage = snapshot;
+      loadedAt = new Date();
+      pulseKey += 1;
+    } finally {
+      loading = false;
     }
-  });
+  }
 
   function formatReset(w: UsageWindow): string {
     if (!w.resetsAt) return "—";
@@ -85,7 +102,7 @@
       class="grid size-7 place-items-center rounded-md text-[oklch(72%_0.012_100)] transition hover:bg-[oklch(96%_0.01_100/0.08)] hover:text-[var(--color-accent)] active:scale-90"
       title="Refresh usage"
       type="button"
-      onclick={load}
+      onclick={refresh}
     >
       <RefreshCw size={13} class={loading ? "animate-spin" : ""} />
     </button>

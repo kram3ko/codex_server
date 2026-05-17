@@ -18,20 +18,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import chat_pb2, common_pb2
 from app.grpc_generated.codex.v1.chat_connect import ChatService as ChatProtocol
-from app.models import TURN_TERMINAL_STATUSES, EventKind, MessageRole, Turn, TurnStatus
+from app.models import TURN_TERMINAL_STATUSES, EventKind, MessageRole, Turn, TurnStatus, UserRole
 from app.rpc._auth import require_user
 from app.rpc._mappers import chat_to_pb
 from app.rpc.chat.guards import load_chat_owned, resolve_limit
 from app.rpc.chat.mappers import codex_usage_to_pb, error_event
 from app.rpc.chat.uploads import resolve_uploads
 from app.services import rate_limit
+from app.services.cache.default import cache
 from app.services.chats.default import chat_service
 from app.services.codex import codex_remote
 from app.services.codex.client import StaleSidecarTurnError
 from app.services.codex.error_codes import CodexErrorCode
-from app.services.codex.runner import open_codex_turn, quarantine_thread
+from app.services.codex.runner import quarantine_thread
+from app.services.codex.sidecar import SidecarName
 from app.services.codex.transport import AppServerError
-from app.services.codex_usage.default import codex_usage_service
+from app.services.codex_usage import poller as usage_poller
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
 from app.services.turns.default import turn_service, turn_stream
@@ -60,7 +62,7 @@ class _PreparedRunTurn:
     audio_ids: list[int]
     voice_reply: bool
     has_uploads: bool
-    sidecar: str
+    sidecar: SidecarName
     client_id: str | None
 
 
@@ -275,20 +277,66 @@ class ChatRPC(ChatProtocol):
                     db, chat.id, MessageRole.USER, text, meta={"steered": True}
                 )
                 await db.commit()
+            # Bump ПІСЛЯ persist — гарантує що stream-loop persist-segment
+            # завжди має id > USER steer message id (chronology stable).
+            await codex_remote.bump_steer_count(active.id)
         return chat_pb2.SteerTurnResponse(accepted=accepted)
 
     @override
-    async def get_codex_usage(
+    async def stream_codex_usage(
         self,
-        request: chat_pb2.GetCodexUsageRequest,
+        request: chat_pb2.StreamCodexUsageRequest,
+        ctx: RequestContext,
+    ) -> AsyncIterator[chat_pb2.CodexUsage]:
+        del request
+        user = await require_user(ctx)
+        sidecar = SidecarName.ADMIN if user.role == UserRole.ADMIN else SidecarName.GUEST
+        channel = usage_poller.channel_for(sidecar)
+        snapshot_key = usage_poller.snapshot_key(sidecar)
+
+        # Subscribe ПЕРЕД read snapshot щоб publish між цими двома операціями
+        # не загубився (raceless bootstrap). Перший frame завжди yield-имо —
+        # `CodexUsage()` empty якщо snapshot ще нема (UI вийде з "loading" у
+        # "no data" замість вічного spinner).
+        pubsub = cache.pubsub()
+        await pubsub.subscribe(channel)
+        try:
+            raw = await cache.get(snapshot_key)
+            bootstrap_usage = (
+                usage_poller.deserialize(raw) if raw is not None else None
+            )
+            yield (
+                codex_usage_to_pb(bootstrap_usage)
+                if bootstrap_usage is not None
+                else chat_pb2.CodexUsage()
+            )
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                usage = usage_poller.deserialize(message["data"])
+                if usage is not None:
+                    yield codex_usage_to_pb(usage)
+        finally:
+            with contextlib.suppress(Exception):
+                await pubsub.unsubscribe(channel)
+                await pubsub.aclose()
+
+    @override
+    async def refresh_codex_usage(
+        self,
+        request: chat_pb2.RefreshCodexUsageRequest,
         ctx: RequestContext,
     ) -> chat_pb2.CodexUsage:
         del request
         user = await require_user(ctx)
-        # Open fresh client just to read rate-limits; cheap (handshake only).
-        persisted_chat_id, _ = await _ensure_web_chat(user.id)
-        async with open_codex_turn(persisted_chat_id, is_admin=True, seed_history=False) as client:
-            usage = await codex_usage_service.latest(client)
+        sidecar = SidecarName.ADMIN if user.role == UserRole.ADMIN else SidecarName.GUEST
+        # Sync fetch + publish (publish_for пише cache + pub/sub) — інші
+        # підписані StreamCodexUsage клієнти теж отримають свіжий snapshot.
+        await usage_poller.publish_for(sidecar)
+        raw = await cache.get(usage_poller.snapshot_key(sidecar))
+        if raw is None:
+            return chat_pb2.CodexUsage()
+        usage = usage_poller.deserialize(raw)
         if usage is None:
             return chat_pb2.CodexUsage()
         return codex_usage_to_pb(usage)
@@ -322,7 +370,7 @@ async def _prepare_run_turn(
         audio_ids=audio_ids,
         voice_reply=bool(audio_ids),
         has_uploads=bool(data_urls) or bool(audio_ids),
-        sidecar="admin",
+        sidecar=SidecarName.ADMIN,
         client_id=request.client_id or None,
     )
 
@@ -404,6 +452,9 @@ async def _try_steer_active_turn(
             meta={"steered": True},
         )
         await db.commit()
+    # Bump steer-count тільки після persist USER row — гарантує stable
+    # chronology у stream-loop persist_segment.
+    await codex_remote.bump_steer_count(active.id)
     return chat_pb2.ChatEvent(
         done=chat_pb2.DoneEvent(
             chat_id=prepared.chat_id,

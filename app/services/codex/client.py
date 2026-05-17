@@ -26,7 +26,6 @@ from app.config import settings
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
     ChatEvent,
-    CodexItem,
     DoneEvent,
     ErrorEvent,
     TokenEvent,
@@ -39,22 +38,6 @@ from app.services.codex.transport import AppServerClient, AppServerError, Notifi
 log = structlog.get_logger(__name__)
 
 _CLIENT_INFO = {"name": "codex-api", "version": "0.1.0"}
-
-# Visible item types → fire boundary callback. Hidden (reasoning, plan, etc.)
-# не дают видимого текста, persistить нечего.
-_PERSIST_BOUNDARY_ITEMS: frozenset[str] = frozenset(
-    {
-        CodexItem.AGENT_MESSAGE,
-        CodexItem.COMMAND_EXECUTION,
-        CodexItem.FILE_CHANGE,
-        CodexItem.WEB_SEARCH,
-        CodexItem.MCP_TOOL_CALL,
-        CodexItem.DYNAMIC_TOOL_CALL,
-        CodexItem.IMAGE_VIEW,
-        CodexItem.IMAGE_GENERATION,
-    }
-)
-
 
 class StaleTurnStreamError(RuntimeError):
     """Raised when a resumed thread only emits events for an older turn."""
@@ -330,7 +313,7 @@ class CodexClient:
         on_started: Callable[[str, str], Awaitable[None]] | None = None,
         idle_s: float | None = None,
         on_idle: Callable[[], Awaitable[bool | None]] | None = None,
-        on_item_boundary: Callable[[str], Awaitable[None]] | None = None,
+        on_usage_signal: Callable[[], Awaitable[None]] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """Stream ChatEvent'и. `on_started(turn_id, thread_id)` fires як тільки
         sidecar повернув turn/start — caller робить `mark_running` у `turns`.
@@ -338,7 +321,10 @@ class CodexClient:
         `idle_s` ставить watchdog на notification-и поточного turn'а (не на
         ChatEvent). Чужі leftover-и з попереднього turn не мають скидати таймер
         і не мають доходити до translator.
-        """
+
+        `on_usage_signal` fires на `thread/tokenUsage/updated` (thread-level,
+        не turn-bound) — sidecar шле це навіть зі stale turn_id, тому НЕ
+        фільтруємо за turn_id."""
         input_payload = self._build_input(text, attachments)
         result = await self._begin_turn_with_retry(input_payload)
         if isinstance(result, ErrorEvent):
@@ -355,7 +341,9 @@ class CodexClient:
                 await on_started(self._current_turn_id, self._thread_id)
             accumulated = ""
 
-            async for note in self._current_turn_notifications(idle_s, on_idle):
+            async for note in self._current_turn_notifications(
+                idle_s, on_idle, on_usage_signal
+            ):
                 self._record_raw_note(note)
                 event = _translate(note, accumulated)
                 if event is not None:
@@ -363,13 +351,6 @@ class CodexClient:
                     if isinstance(event, TokenEvent):
                         accumulated += event.delta
                     yield event
-                # Boundary callback ПІСЛЯ yield щоб stream.py встиг collector.absorb
-                # цього event'а. Інакше partial-write бачить state на один event позаду.
-                if on_item_boundary is not None and note.method == "item/completed":
-                    item = note.params.get("item")
-                    item_type = item.get("type") if isinstance(item, dict) else None
-                    if isinstance(item_type, str) and item_type in _PERSIST_BOUNDARY_ITEMS:
-                        await on_item_boundary(item_type)
                 if event is not None and isinstance(event, DoneEvent):
                     return
         finally:
@@ -521,6 +502,7 @@ class CodexClient:
         self,
         idle_s: float | None,
         on_idle: Callable[[], Awaitable[bool | None]] | None,
+        on_usage_signal: Callable[[], Awaitable[None]] | None = None,
     ) -> AsyncIterator[Notification]:
         notes = self._transport.notifications()
         self._idle_s = idle_s
@@ -531,6 +513,10 @@ class CodexClient:
                     note = await self._next_notification(notes, on_idle)
                 except StopAsyncIteration:
                     return
+                # Перехоплюємо ДО stale-filter: thread/tokenUsage/updated
+                # приходить зі stale turn_id, інакше signal губиться.
+                if on_usage_signal is not None and note.method == "thread/tokenUsage/updated":
+                    await on_usage_signal()
                 if self._is_stale_turn_note(note):
                     self._record_stale_raw_note(note)
                     continue

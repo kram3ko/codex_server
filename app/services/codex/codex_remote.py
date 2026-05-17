@@ -21,10 +21,15 @@ from app.services.codex.client import CodexClient
 log = structlog.get_logger(__name__)
 
 _STEER_KEY_PREFIX = "codex:active-steer:"
+_STEER_COUNT_PREFIX = "codex:steer-count:"
 
 
 def _steer_key(chat_id: int) -> str:
     return f"{_STEER_KEY_PREFIX}{chat_id}"
+
+
+def _steer_count_key(turn_id: int) -> str:
+    return f"{_STEER_COUNT_PREFIX}{turn_id}"
 
 
 def _ttl_s() -> int:
@@ -37,6 +42,29 @@ async def note_steer(chat_id: int, codex_turn_id: str) -> None:
         await cache.set(_steer_key(chat_id), codex_turn_id, ex=_ttl_s())
     except RedisError as exc:
         log.warning("codex_remote_note_steer_failed", chat_id=chat_id, error=str(exc))
+
+
+async def bump_steer_count(turn_id: int) -> None:
+    """INCR-counter sertвіс для stream-loop persist-boundary. Окремий від
+    `note_steer` (той сигналить idle-watchdog'у keepalive). Stream-loop
+    porівнює локальний `seen` з cache value і на ріст робить cut_segment."""
+    try:
+        key = _steer_count_key(turn_id)
+        await cache.incr(key)
+        await cache.expire(key, _ttl_s())
+    except RedisError as exc:
+        log.warning("codex_remote_bump_steer_failed", turn_id=turn_id, error=str(exc))
+
+
+async def peek_steer_count(turn_id: int) -> int:
+    try:
+        raw = await cache.get(_steer_count_key(turn_id))
+        if raw is None:
+            return 0
+        return int(raw)
+    except (RedisError, ValueError) as exc:
+        log.warning("codex_remote_peek_steer_failed", turn_id=turn_id, error=str(exc))
+        return 0
 
 
 async def consume_steer(chat_id: int, codex_turn_id: str | None) -> bool:
@@ -70,7 +98,12 @@ async def send_steer_by_ids(
     codex_turn_id: str,
     text: str,
 ) -> bool:
-    """Cross-worker steer. On accept — note_steer щоб owner-idle не вбив turn."""
+    """Cross-worker steer transport. На accept робить тільки `note_steer`
+    (idle-watchdog keepalive). `bump_steer_count` НЕ викликається тут —
+    інакше stream-loop міг би побачити counter РАНІШЕ ніж caller встигне
+    persist steered USER message, і chronology у БД ламається (assistant
+    partial id < user steer id). Caller сам викликає `bump_steer_count`
+    ПІСЛЯ persist-у USER row — це робить race неможливим."""
     async with _one_shot_client(is_admin) as client:
         accepted = await client.steer(text, turn_id=codex_turn_id, thread_id=thread_id)
     if accepted:

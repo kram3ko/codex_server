@@ -200,7 +200,11 @@ class SteerTurnResponse(_message.Message):
     accepted: bool
     def __init__(self, accepted: bool = ...) -> None: ...
 
-class GetCodexUsageRequest(_message.Message):
+class StreamCodexUsageRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class RefreshCodexUsageRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 

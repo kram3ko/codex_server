@@ -43,7 +43,10 @@ class ChatService(Protocol):
     async def steer_turn(self, request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
-    async def get_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.CodexUsage:
+    def stream_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest, ctx: RequestContext) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.CodexUsage]:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    async def refresh_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.RefreshCodexUsageRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.CodexUsage:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
@@ -132,15 +135,25 @@ class ChatServiceASGIApplication(ConnectASGIApplication[ChatService]):
                     ),
                     function=svc.steer_turn,
                 ),
-                "/codex.v1.ChatService/GetCodexUsage": Endpoint.unary(
+                "/codex.v1.ChatService/StreamCodexUsage": Endpoint.server_stream(
                     method=MethodInfo(
-                        name="GetCodexUsage",
+                        name="StreamCodexUsage",
                         service_name="codex.v1.ChatService",
-                        input=codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest,
+                        input=codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest,
                         output=codex_dot_v1_dot_chat__pb2.CodexUsage,
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
-                    function=svc.get_codex_usage,
+                    function=svc.stream_codex_usage,
+                ),
+                "/codex.v1.ChatService/RefreshCodexUsage": Endpoint.unary(
+                    method=MethodInfo(
+                        name="RefreshCodexUsage",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.RefreshCodexUsageRequest,
+                        output=codex_dot_v1_dot_chat__pb2.CodexUsage,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.refresh_codex_usage,
                 ),
             },
             interceptors=interceptors,
@@ -316,9 +329,29 @@ class ChatServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
-    async def get_codex_usage(
+    def stream_codex_usage(
         self,
-        request: codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest,
+        request: codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.CodexUsage]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="StreamCodexUsage",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest,
+                output=codex_dot_v1_dot_chat__pb2.CodexUsage,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    async def refresh_codex_usage(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.RefreshCodexUsageRequest,
         *,
         headers: Headers | Mapping[str, str] | None = None,
         timeout_ms: int | None = None,
@@ -326,9 +359,9 @@ class ChatServiceClient(ConnectClient):
         return await self.execute_unary(
             request=request,
             method=MethodInfo(
-                name="GetCodexUsage",
+                name="RefreshCodexUsage",
                 service_name="codex.v1.ChatService",
-                input=codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest,
+                input=codex_dot_v1_dot_chat__pb2.RefreshCodexUsageRequest,
                 output=codex_dot_v1_dot_chat__pb2.CodexUsage,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
@@ -357,7 +390,9 @@ class ChatServiceSync(Protocol):
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def steer_turn(self, request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
-    def get_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.CodexUsage:
+    def stream_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest, ctx: RequestContext) -> Iterator[codex_dot_v1_dot_chat__pb2.CodexUsage]:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def refresh_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.RefreshCodexUsageRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.CodexUsage:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
@@ -445,15 +480,25 @@ class ChatServiceWSGIApplication(ConnectWSGIApplication):
                     ),
                     function=service.steer_turn,
                 ),
-                "/codex.v1.ChatService/GetCodexUsage": EndpointSync.unary(
+                "/codex.v1.ChatService/StreamCodexUsage": EndpointSync.server_stream(
                     method=MethodInfo(
-                        name="GetCodexUsage",
+                        name="StreamCodexUsage",
                         service_name="codex.v1.ChatService",
-                        input=codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest,
+                        input=codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest,
                         output=codex_dot_v1_dot_chat__pb2.CodexUsage,
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
-                    function=service.get_codex_usage,
+                    function=service.stream_codex_usage,
+                ),
+                "/codex.v1.ChatService/RefreshCodexUsage": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="RefreshCodexUsage",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.RefreshCodexUsageRequest,
+                        output=codex_dot_v1_dot_chat__pb2.CodexUsage,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.refresh_codex_usage,
                 ),
             },
             interceptors=interceptors,
@@ -629,9 +674,29 @@ class ChatServiceClientSync(ConnectClientSync):
             timeout_ms=timeout_ms,
         )
 
-    def get_codex_usage(
+    def stream_codex_usage(
         self,
-        request: codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest,
+        request: codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> Iterator[codex_dot_v1_dot_chat__pb2.CodexUsage]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="StreamCodexUsage",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest,
+                output=codex_dot_v1_dot_chat__pb2.CodexUsage,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def refresh_codex_usage(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.RefreshCodexUsageRequest,
         *,
         headers: Headers | Mapping[str, str] | None = None,
         timeout_ms: int | None = None,
@@ -639,9 +704,9 @@ class ChatServiceClientSync(ConnectClientSync):
         return self.execute_unary(
             request=request,
             method=MethodInfo(
-                name="GetCodexUsage",
+                name="RefreshCodexUsage",
                 service_name="codex.v1.ChatService",
-                input=codex_dot_v1_dot_chat__pb2.GetCodexUsageRequest,
+                input=codex_dot_v1_dot_chat__pb2.RefreshCodexUsageRequest,
                 output=codex_dot_v1_dot_chat__pb2.CodexUsage,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),

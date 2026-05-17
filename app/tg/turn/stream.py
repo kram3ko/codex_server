@@ -23,6 +23,8 @@ from app.services.codex.events import (
     ToolResultEvent,
 )
 from app.services.codex.runner import quarantine_thread
+from app.services.codex.sidecar import SidecarName
+from app.services.codex_usage import poller as usage_poller
 from app.services.events.default import event_service
 from app.services.sessions.store import ChatSession
 from app.services.turns.default import turn_service
@@ -48,6 +50,7 @@ async def stream_turn(
     prepared: PreparedTurn,
     progress: TurnProgressReporter,
     turn_id: int,
+    sidecar: SidecarName,
 ) -> None:
     """Стрімить codex events. ЗАВЖДИ виходить через `CodexTurnTerminal`
     (success/failed/cancelled) — runner перетворює це на `TurnStatus`."""
@@ -77,12 +80,16 @@ async def stream_turn(
         await interrupt_best_effort(client, reason="tg_idle_timeout")
         return False
 
+    async def _on_usage_signal() -> None:
+        usage_poller.schedule_refresh(sidecar)
+
     stream = client.run_turn(
         prepared.text,
         attachments=prepared.attachments,
         on_started=_on_started,
         idle_s=settings.TG_TURN_TIMEOUT_SECONDS,
         on_idle=_on_idle,
+        on_usage_signal=_on_usage_signal,
     )
 
     try:
@@ -119,6 +126,7 @@ async def stream_turn(
                         collector.attachments,
                         collector.tool_calls,
                         progress.committed_text,
+                        turn_id=turn_id,
                     )
                     raise CodexTurnTerminal(TurnStatus.COMPLETED)
     except CodexTurnTerminal:

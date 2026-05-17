@@ -6,6 +6,8 @@ HTTP/WS routers живуть в `app/api/`; Connect-RPC services тримают�
 (тонкий mount). Singletons (cache, tg_bot) у `lifespan` — старт + cleanup.
 """
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 import sentry_sdk
@@ -66,6 +68,7 @@ from app.rpc.uploads import UploadsRPC
 from app.rpc.user import UserRPC
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
+from app.services.codex_usage.poller import bootstrap_usage, drain_bg_tasks
 from app.services.errors.default import bugsink_client
 from app.services.turns.recovery import reconcile_stale_turns
 from app.services.users.default import user_service
@@ -85,15 +88,23 @@ async def lifespan(_app: FastAPI):
         if stale:
             log.info("app_startup_stale_turns_finalized", count=stale)
         await tg_bot_service.start()
-        yield
-        log.info("app_shutdown")
-        cancelled = await tg_bot_service.interrupt_active_turns()
-        if cancelled:
-            log.info("app_shutdown_turns_interrupted", count=cancelled)
-        await tg_bot_service.stop()
-        await bugsink_client.aclose()
-        await cache.aclose()
-        await engine.dispose()
+        usage_bootstrap = bootstrap_usage()
+        try:
+            yield
+        finally:
+            log.info("app_shutdown")
+            if not usage_bootstrap.done():
+                usage_bootstrap.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await usage_bootstrap
+            await drain_bg_tasks()
+            cancelled = await tg_bot_service.interrupt_active_turns()
+            if cancelled:
+                log.info("app_shutdown_turns_interrupted", count=cancelled)
+            await tg_bot_service.stop()
+            await bugsink_client.aclose()
+            await cache.aclose()
+            await engine.dispose()
 
 
 async def _bootstrap_users() -> None:

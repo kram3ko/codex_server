@@ -19,7 +19,9 @@ from app.services.chats.default import chat_service
 from app.services.codex import codex_remote
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
+from app.services.codex.sidecar import SidecarName
 from app.services.codex.transport import AppServerError
+from app.services.codex_usage import poller as usage_poller
 from app.services.sessions.store import ChatSession
 from app.services.stt.base import STTBackend
 from app.services.turns import locks as turn_locks
@@ -100,7 +102,7 @@ class TurnRunner:
                 return
 
             user_msg_id = await persist_user_turn(session, prepared)
-            sidecar = "admin" if session.is_admin else "guest"
+            sidecar = SidecarName.ADMIN if session.is_admin else SidecarName.GUEST
             try:
                 async with SessionLocal() as db:
                     turn = await turn_service.create_starting(
@@ -142,7 +144,10 @@ class TurnRunner:
         progress: TurnProgressReporter,
         turn: TurnRow,
     ) -> None:
-        sidecar = turn.sidecar or ("admin" if session.is_admin else "guest")
+        sidecar = SidecarName.normalize(
+            turn.sidecar
+            or (SidecarName.ADMIN if session.is_admin else SidecarName.GUEST),
+        )
         async with session.turn_lock:
             current = asyncio.current_task()
             session.current_turn_task = current
@@ -175,7 +180,9 @@ class TurnRunner:
                         async with open_codex_turn(
                             session.db_chat_id, is_admin=session.is_admin
                         ) as client:
-                            await stream_turn(client, session, message, prepared, progress, turn.id)
+                            await stream_turn(
+                                client, session, message, prepared, progress, turn.id, sidecar
+                            )
                             # `stream_turn` ЗАВЖДИ raise-ить `CodexTurnTerminal`.
                             # Цей рядок не повинен бути reachable; якщо ми тут —
                             # це bug у stream_turn (відсутній terminal-raise).
@@ -228,6 +235,9 @@ class TurnRunner:
                             error_detail=terminal_error[1],
                         )
                         await db.commit()
+                    # Event-driven usage refresh — codex списав tokens на
+                    # finalize. Симетрично до `execute_turn_inner` (web path).
+                    usage_poller.schedule_refresh(sidecar)
 
     @staticmethod
     async def _on_timeout(
@@ -316,6 +326,9 @@ async def _handle_active_tg_turn(
             accepted = False
         if accepted:
             await persist_user_turn(session, prepared)
+            # Bump AFTER persist — stream-loop persist_segment гарантовано
+            # побачить counter тільки коли USER row уже у БД.
+            await codex_remote.bump_steer_count(active.id)
             return True
 
     try:

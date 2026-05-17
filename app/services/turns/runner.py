@@ -17,6 +17,8 @@ from app.models import TurnStatus
 from app.services import rate_limit
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
+from app.services.codex.sidecar import SidecarName
+from app.services.codex_usage import poller as usage_poller
 from app.services.turns import locks
 from app.services.turns.default import turn_service, turn_stream
 from app.services.turns.locks import LockAcquireOutcome
@@ -78,8 +80,8 @@ async def execute_turn_inner(
         return
 
     chat_id = turn.chat_id
-    sidecar = turn.sidecar or "admin"
-    is_admin = sidecar == "admin"
+    sidecar = SidecarName.normalize(turn.sidecar)
+    is_admin = sidecar is SidecarName.ADMIN
 
     cancelled = False
     terminal_status: TurnStatus | None = None
@@ -122,6 +124,7 @@ async def execute_turn_inner(
                     voice_reply=voice_reply,
                     client_id=client_id,
                     turn_id=turn_id,
+                    sidecar=sidecar,
                 ):
                     event.event_id = await turn_stream.publish(turn_id, event)
                     async with SessionLocal() as db:
@@ -190,6 +193,9 @@ async def execute_turn_inner(
         if not redelivery_skip:
             await turn_stream.cleanup(turn_id)
             await rate_limit.release_turn(rl_user)
+            # Codex списав tokens саме на terminal — refresh usage stream
+            # event-driven (не periodic). schedule_refresh не блокує runner.
+            usage_poller.schedule_refresh(sidecar)
 
 
 def _build_terminal_event(
