@@ -10,10 +10,16 @@
   let pulseKey = $state(0);
   let loadedAt = $state<Date | null>(null);
   let abort: AbortController | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let destroyed = false;
 
   // Server-pushed event-driven stream: bootstrap frame з cache (instant),
   // далі pub/sub push на кожен `thread/tokenUsage/updated` від sidecar.
-  async function consumeStream() {
+  // Auto-reconnect з exponential backoff (1s → 30s cap) — стрім може
+  // обірватися (JWT expired, HMR cycle, server restart); без reconnect-у
+  // UI завмер би до full page reload.
+  async function consumeStream(attempt = 0) {
+    if (destroyed) return;
     abort?.abort();
     abort = new AbortController();
     loading = true;
@@ -26,15 +32,26 @@
         loadedAt = new Date();
         pulseKey += 1;
         loading = false;
+        attempt = 0; // первий валідний frame → reset backoff
       }
     } catch (exc) {
       if ((exc as { name?: string })?.name === "AbortError") return;
-      loading = false;
     }
+    loading = false;
+    if (destroyed) return;
+    // Backoff з ±20% jitter — без нього N вкладок після server-restart
+    // reconnect-нуться одночасно і дадуть spike навантаження.
+    const base = Math.min(30_000, 1_000 * 2 ** attempt);
+    const delay = base * (0.8 + Math.random() * 0.4);
+    reconnectTimer = setTimeout(() => consumeStream(attempt + 1), delay);
   }
 
-  onMount(consumeStream);
-  onDestroy(() => abort?.abort());
+  onMount(() => void consumeStream());
+  onDestroy(() => {
+    destroyed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    abort?.abort();
+  });
 
   // Server-side force-refresh: fetch у sidecar + publish у pub/sub. Stream
   // нашого вікна теж отримає snapshot через канал, але unary response повертає
