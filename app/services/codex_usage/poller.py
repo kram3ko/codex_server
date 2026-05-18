@@ -59,11 +59,7 @@ def deserialize(raw: bytes | str) -> CodexUsage | None:
 
 
 async def _fetch_once(sidecar: SidecarName) -> CodexUsage | None:
-    url = (
-        settings.CODEX_CLI_URL
-        if sidecar is SidecarName.ADMIN
-        else settings.CODEX_CLI_GUEST_URL
-    )
+    url = settings.CODEX_CLI_URL if sidecar is SidecarName.ADMIN else settings.CODEX_CLI_GUEST_URL
     queue_max = (
         settings.CODEX_NOTIFICATION_QUEUE_MAX_ADMIN
         if sidecar is SidecarName.ADMIN

@@ -71,9 +71,7 @@ async def release_active(chat_id: int, turn_id: int) -> bool:
 
 
 @contextlib.asynccontextmanager
-async def hold_turn_locks(
-    chat_id: int, turn_id: int
-) -> AsyncIterator[LockAcquireOutcome]:
+async def hold_turn_locks(chat_id: int, turn_id: int) -> AsyncIterator[LockAcquireOutcome]:
     """Acquire per-chat active lock → release on exit. Codex-cli тримає
     окремий thread/WS на chat, тому між-чатова serialization не потрібна."""
     active_acquired = await try_acquire_active(chat_id, turn_id)

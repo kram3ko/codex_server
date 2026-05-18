@@ -1,0 +1,324 @@
+services:
+  codex-cli:
+    build:
+      context: ..
+      dockerfile: docker/codex/Dockerfile
+    container_name: codex-cli
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+      MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+      GH_TOKEN: ${GH_TOKEN:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-Codex Agent}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-codex@local}
+      GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-Codex Agent}
+      GIT_COMMITTER_EMAIL: ${GIT_AUTHOR_EMAIL:-codex@local}
+    volumes:
+      - codex_admin_home:/home/codex/.codex
+      - codex_generated_images:/home/codex/.codex/generated_images
+      - codex_workspace:/home/codex/workspace
+    tmpfs:
+      - /codex-feedback:size=250m
+    expose:
+      - "4500"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4500/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  codex-cli-guest:
+    build:
+      context: ..
+      dockerfile: docker/codex/Dockerfile
+    container_name: codex-cli-guest
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+      MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+    volumes:
+      - codex_guest_home:/home/codex/.codex
+      - codex_generated_images:/home/codex/.codex/generated_images
+      - ./codex/AGENTS-guest.md:/home/codex/workspace/AGENTS.md:ro
+    tmpfs:
+      - /codex-feedback:size=250m
+    expose:
+      - "4500"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4500/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  codex-server:
+    build:
+      context: ..
+      dockerfile: docker/server/Dockerfile
+    container_name: codex-server
+    restart: unless-stopped
+    stop_grace_period: 35s
+    expose:
+      - "8000"
+    env_file: ../.env
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+      DATABASE_URL: postgresql+asyncpg://codex:${POSTGRES_PASSWORD}@postgres:5432/codex
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: /minio
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      CODEX_CLI_URL: ws://codex-cli:4500
+      CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_PRELOAD: ${GUNICORN_PRELOAD:-true}
+    volumes:
+      - codex_generated_images:/home/codex/.codex/generated_images:ro
+    command: gunicorn app.main:app -c gunicorn.conf.py
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      codex-cli:
+        condition: service_healthy
+      codex-cli-guest:
+        condition: service_healthy
+    networks:
+      - default
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.codex-server.rule=Host(`${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/mcp`) || PathPrefix(`/health`) || PathPrefix(`/generated`))
+      - traefik.http.routers.codex-server.entrypoints=websecure
+      - traefik.http.routers.codex-server.tls.certresolver=letsencrypt
+      - traefik.http.services.codex-server.loadbalancer.server.port=8000
+
+  codex-worker:
+    build:
+      context: ..
+      dockerfile: docker/server/Dockerfile
+    container_name: codex-worker
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+      DATABASE_URL: postgresql+asyncpg://codex:${POSTGRES_PASSWORD}@postgres:5432/codex
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: /minio
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      CODEX_CLI_URL: ws://codex-cli:4500
+      CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+    volumes:
+      - codex_generated_images:/home/codex/.codex/generated_images:ro
+    command: taskiq worker app.worker:broker app.services.turns.tasks --workers 2 --ack-type when_executed
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  codex-web:
+    build:
+      context: ..
+      dockerfile: docker/web/Dockerfile
+    container_name: codex-web
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+    depends_on:
+      codex-server:
+        condition: service_healthy
+    networks:
+      - default
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.codex-web.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.codex-web.entrypoints=websecure
+      - traefik.http.routers.codex-web.tls.certresolver=letsencrypt
+      - traefik.http.routers.codex-web.priority=1
+      - traefik.http.services.codex-web.loadbalancer.server.port=80
+
+  postgres:
+    image: postgres:alpine
+    container_name: codex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: codex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: codex
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codex -d codex"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:alpine
+    container_name: codex-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: codex-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - default
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.codex-minio.rule=Host(`${DOMAIN}`) && PathPrefix(`/minio`)
+      - traefik.http.routers.codex-minio.entrypoints=websecure
+      - traefik.http.routers.codex-minio.tls.certresolver=letsencrypt
+      - traefik.http.routers.codex-minio.middlewares=codex-minio-strip
+      - traefik.http.middlewares.codex-minio-strip.stripprefix.prefixes=/minio
+      - traefik.http.services.codex-minio.loadbalancer.server.port=9000
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: codex-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb -p local/personal-codex || true &&
+      exit 0
+      "
+
+  bugsink-db-init:
+    image: postgres:alpine
+    container_name: codex-bugsink-db-init
+    environment:
+      PGHOST: postgres
+      PGUSER: codex
+      PGDATABASE: codex
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BUGSINK_DB_PASSWORD: ${BUGSINK_DB_PASSWORD:?required}
+    entrypoint:
+      - sh
+      - -eu
+      - -c
+      - |
+        until pg_isready -q; do sleep 1; done
+        psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='bugsink'" | grep -q . \
+          || psql -c "CREATE USER bugsink WITH PASSWORD '$$BUGSINK_DB_PASSWORD'"
+        psql -tAc "SELECT 1 FROM pg_database WHERE datname='bugsink'" | grep -q . \
+          || psql -c "CREATE DATABASE bugsink OWNER bugsink"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bugsink:
+    image: bugsink/bugsink:2.1.3
+    container_name: codex-bugsink
+    restart: unless-stopped
+    environment:
+      SECRET_KEY: ${JWT_SECRET}
+      PORT: "8000"
+      DATABASE_URL: postgresql://bugsink:${BUGSINK_DB_PASSWORD}@postgres:5432/bugsink
+      CREATE_SUPERUSER: "${ADMIN_EMAIL}:${ADMIN_PASSWORD}"
+      BEHIND_HTTPS_PROXY: "True"
+      BASE_URL: https://${BUGSINK_DOMAIN:?required}
+    depends_on:
+      bugsink-db-init:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.codex-bugsink.rule=Host(`${BUGSINK_DOMAIN}`)
+      - traefik.http.routers.codex-bugsink.entrypoints=websecure
+      - traefik.http.routers.codex-bugsink.tls.certresolver=letsencrypt
+      - traefik.http.services.codex-bugsink.loadbalancer.server.port=8000
+
+  bugsink-token-init:
+    image: postgres:alpine
+    container_name: codex-bugsink-token-init
+    environment:
+      PGHOST: postgres
+      PGUSER: bugsink
+      PGDATABASE: bugsink
+      PGPASSWORD: ${BUGSINK_DB_PASSWORD}
+      TOKEN: ${BUGSINK_AUTH_TOKEN}
+    entrypoint:
+      - sh
+      - -eu
+      - -c
+      - |
+        [ -z "$$TOKEN" ] && exit 0
+        until psql -tAc "SELECT 1 FROM bsmain_authtoken LIMIT 0" >/dev/null 2>&1; do sleep 1; done
+        psql -c "INSERT INTO bsmain_authtoken (token, description, created_at)
+                 VALUES ('$$TOKEN', 'codex-server', NOW())
+                 ON CONFLICT (token) DO NOTHING"
+    depends_on:
+      bugsink:
+        condition: service_started
+
+networks:
+  default:
+    external: true
+    name: codex_net
+  dokploy-network:
+    external: true
+
+volumes:
+  postgres_data:
+  minio_data:
+  codex_admin_home:
+  codex_guest_home:
+  codex_generated_images:
+  codex_workspace:

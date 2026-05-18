@@ -39,6 +39,7 @@ log = structlog.get_logger(__name__)
 
 _CLIENT_INFO = {"name": "codex-api", "version": "0.1.0"}
 
+
 class StaleTurnStreamError(RuntimeError):
     """Raised when a resumed thread only emits events for an older turn."""
 
@@ -341,9 +342,7 @@ class CodexClient:
                 await on_started(self._current_turn_id, self._thread_id)
             accumulated = ""
 
-            async for note in self._current_turn_notifications(
-                idle_s, on_idle, on_usage_signal
-            ):
+            async for note in self._current_turn_notifications(idle_s, on_idle, on_usage_signal):
                 self._record_raw_note(note)
                 event = _translate(note, accumulated)
                 if event is not None:

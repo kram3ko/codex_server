@@ -1,12 +1,11 @@
-# Codex CLI у режимі WebSocket app-server.
-# Доустановлено python3 + ripgrep + grep + git + jq + curl/wget + bubblewrap,
-# щоб модель могла вільно користуватися shell_tool / unified_exec у workspace.
 FROM alpine:3.20
 
 ARG CODEX_VERSION=0.130.0
 ARG TARGETARCH
 
-RUN apk add --no-cache \
+RUN set -eux \
+ && echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories \
+ && apk add --no-cache \
         ca-certificates \
         tzdata \
         bash \
@@ -16,6 +15,8 @@ RUN apk add --no-cache \
         docker-cli \
         docker-cli-compose \
         git \
+        github-cli \
+        openssh-client \
         grep \
         ripgrep \
         jq \
@@ -23,17 +24,17 @@ RUN apk add --no-cache \
         libgcc \
         python3 \
         py3-pip \
- && set -eux; \
-    case "${TARGETARCH:-arm64}" in \
+        glab@edge \
+ && case "${TARGETARCH:-arm64}" in \
         arm64) CODEX_ARCH=aarch64-unknown-linux-musl ;; \
         amd64) CODEX_ARCH=x86_64-unknown-linux-musl ;; \
         *) echo "Unsupported arch: ${TARGETARCH}"; exit 1 ;; \
-    esac; \
-    curl -fsSL "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-${CODEX_ARCH}.tar.gz" -o /tmp/codex.tar.gz; \
-    tar -xzf /tmp/codex.tar.gz -C /tmp; \
-    mv "/tmp/codex-${CODEX_ARCH}" /usr/local/bin/codex; \
-    chmod +x /usr/local/bin/codex; \
-    rm -f /tmp/codex.tar.gz
+    esac \
+ && curl -fsSL "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-${CODEX_ARCH}.tar.gz" -o /tmp/codex.tar.gz \
+ && tar -xzf /tmp/codex.tar.gz -C /tmp \
+ && mv "/tmp/codex-${CODEX_ARCH}" /usr/local/bin/codex \
+ && chmod +x /usr/local/bin/codex \
+ && rm -f /tmp/codex.tar.gz
 
 COPY docker/codex/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

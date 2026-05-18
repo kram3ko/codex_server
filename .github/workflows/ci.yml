@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-lint:
+    name: Python lint (ruff + pyright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.14t (free-threaded)
+        run: uv python install 3.14t
+
+      - name: Sync lint deps
+        env:
+          UV_PYTHON: 3.14t
+          ORJSON_BUILD_FREETHREADED: "1"
+        run: uv sync --frozen --group lint
+
+      - name: ruff check
+        run: uv run ruff check app/
+
+      - name: ruff format check
+        run: uv run ruff format --check app/
+
+      - name: pyright
+        run: uv run pyright app/
+
+  web-lint:
+    name: Web lint (svelte-check + tsc)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+
+      - name: svelte-check + tsc
+        run: npm run check
+
+  docker-build:
+    name: Docker build verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build codex-server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/server/Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha,scope=codex-server
+          cache-to: type=gha,mode=max,scope=codex-server
+
+      - name: Build codex-web prod image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/web/Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha,scope=codex-web
+          cache-to: type=gha,mode=max,scope=codex-web
+
+      - name: Build codex-cli image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/codex/Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha,scope=codex-cli
+          cache-to: type=gha,mode=max,scope=codex-cli
