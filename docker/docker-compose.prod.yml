@@ -158,6 +158,14 @@ services:
       - traefik.http.routers.codex-web.tls.certresolver=letsencrypt
       - traefik.http.routers.codex-web.priority=1
       - traefik.http.services.codex-web.loadbalancer.server.port=80
+      - traefik.http.routers.root-redirect.rule=Host(`${ROOT_DOMAIN}`)
+      - traefik.http.routers.root-redirect.entrypoints=websecure
+      - traefik.http.routers.root-redirect.tls.certresolver=letsencrypt
+      - traefik.http.routers.root-redirect.service=codex-web
+      - traefik.http.routers.root-redirect.middlewares=to-codex
+      - traefik.http.middlewares.to-codex.redirectregex.regex=^https?://[^/]+/(.*)
+      - traefik.http.middlewares.to-codex.redirectregex.replacement=https://${DOMAIN}/$$1
+      - traefik.http.middlewares.to-codex.redirectregex.permanent=true
 
   postgres:
     image: postgres:alpine
@@ -317,8 +325,14 @@ networks:
 
 volumes:
   postgres_data:
+    name: codex_postgres_data
   minio_data:
+    name: codex_minio_data
   codex_admin_home:
+    name: codex_admin_home
   codex_guest_home:
+    name: codex_guest_home
   codex_generated_images:
+    name: codex_generated_images
   codex_workspace:
+    name: codex_workspace
