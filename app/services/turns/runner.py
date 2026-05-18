@@ -34,9 +34,8 @@ log = structlog.get_logger(__name__)
 _HEARTBEAT_INTERVAL_S = 10.0
 
 
-async def heartbeat_loop(turn_id: int, chat_id: int, sidecar: str) -> None:
+async def heartbeat_loop(turn_id: int, chat_id: int) -> None:
     """CAS-refresh False = ownership lost → loop exits; runner ловить далі."""
-    del sidecar  # legacy signature compat — slot lock прибрано
     while True:
         try:
             await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
@@ -93,7 +92,7 @@ async def execute_turn_inner(
     from app.rpc.chat.stream import stream_turn
 
     try:
-        async with locks.hold_turn_locks(chat_id, sidecar, turn_id) as outcome:
+        async with locks.hold_turn_locks(chat_id, turn_id) as outcome:
             if outcome == LockAcquireOutcome.REDELIVERY:
                 log.warning("turn_lock_contention_redelivery", turn_id=turn_id)
                 redelivery_skip = True
@@ -107,7 +106,7 @@ async def execute_turn_inner(
                 return
 
             heartbeat_task = asyncio.create_task(
-                heartbeat_loop(turn_id, chat_id, sidecar),
+                heartbeat_loop(turn_id, chat_id),
                 name=f"turn-heartbeat:{turn_id}",
             )
 

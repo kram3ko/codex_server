@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from sqlalchemy import CursorResult, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Turn, TurnStatus
@@ -20,12 +21,27 @@ def _now() -> datetime:
 
 
 class TurnService:
+    async def try_create_starting(
+        self,
+        session: AsyncSession,
+        payload: TurnCreate,
+    ) -> TurnRow | None:
+        """Race-safe create: повертає None якщо partial-unique fence спрацював
+        (інший active turn у тому ж chat). Caller-у пропонує retry-сценарій
+        без catch-у DB-exception на handler-рівні."""
+        try:
+            return await self.create_starting(session, payload)
+        except IntegrityError:
+            await session.rollback()
+            return None
+
     async def create_starting(
         self,
         session: AsyncSession,
         payload: TurnCreate,
     ) -> TurnRow:
-        """Race з другим INSERT → `IntegrityError` (partial unique fence)."""
+        """Race з другим INSERT → `IntegrityError` (partial unique fence).
+        Caller повинен ловити (або краще — кликати `try_create_starting`)."""
         now = _now()
         turn = Turn(
             chat_id=payload.chat_id,

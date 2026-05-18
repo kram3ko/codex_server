@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
-from sqlalchemy import delete
 
 from app.config import settings
 from app.db.base import SessionLocal
@@ -49,6 +48,10 @@ from app.services.turns.probe import (
 from app.services.uploads.default import upload_service
 
 log = structlog.get_logger(__name__)
+
+# Strong refs до fire-and-forget background tasks (TTS attach після final
+# yield). Без цього GC може зібрати task посеред synth.
+_BG_TASKS: set[asyncio.Task[None]] = set()
 
 
 @dataclass
@@ -106,12 +109,7 @@ async def stream_turn(
         if cur <= state.seen_steer_count:
             return
         state.seen_steer_count = cur
-        await _persist_segment(
-            state,
-            persisted_chat_id,
-            user_pk,
-            turn_id=turn_id,
-        )
+        await _persist_segment(state, persisted_chat_id, user_pk)
 
     async def _on_usage_signal() -> None:
         # Sidecar шле `thread/tokenUsage/updated` → fan-out у pub/sub.
@@ -282,23 +280,32 @@ async def stream_turn(
     state.partial_msg_ids.clear()
 
     # TTS off the hot path — finalize turn for client first, attach audio коли
-    # synth закінчиться. Codex flagged the prior blocking flow.
+    # synth закінчиться. Тримаємо reference у module-level set щоб GC не вбив
+    # orphan task посеред synth (RUF006).
     if voice_reply and state.collector.final_text.strip():
-        asyncio.create_task(
+        tts_task = asyncio.create_task(
             attach_tts_to_message(
                 assistant_msg.id, state.collector.final_text, persisted_chat_id, user_pk
             )
         )
+        _BG_TASKS.add(tts_task)
+        tts_task.add_done_callback(_BG_TASKS.discard)
 
-    log.info(
-        "web_done_yielded",
-        turn_id=turn_id,
-        client_id=client_id,
-        assistant_msg_id=assistant_msg.id,
-        final_text_len=len(state.collector.final_text),
-        buffer_len=len(state.collector.buffer),
-        partials_deleted=partials_count,
-    )
+    # Anomaly-only: empty final з partials або final коротший за buffer
+    # (codex-reformat дав менше тексту ніж стримилось — раніше було data-loss).
+    # Норма — silent; немає метричного pipeline у цьому setup-і щоб лити info.
+    final_len = len(state.collector.final_text)
+    buffer_len = len(state.collector.buffer)
+    if (final_len == 0 and partials_count > 0) or buffer_len > final_len:
+        log.warning(
+            "web_done_anomaly",
+            turn_id=turn_id,
+            client_id=client_id,
+            assistant_msg_id=assistant_msg.id,
+            final_text_len=final_len,
+            buffer_len=buffer_len,
+            partials_deleted=partials_count,
+        )
     yield chat_pb2.ChatEvent(
         done=chat_pb2.DoneEvent(
             chat_id=persisted_chat_id,
@@ -426,17 +433,12 @@ async def _persist_segment(
     state: _StreamState,
     persisted_chat_id: int,
     user_pk: int,
-    *,
-    turn_id: int | None,
 ) -> None:
     """Steer-boundary partial snapshot: live chronology підказка під час
     streaming. На successful done усі partial-rows цього turn-у видаляються
     у `_finalize_turn_persist` (final assistant row є source of truth).
     Tools-only boundary (text_delta пустий) пропускаємо — інакше UI рендерить
-    empty-text partial як false-positive 'Codex was thinking — interrupted'.
-    `turn_id` приймаємо для сигнатурної симетрії з caller-ом; bind до turn-у
-    робиться на final-persist, не тут."""
-    del turn_id
+    empty-text partial як false-positive 'Codex was thinking — interrupted'."""
     text_delta, tools_delta = _segment_delta(state)
     if not text_delta:
         return
@@ -503,10 +505,7 @@ async def _finalize_turn_persist(
         )
         if turn_id is not None:
             await turn_service.attach_assistant_message(db, turn_id, assistant_msg.id)
-        if partial_msg_ids:
-            await db.execute(
-                delete(Message).where(Message.id.in_(partial_msg_ids))
-            )
+        await message_service.delete_many(db, partial_msg_ids)
         await event_service.emit(
             db,
             EventKind.TURN_COMPLETED,

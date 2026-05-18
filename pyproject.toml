@@ -61,7 +61,14 @@ target-version = "py314"
 extend-exclude = ["app/grpc_generated"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM"]
+# RET — flake8-return: ловить unreachable `return` після `return` (саме той
+# `return False; return False` що проїхав у PR #13 непоміченим).
+# RUF — Ruff-specific: useless-async, mutable-class-default, etc.
+# PLE/PLW — pylint errors+warnings subset: useless-return, broad-except etc.
+select = ["E", "F", "I", "B", "UP", "SIM", "RET", "RUF", "PLE", "PLW"]
+# Comments/docstrings/strings свідомо містять українські літери (`і`, `у`).
+# RUF001/002/003 шумлять про "ambiguous Cyrillic" на ~400 рядків — глушимо.
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 # Legitimate broad-except patterns (per CLAUDE.md §3 §7). Inline `# noqa`
 # заборонено — все що залишилось після narrow'у живе тут з пояснення-чому.
@@ -80,7 +87,7 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 "app/services/codex/transport.py" = ["BLE001"]
 # Future-from-setter resolver: setter може кинути будь-що, ловимо щоб
 # вернути None замість CancelledError у getter'у.
-"app/services/sessions/store.py" = ["BLE001"]
+"app/services/sessions/store.py" = ["BLE001", "B027"]
 # asyncio done-callback: Python спеціально вимагає не пускати exc з callback,
 # інакше Task warning + сторонні task'и не отримують сигнал.
 "app/tg/polling.py" = ["BLE001"]
@@ -92,6 +99,9 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 # каже `reportIncompatibleMethodOverride`. Імена потрібно зберегти, тому ARG002
 # тут — by design.
 "app/tg/markdown.py" = ["ARG001", "ARG002"]
+# Module-level `_configured` singleton flag — standard double-init guard
+# pattern; `global` тут by design.
+"app/log_config.py" = ["PLW0603"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

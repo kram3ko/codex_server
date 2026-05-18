@@ -27,10 +27,6 @@ def _active_key(chat_id: int) -> str:
     return f"turn:active:{chat_id}"
 
 
-def _slot_key(sidecar: str) -> str:
-    return f"codex:slot:{sidecar}:0"
-
-
 async def try_acquire_active(chat_id: int, turn_id: int) -> bool:
     payload = str(turn_id)
     try:
@@ -74,46 +70,12 @@ async def release_active(chat_id: int, turn_id: int) -> bool:
     return bool(deleted)
 
 
-async def try_acquire_slot(sidecar: str, turn_id: int) -> bool:
-    payload = str(turn_id)
-    try:
-        result = await cache.set(_slot_key(sidecar), payload, ex=_LOCK_TTL_S, nx=True)
-    except RedisError as exc:
-        log.warning("codex_slot_acquire_failed", sidecar=sidecar, error=str(exc))
-        return False
-    return bool(result)
-
-
-async def heartbeat_slot(sidecar: str, turn_id: int) -> bool:
-    payload = str(turn_id)
-    try:
-        result = await cache.execute_command(
-            "SET", _slot_key(sidecar), payload, "EX", _LOCK_TTL_S, "IFEQ", payload
-        )
-    except RedisError as exc:
-        log.warning("codex_slot_heartbeat_failed", sidecar=sidecar, error=str(exc))
-        return False
-    return bool(result)
-
-
-async def release_slot(sidecar: str, turn_id: int) -> bool:
-    payload = str(turn_id)
-    try:
-        deleted = await cache.execute_command("DELEX", _slot_key(sidecar), "IFEQ", payload)
-    except RedisError as exc:
-        log.warning("codex_slot_release_failed", sidecar=sidecar, error=str(exc))
-        return False
-    return bool(deleted)
-
-
 @contextlib.asynccontextmanager
 async def hold_turn_locks(
-    chat_id: int, sidecar: str, turn_id: int
+    chat_id: int, turn_id: int
 ) -> AsyncIterator[LockAcquireOutcome]:
-    """Acquire per-chat active lock → release on exit. Sidecar slot lock
-    видалено: codex-cli тримає окремий thread/WS на chat, кілька активних
-    chat-ів у одному sidecar безпечні."""
-    del sidecar  # legacy signature compat — рознесемо у наступному cleanup-і
+    """Acquire per-chat active lock → release on exit. Codex-cli тримає
+    окремий thread/WS на chat, тому між-чатова serialization не потрібна."""
     active_acquired = await try_acquire_active(chat_id, turn_id)
     if not active_acquired:
         if await active_lock_value(chat_id) == str(turn_id):

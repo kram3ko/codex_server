@@ -156,13 +156,6 @@ turns з протухлим `heartbeat_at`. Event-driven recovery під час 
 
 ![Schema ER diagram](docs/schema.svg)
 
-> **`docs/schema.svg` потребує регенерації** — додалися `notes.user_id`,
-> таблиця `invites` (FK на users двічі: created_by + used_by) і **`turns`**
-> (FK на chats/users + 2× messages: user_message + assistant_message).
-> Актуальний source — `docs/schema.mmd`; відкрий у
-> [mermaid.live](https://mermaid.live) → Export SVG → перезаписати
-> `docs/schema.svg`.
-
 **Як оновлювати картинку:**
 - Джерело — `docs/schema.mmd` (Mermaid erDiagram) + `docs/schema.svg` (rendered)
 - При зміні моделі: правиш `.mmd` → відкриваєш у [mermaid.live](https://mermaid.live) → Export SVG → перезаписуєш `docs/schema.svg`. Або: `npx -p @mermaid-js/mermaid-cli mmdc -i docs/schema.mmd -o docs/schema.svg` (тягне Chromium ~200MB).
