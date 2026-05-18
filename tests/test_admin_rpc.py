@@ -136,10 +136,10 @@ def _wire(
     monkeypatch.setattr(admin_rpc, "auth_service", svc)
     monkeypatch.setattr(admin_rpc, "user_service", users)
     monkeypatch.setattr(admin_rpc, "invite_service", invites)
-    monkeypatch.setattr(admin_rpc, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(admin_rpc, "SessionLocal", _Session)
     monkeypatch.setattr(auth_helper, "auth_service", svc)
     monkeypatch.setattr(auth_helper, "user_service", users)
-    monkeypatch.setattr(auth_helper, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(auth_helper, "SessionLocal", _Session)
     yield svc
 
 

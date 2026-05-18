@@ -58,7 +58,7 @@ default-groups = []
 [tool.ruff]
 line-length = 100
 target-version = "py314"
-extend-exclude = ["app/grpc_generated"]
+extend-exclude = ["app/grpc_generated", "migrations"]
 
 [tool.ruff.lint]
 # RET — flake8-return: ловить unreachable `return` після `return` (саме той
@@ -112,4 +112,3 @@ include = ["app"]
 exclude = ["app/grpc_generated", ".venv", "**/__pycache__"]
 pythonVersion = "3.14"
 reportMissingTypeStubs = false
-
