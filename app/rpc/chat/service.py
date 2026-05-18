@@ -12,15 +12,22 @@ from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import chat_pb2, common_pb2
 from app.grpc_generated.codex.v1.chat_connect import ChatService as ChatProtocol
-from app.models import TURN_TERMINAL_STATUSES, EventKind, MessageRole, Turn, TurnStatus, UserRole
+from app.models import (
+    TURN_TERMINAL_STATUSES,
+    EventKind,
+    Message,
+    MessageRole,
+    Turn,
+    TurnStatus,
+    UserRole,
+)
 from app.rpc._auth import require_user
-from app.rpc._mappers import chat_to_pb
+from app.rpc._mappers import chat_to_pb, message_to_pb
 from app.rpc.chat.guards import load_chat_owned, resolve_limit
 from app.rpc.chat.mappers import codex_usage_to_pb, error_event
 from app.rpc.chat.uploads import resolve_uploads
@@ -194,13 +201,13 @@ class ChatRPC(ChatProtocol):
                 async with SessionLocal() as db:
                     latest = await _latest_turn_for_chat(db, request.chat_id)
                 if latest is not None and latest.status in TURN_TERMINAL_STATUSES:
-                    terminal = _terminal_from_status(latest)
+                    terminal = await _terminal_from_status(latest)
                     if terminal is not None:
                         yield terminal
                 return
 
         if target_turn.status in TURN_TERMINAL_STATUSES:
-            terminal = _terminal_from_status(target_turn)
+            terminal = await _terminal_from_status(target_turn)
             if terminal is not None:
                 yield terminal
             return
@@ -210,7 +217,7 @@ class ChatRPC(ChatProtocol):
         async with SessionLocal() as db:
             refreshed = await turn_service.get_by_id(db, target_turn.id)
         if refreshed is not None and refreshed.status in TURN_TERMINAL_STATUSES:
-            terminal = _terminal_from_status(refreshed)
+            terminal = await _terminal_from_status(refreshed)
             if terminal is not None:
                 yield terminal
 
@@ -228,7 +235,7 @@ class ChatRPC(ChatProtocol):
             return chat_pb2.InterruptTurnResponse()
         try:
             await codex_remote.send_interrupt_turn_id(
-                (active.sidecar or "admin") == "admin",
+                SidecarName.normalize(active.sidecar) is SidecarName.ADMIN,
                 active.codex_turn_id,
             )
         except StaleSidecarTurnError as exc:
@@ -260,7 +267,7 @@ class ChatRPC(ChatProtocol):
         try:
             accepted = await codex_remote.send_steer_by_ids(
                 chat_id=chat.id,
-                is_admin=(active.sidecar or "admin") == "admin",
+                is_admin=SidecarName.normalize(active.sidecar) is SidecarName.ADMIN,
                 thread_id=active.codex_thread_id,
                 codex_turn_id=active.codex_turn_id,
                 text=text,
@@ -420,7 +427,7 @@ async def _try_steer_active_turn(
     try:
         accepted = await codex_remote.send_steer_by_ids(
             chat_id=prepared.chat_id,
-            is_admin=(active.sidecar or "admin") == "admin",
+            is_admin=SidecarName.normalize(active.sidecar) is SidecarName.ADMIN,
             thread_id=active.codex_thread_id,
             codex_turn_id=active.codex_turn_id,
             text=prepared.text,
@@ -471,7 +478,7 @@ async def _try_interrupt_active_turn(
     assert active.codex_turn_id is not None  # caller-narrowed
     try:
         interrupted = await codex_remote.send_interrupt_turn_id(
-            (active.sidecar or "admin") == "admin", active.codex_turn_id
+            SidecarName.normalize(active.sidecar) is SidecarName.ADMIN, active.codex_turn_id
         )
         return interrupted, None
     except StaleSidecarTurnError as exc:
@@ -494,43 +501,42 @@ async def _create_web_turn(
     prepared: _PreparedRunTurn,
 ) -> tuple[TurnRow, None] | tuple[None, chat_pb2.ChatEvent]:
     user_meta = _user_message_meta(prepared)
-    try:
-        async with SessionLocal() as db:
-            user_message = await message_service.append(
-                db,
-                prepared.chat_id,
-                MessageRole.USER,
-                prepared.text,
-                meta=user_meta,
-            )
-            turn = await turn_service.create_starting(
-                db,
-                TurnCreate(
-                    chat_id=prepared.chat_id,
-                    user_id=prepared.user_id,
-                    user_message_id=user_message.id,
-                    sidecar=prepared.sidecar,
-                ),
-            )
-            await event_service.emit(
-                db,
-                EventKind.TURN_STARTED,
+    async with SessionLocal() as db:
+        user_message = await message_service.append(
+            db,
+            prepared.chat_id,
+            MessageRole.USER,
+            prepared.text,
+            meta=user_meta,
+        )
+        turn = await turn_service.try_create_starting(
+            db,
+            TurnCreate(
                 chat_id=prepared.chat_id,
                 user_id=prepared.user_id,
-                payload={
-                    "turn_id": turn.id,
-                    "text_len": len(prepared.text),
-                    "attachments": len(prepared.data_urls),
-                },
-            )
-            await db.commit()
-            return turn, None
-    except IntegrityError:
-        log.warning("turn_create_race_lost", chat_id=prepared.chat_id)
-        return None, error_event(
-            CodexErrorCode.TURN_BUSY,
-            "another turn is starting for this chat",
+                user_message_id=user_message.id,
+                sidecar=prepared.sidecar,
+            ),
         )
+        if turn is None:
+            log.warning("turn_create_race_lost", chat_id=prepared.chat_id)
+            return None, error_event(
+                CodexErrorCode.TURN_BUSY,
+                "another turn is starting for this chat",
+            )
+        await event_service.emit(
+            db,
+            EventKind.TURN_STARTED,
+            chat_id=prepared.chat_id,
+            user_id=prepared.user_id,
+            payload={
+                "turn_id": turn.id,
+                "text_len": len(prepared.text),
+                "attachments": len(prepared.data_urls),
+            },
+        )
+        await db.commit()
+        return turn, None
 
 
 def _user_message_meta(prepared: _PreparedRunTurn) -> dict[str, Any] | None:
@@ -574,7 +580,7 @@ async def _terminal_for_turn_id(turn_id: int) -> chat_pb2.ChatEvent | None:
         turn = await turn_service.get_by_id(db, turn_id)
     if turn is None or turn.status not in TURN_TERMINAL_STATUSES:
         return None
-    return _terminal_from_status(turn)
+    return await _terminal_from_status(turn)
 
 
 async def _handle_stale_turn(
@@ -592,7 +598,7 @@ async def _handle_stale_turn(
     )
     with contextlib.suppress(Exception):
         await codex_remote.send_interrupt_turn_id(
-            (turn.sidecar or "admin") == "admin", exc.actual_turn_id
+            SidecarName.normalize(turn.sidecar) is SidecarName.ADMIN, exc.actual_turn_id
         )
     await quarantine_thread(turn.codex_thread_id)
     async with SessionLocal() as db:
@@ -606,10 +612,19 @@ async def _handle_stale_turn(
         await db.commit()
 
 
-def _terminal_from_status(turn: TurnRow) -> chat_pb2.ChatEvent | None:
-    """Synthesize terminal ChatEvent з `turn.status` для UI close-placeholder."""
+async def _terminal_from_status(turn: TurnRow) -> chat_pb2.ChatEvent | None:
+    """Synthesize terminal ChatEvent з `turn.status` для UI close-placeholder.
+    На COMPLETED додаємо persisted assistant message прямо у DoneEvent —
+    клієнту не треба робити окремий reload щоб дізнатися фінальний row."""
     if turn.status == TurnStatus.COMPLETED:
-        return chat_pb2.ChatEvent(done=chat_pb2.DoneEvent(chat_id=turn.chat_id, final_text=""))
+        done = chat_pb2.DoneEvent(chat_id=turn.chat_id, final_text="")
+        if turn.assistant_message_id is not None:
+            async with SessionLocal() as db:
+                msg = await db.get(Message, turn.assistant_message_id)
+            if msg is not None:
+                done.message.CopyFrom(message_to_pb(msg))
+                done.final_text = msg.text
+        return chat_pb2.ChatEvent(done=done)
     if turn.status in (TurnStatus.FAILED, TurnStatus.CANCELLED):
         code = turn.error_code or (
             CodexErrorCode.STREAM_DROPPED if turn.status == TurnStatus.FAILED else "cancelled"

@@ -9,7 +9,6 @@ import asyncio
 import structlog
 import websockets
 from aiogram.types import Message
-from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.db.base import SessionLocal
@@ -103,19 +102,19 @@ class TurnRunner:
 
             user_msg_id = await persist_user_turn(session, prepared)
             sidecar = SidecarName.ADMIN if session.is_admin else SidecarName.GUEST
-            try:
-                async with SessionLocal() as db:
-                    turn = await turn_service.create_starting(
-                        db,
-                        TurnCreate(
-                            chat_id=session.db_chat_id,
-                            user_id=session.db_user_id,
-                            user_message_id=user_msg_id,
-                            sidecar=sidecar,
-                        ),
-                    )
+            async with SessionLocal() as db:
+                turn = await turn_service.try_create_starting(
+                    db,
+                    TurnCreate(
+                        chat_id=session.db_chat_id,
+                        user_id=session.db_user_id,
+                        user_message_id=user_msg_id,
+                        sidecar=sidecar,
+                    ),
+                )
+                if turn is not None:
                     await db.commit()
-            except IntegrityError:
+            if turn is None:
                 # Active turn у цьому chat ще не finalize-нувся (steer тільки
                 # що пройшов і відпустить slot за мить, або turn у STARTING
                 # без codex_turn_id ще). Просимо retry.
@@ -157,7 +156,7 @@ class TurnRunner:
                 # Per-chat active lock — фізична гарантія "1 active turn per chat".
                 # Різні chat-и працюють паралельно (codex-cli тримає окремий thread/WS).
                 async with turn_locks.hold_turn_locks(
-                    session.db_chat_id, sidecar, turn.id
+                    session.db_chat_id, turn.id
                 ) as outcome:
                     if outcome != LockAcquireOutcome.ACQUIRED:
                         terminal = TurnStatus.FAILED
@@ -173,7 +172,7 @@ class TurnRunner:
                         )
                         return
                     heartbeat_task = asyncio.create_task(
-                        heartbeat_loop(turn.id, session.db_chat_id, sidecar),
+                        heartbeat_loop(turn.id, session.db_chat_id),
                         name=f"tg-turn-heartbeat:{turn.id}",
                     )
                     try:
@@ -312,11 +311,13 @@ async def _handle_active_tg_turn(
         )
         return True
 
+    is_admin_sidecar = SidecarName.normalize(active.sidecar) is SidecarName.ADMIN
+
     if prepared.text:
         try:
             accepted = await codex_remote.send_steer_by_ids(
                 chat_id=session.db_chat_id,
-                is_admin=(active.sidecar or "admin") == "admin",
+                is_admin=is_admin_sidecar,
                 thread_id=active.codex_thread_id,
                 codex_turn_id=active.codex_turn_id,
                 text=prepared.text,
@@ -333,7 +334,7 @@ async def _handle_active_tg_turn(
 
     try:
         interrupted = await codex_remote.send_interrupt_turn_id(
-            (active.sidecar or "admin") == "admin",
+            is_admin_sidecar,
             active.codex_turn_id,
         )
     except _STEER_RPC_ERRORS as exc:

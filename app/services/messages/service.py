@@ -1,8 +1,9 @@
 """Append/list messages inside a Chat. Tx boundary lives at the caller."""
 
+from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Message, MessageRole
@@ -23,6 +24,17 @@ class MessageService:
         await chat_service.touch_last_msg_at(session, chat_id)
         await session.flush()
         return message
+
+    async def delete_many(
+        self,
+        session: AsyncSession,
+        message_ids: Sequence[int],
+    ) -> None:
+        """Bulk delete by id. Caller тримає tx — flush у одній транзакції з
+        sibling INSERT/UPDATE (наприклад final-persist + DELETE partials)."""
+        if not message_ids:
+            return
+        await session.execute(delete(Message).where(Message.id.in_(message_ids)))
 
     async def update_text(
         self,

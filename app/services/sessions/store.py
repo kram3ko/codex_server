@@ -153,7 +153,6 @@ class ChatSessionStore[K, B](ABC):
 
     async def _on_turn_interrupted(self, session: ChatSession) -> None:
         """Optional hook: surface може записати TURN_INTERRUPTED у свій журнал."""
-        return None
 
     @staticmethod
     async def _safe_resolve(future: asyncio.Future[ChatSession]) -> ChatSession | None:

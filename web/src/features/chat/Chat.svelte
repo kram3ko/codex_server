@@ -39,6 +39,9 @@
   let lastActivityAt = $state<number | undefined>(undefined);
   let activeTurnId = $state(0);
   let streamedPrefix = "";
+  // Negative monotonic id для placeholder-рядків (resume/send). DB ids
+  // позитивні autoincrement — від'ємні гарантовано не колізують.
+  let placeholderSeq = -1n;
 
   const IDLE_TIMEOUT_MS = 300_000;
 
@@ -126,7 +129,7 @@
       if (placeholderAdded || ctrl.signal.aborted) return;
       placeholderAdded = true;
       const placeholder = create(MessageSchema, {
-        id: -BigInt(Date.now()),
+        id: placeholderSeq--,
         chatId: chat.id,
         role: 2,
         text: "",
@@ -203,24 +206,18 @@
           case "done": {
             await typer.drained();
             const persisted = event.kind.value.message;
+            // Server тепер вкладає persisted message у synthetic terminal
+            // (`_terminal_from_status` у service.py). Один з трьох шляхів:
+            //   placeholder + persisted → swap
+            //   no placeholder + persisted → append (turn finalize-нувся
+            //     між loadChatMessages і tail RPC)
+            //   no persisted → no-op (FAILED/CANCELLED або pre-attach turn)
             if (persisted && placeholderAdded) {
               messages = messages.map((m) =>
                 clientIdOf(m) === clientId ? persisted : m
               );
-            } else if (persisted) {
-              // Turn був майже finalized до того як ми приєднались — нема
-              // tokens, додаємо persisted у кінець.
+            } else if (persisted && !messages.some((m) => m.id === persisted.id)) {
               messages = [...messages, persisted];
-            } else if (selected?.id === chat.id) {
-              // Synthetic terminal (turn вже у БД до того як resume почав tail).
-              // Можливо turn finalize-нувся між loadChatMessages та tail RPC —
-              // reload щоб підтягти final assistant row що поки не у `messages`.
-              const refreshed = await messageClient.listMessages({
-                chatId: chat.id,
-                pagination: { limit: PAGE_SIZE }
-              });
-              messages = [...refreshed.messages];
-              hasMoreOlder = refreshed.messages.length >= PAGE_SIZE;
             }
             cleanupResumeState(clientId);
             return;
@@ -319,7 +316,7 @@
         const partialText = typer.displayed;
         const partialAssistant = partialText.trim()
           ? create(MessageSchema, {
-              id: -BigInt(Date.now() + 1),
+              id: placeholderSeq--,
               chatId: selected.id,
               role: 2,
               text: partialText,
@@ -375,7 +372,7 @@
     const clientId = crypto.randomUUID();
     streamingClientId = clientId;
     const streamingPlaceholder = create(MessageSchema, {
-      id: -BigInt(Date.now()),
+      id: placeholderSeq--,
       chatId: selected?.id ?? 0n,
       role: 2,
       text: "",

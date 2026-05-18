@@ -8,6 +8,7 @@ from app.db.base import SessionLocal
 from app.models import EventKind, TurnStatus
 from app.services.codex import codex_remote
 from app.services.codex.runner import quarantine_thread
+from app.services.codex.sidecar import SidecarName
 from app.services.events.default import event_service
 from app.services.sessions.store import ChatSession, cancel_session_turn
 from app.services.turns.default import turn_service
@@ -22,7 +23,7 @@ async def cancel_turn(session: ChatSession) -> bool:
     if active is not None and active.codex_turn_id is not None:
         with contextlib.suppress(Exception):
             await codex_remote.send_interrupt_turn_id(
-                (active.sidecar or "admin") == "admin",
+                SidecarName.normalize(active.sidecar) is SidecarName.ADMIN,
                 active.codex_turn_id,
             )
     if not await cancel_session_turn(session):
