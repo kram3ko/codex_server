@@ -1,3 +1,5 @@
+name: codex_server
+
 services:
   codex-cli:
     build:
@@ -288,7 +290,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./watchdog/watch.sh:/watch.sh:ro
 
+# Explicit volume names — project-prefix-independent. Якщо хтось запустить
+# compose з іншим project (cwd folder name, custom -p), volume той самий →
+# дані не "зникають" як артефакт docker compose naming.
 volumes:
   postgres_data:
+    name: codex_postgres_data
   minio_data:
+    name: codex_minio_data
   web_node_modules:
+    name: codex_web_node_modules
