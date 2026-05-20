@@ -15,6 +15,9 @@ services:
       GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-codex@local}
       GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-Codex Agent}
       GIT_COMMITTER_EMAIL: ${GIT_AUTHOR_EMAIL:-codex@local}
+      PLAYWRIGHT_MCP_URL: http://playwright-mcp:8931/mcp
+      CODEX_WS_SECRET: ${CODEX_WS_SECRET_ADMIN:?required}
+      CODEX_WS_AUDIENCE: codex-cli-admin
     volumes:
       - codex_admin_home:/home/codex/.codex
       - codex_generated_images:/home/codex/.codex/generated_images
@@ -40,6 +43,8 @@ services:
     environment:
       TZ: ${TZ:-Europe/Kyiv}
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+      CODEX_WS_SECRET: ${CODEX_WS_SECRET_GUEST:?required}
+      CODEX_WS_AUDIENCE: codex-cli-guest
     volumes:
       - codex_guest_home:/home/codex/.codex
       - codex_generated_images:/home/codex/.codex/generated_images
@@ -75,6 +80,8 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       CODEX_CLI_URL: ws://codex-cli:4500
       CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+      CODEX_WS_SECRET_ADMIN: ${CODEX_WS_SECRET_ADMIN:?required}
+      CODEX_WS_SECRET_GUEST: ${CODEX_WS_SECRET_GUEST:?required}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       GUNICORN_PRELOAD: ${GUNICORN_PRELOAD:-true}
     volumes:
@@ -127,6 +134,8 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       CODEX_CLI_URL: ws://codex-cli:4500
       CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+      CODEX_WS_SECRET_ADMIN: ${CODEX_WS_SECRET_ADMIN:?required}
+      CODEX_WS_SECRET_GUEST: ${CODEX_WS_SECRET_GUEST:?required}
     volumes:
       - codex_generated_images:/home/codex/.codex/generated_images:ro
     command: taskiq worker app.worker:broker app.services.turns.tasks --workers 2 --ack-type when_executed
@@ -316,6 +325,48 @@ services:
       bugsink:
         condition: service_started
 
+  playwright-mcp:
+    build:
+      context: ..
+      dockerfile: docker/playwright/Dockerfile
+    container_name: playwright-mcp
+    restart: unless-stopped
+    ipc: host
+    shm_size: 1gb
+    mem_limit: 2g
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+    volumes:
+      - playwright_profile:/profile
+    expose:
+      - "8931"
+      - "6080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS -o /dev/null -m 3 http://127.0.0.1:8931/mcp || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - default
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.codex-vnc.rule=Host(`${VNC_DOMAIN:?required}`)
+      - traefik.http.routers.codex-vnc.entrypoints=websecure
+      - traefik.http.routers.codex-vnc.tls.certresolver=letsencrypt
+      - traefik.http.routers.codex-vnc.middlewares=codex-vnc-auth,codex-vnc-ratelimit,codex-vnc-headers
+      - traefik.http.middlewares.codex-vnc-auth.basicauth.users=${VNC_BASIC_AUTH:?required}
+      - traefik.http.middlewares.codex-vnc-auth.basicauth.removeheader=true
+      - traefik.http.middlewares.codex-vnc-ratelimit.ratelimit.average=20
+      - traefik.http.middlewares.codex-vnc-ratelimit.ratelimit.burst=40
+      - traefik.http.middlewares.codex-vnc-headers.headers.framedeny=true
+      - traefik.http.middlewares.codex-vnc-headers.headers.contenttypenosniff=true
+      - traefik.http.middlewares.codex-vnc-headers.headers.browserxssfilter=true
+      - traefik.http.middlewares.codex-vnc-headers.headers.referrerpolicy=no-referrer
+      - traefik.http.services.codex-vnc.loadbalancer.server.port=6080
+
 networks:
   default:
     external: true
@@ -336,3 +387,5 @@ volumes:
     name: codex_generated_images
   codex_workspace:
     name: codex_workspace
+  playwright_profile:
+    name: codex_playwright_profile

@@ -26,6 +26,8 @@ from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import common_pb2
 from app.grpc_generated.codex.v1.common_connect import HealthService as HealthProtocol
 from app.services.cache.default import cache
+from app.services.codex.jwt import make_ws_token
+from app.services.codex.sidecar import SidecarName
 
 log = structlog.get_logger(__name__)
 
@@ -79,12 +81,17 @@ async def _probe_redis() -> bool:
 
 
 async def _probe_codex_sidecar() -> bool:
-    """Cheap WS-handshake to confirm sidecar accepts connections."""
+    """Cheap WS-handshake to confirm sidecar accepts connections.
+
+    0.131+ refuses non-loopback WS без `--ws-auth`, тому probe мусить слати
+    JWT bearer у Authorization header (той самий що ганяють CodexClient-и)."""
+    token = make_ws_token(SidecarName.ADMIN)
     with contextlib.suppress(websockets.WebSocketException, OSError, TimeoutError):
         async with websockets.connect(
             settings.CODEX_CLI_URL,
             open_timeout=2.0,
             close_timeout=1.0,
+            additional_headers={"Authorization": f"Bearer {token}"},
         ):
             pass
         return True

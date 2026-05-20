@@ -19,6 +19,9 @@ services:
       GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-codex@local}
       GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-Codex Agent}
       GIT_COMMITTER_EMAIL: ${GIT_AUTHOR_EMAIL:-codex@local}
+      PLAYWRIGHT_MCP_URL: http://playwright-mcp:8931/mcp
+      CODEX_WS_SECRET: ${CODEX_WS_SECRET_ADMIN}
+      CODEX_WS_AUDIENCE: codex-cli-admin
     volumes:
       - ../.codex:/home/codex/.codex:rw
       - /var/run/docker.sock:/var/run/docker.sock
@@ -47,6 +50,8 @@ services:
     environment:
       TZ: ${TZ:-Europe/Kyiv}
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
+      CODEX_WS_SECRET: ${CODEX_WS_SECRET_GUEST}
+      CODEX_WS_AUDIENCE: codex-cli-guest
     volumes:
       - ../.codex-guest:/home/codex/.codex:rw
       - ../.codex/generated_images:/home/codex/.codex/generated_images:rw
@@ -80,6 +85,8 @@ services:
       S3_PUBLIC_ENDPOINT: /minio
       CODEX_CLI_URL: ws://codex-cli:4500
       CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+      CODEX_WS_SECRET_ADMIN: ${CODEX_WS_SECRET_ADMIN}
+      CODEX_WS_SECRET_GUEST: ${CODEX_WS_SECRET_GUEST}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       GUNICORN_PRELOAD: ${GUNICORN_PRELOAD:-true}
     volumes:
@@ -121,6 +128,8 @@ services:
       S3_PUBLIC_ENDPOINT: /minio
       CODEX_CLI_URL: ws://codex-cli:4500
       CODEX_CLI_GUEST_URL: ws://codex-cli-guest:4500
+      CODEX_WS_SECRET_ADMIN: ${CODEX_WS_SECRET_ADMIN}
+      CODEX_WS_SECRET_GUEST: ${CODEX_WS_SECRET_GUEST}
     volumes:
       - ..:/home/codex/workspace
       - ../.codex/generated_images:/home/codex/.codex/generated_images:ro
@@ -290,6 +299,31 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./watchdog/watch.sh:/watch.sh:ro
 
+  playwright-mcp:
+    build:
+      context: ..
+      dockerfile: docker/playwright/Dockerfile
+    container_name: playwright-mcp
+    restart: unless-stopped
+    ipc: host
+    shm_size: 1gb
+    environment:
+      TZ: ${TZ:-Europe/Kyiv}
+    volumes:
+      - playwright_profile:/profile
+    expose:
+      - "8931"
+    ports:
+      - "127.0.0.1:6080:6080"
+    healthcheck:
+      # MCP returns 400 on plain GET (expects POST з JSON-RPC). Будь-який HTTP
+      # response = server alive; failure тільки на transport-level errors.
+      test: ["CMD-SHELL", "curl -sS -o /dev/null -m 3 http://127.0.0.1:8931/mcp || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
 # Explicit volume names — project-prefix-independent. Якщо хтось запустить
 # compose з іншим project (cwd folder name, custom -p), volume той самий →
 # дані не "зникають" як артефакт docker compose naming.
@@ -300,3 +334,5 @@ volumes:
     name: codex_minio_data
   web_node_modules:
     name: codex_web_node_modules
+  playwright_profile:
+    name: codex_playwright_profile

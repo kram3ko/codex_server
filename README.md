@@ -193,7 +193,9 @@ cp .env.example .env             # заповнити: TG_BOT_TOKEN, TG_ADMIN_US
                                  # REDIS_PASSWORD, SPEECHMATICS_API_KEY,
                                  # GOOGLE_TTS_API_KEY, MCP_CALLBACK_TOKEN,
                                  # GH_TOKEN, SENTRY_DSN (опціонально),
-                                 # BUGSINK_AUTH_TOKEN
+                                 # BUGSINK_AUTH_TOKEN,
+                                 # CODEX_WS_SECRET_ADMIN, CODEX_WS_SECRET_GUEST
+                                 #   (`python -c "import secrets; print(secrets.token_urlsafe(48))"`)
 docker compose --env-file .env -f docker/docker-compose.yml up -d --build
 ```
 
@@ -436,7 +438,10 @@ codex_server/
 │   │   ├── auth/               JWT issue/verify + password hashing (argon2)
 │   │   ├── codex/              Codex CLI app-server клієнт (низький рівень):
 │   │   │   ├── transport.py    JSON-RPC over WS + bounded notification queue
-│   │   │   │                   (drop-oldest+WARN) + handler hook
+│   │   │   │                   (drop-oldest+WARN) + handler hook + Authorization
+│   │   │   │                   header (Bearer JWT для CLI 0.131+ ws-auth)
+│   │   │   ├── jwt.py          make_ws_token(sidecar) — HS256 short-TTL bearer
+│   │   │   │                   для WS handshake (per-audience shared secrets)
 │   │   │   ├── client.py       CodexClient — handshake, threads, run_turn
 │   │   │   │                   (on_started/on_idle callbacks; raises
 │   │   │   │                   StaleSidecarTurnError / StaleTurnStreamError)
