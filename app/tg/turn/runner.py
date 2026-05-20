@@ -120,9 +120,7 @@ class TurnRunner:
                 # без codex_turn_id ще). Просимо retry.
                 log.warning("tg_turn_create_race_lost", chat_id=session.db_chat_id)
                 await message.answer(
-                    tg_markdown.escape(
-                        "⏳ У цьому chat вже виконується turn — спробуй за мить."
-                    )
+                    tg_markdown.escape("⏳ У цьому chat вже виконується turn — спробуй за мить.")
                 )
                 return
 
@@ -144,8 +142,7 @@ class TurnRunner:
         turn: TurnRow,
     ) -> None:
         sidecar = SidecarName.normalize(
-            turn.sidecar
-            or (SidecarName.ADMIN if session.is_admin else SidecarName.GUEST),
+            turn.sidecar or (SidecarName.ADMIN if session.is_admin else SidecarName.GUEST),
         )
         async with session.turn_lock:
             current = asyncio.current_task()
@@ -155,9 +152,7 @@ class TurnRunner:
             try:
                 # Per-chat active lock — фізична гарантія "1 active turn per chat".
                 # Різні chat-и працюють паралельно (codex-cli тримає окремий thread/WS).
-                async with turn_locks.hold_turn_locks(
-                    session.db_chat_id, turn.id
-                ) as outcome:
+                async with turn_locks.hold_turn_locks(session.db_chat_id, turn.id) as outcome:
                     if outcome != LockAcquireOutcome.ACQUIRED:
                         terminal = TurnStatus.FAILED
                         terminal_error = (
@@ -299,9 +294,7 @@ async def _handle_active_tg_turn(
 
     if active.codex_turn_id is None:
         log.warning("tg_active_pending_conflict", chat_id=session.db_chat_id)
-        await message.answer(
-            tg_markdown.escape("⏳ Turn ще запускається — спробуй за мить.")
-        )
+        await message.answer(tg_markdown.escape("⏳ Turn ще запускається — спробуй за мить."))
         return True
 
     if prepared.attachments:

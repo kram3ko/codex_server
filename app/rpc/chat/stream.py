@@ -373,11 +373,7 @@ async def _event_from_probe_terminal(
         # будуть, бо їх теж нема.
         full_text = state.collector.final_text or state.collector.buffer
         message = None
-        has_content = bool(
-            full_text
-            or state.collector.tool_calls
-            or state.collector.attachments
-        )
+        has_content = bool(full_text or state.collector.tool_calls or state.collector.attachments)
         if has_content:
             message = await _finalize_turn_persist(
                 persisted_chat_id,

@@ -35,9 +35,7 @@ async def handle_done(
         committed_prefix,
         as_voice=prepared.had_voice_input,
     )
-    await persist_assistant_turn(
-        session, final_text, attachments, tool_calls, turn_id=turn_id
-    )
+    await persist_assistant_turn(session, final_text, attachments, tool_calls, turn_id=turn_id)
 
 
 async def handle_empty_response(

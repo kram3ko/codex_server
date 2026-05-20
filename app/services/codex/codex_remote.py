@@ -17,6 +17,8 @@ from redis.exceptions import RedisError
 from app.config import settings
 from app.services.cache.default import cache
 from app.services.codex.client import CodexClient
+from app.services.codex.jwt import make_ws_token
+from app.services.codex.sidecar import SidecarName
 
 log = structlog.get_logger(__name__)
 
@@ -113,6 +115,7 @@ async def send_steer_by_ids(
 
 @contextlib.asynccontextmanager
 async def _one_shot_client(is_admin: bool):
+    sidecar = SidecarName.ADMIN if is_admin else SidecarName.GUEST
     client = CodexClient(
         url=settings.CODEX_CLI_URL if is_admin else settings.CODEX_CLI_GUEST_URL,
         cwd=settings.CODEX_CWD,
@@ -124,6 +127,7 @@ async def _one_shot_client(is_admin: bool):
             if is_admin
             else settings.CODEX_NOTIFICATION_QUEUE_MAX_GUEST
         ),
+        auth_token=make_ws_token(sidecar),
     )
     await client.connect()
     try:

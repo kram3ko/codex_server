@@ -192,26 +192,30 @@ e1f7a2b3c4d5  turns_lifecycle        (turns table + ENUM turn_status +
 cp .env.example .env             # заповнити: TG_BOT_TOKEN, TG_ADMIN_USER_IDS,
                                  # REDIS_PASSWORD, SPEECHMATICS_API_KEY,
                                  # GOOGLE_TTS_API_KEY, MCP_CALLBACK_TOKEN,
-                                 # SENTRY_DSN (опціонально), BUGSINK_AUTH_TOKEN
-./docker/up.sh                   # бутстрап з усіма compose-файлами
+                                 # GH_TOKEN, SENTRY_DSN (опціонально),
+                                 # BUGSINK_AUTH_TOKEN,
+                                 # CODEX_WS_SECRET_ADMIN, CODEX_WS_SECRET_GUEST
+                                 #   (`python -c "import secrets; print(secrets.token_urlsafe(48))"`)
+docker compose --env-file .env -f docker/docker-compose.yml up -d --build
 ```
 
-Compose-файли розкидані по призначенню:
+Два compose-файли — одна точка входу на сценарій:
 
-| Файл                              | Що піднімає                                                 |
-|-----------------------------------|-------------------------------------------------------------|
-| `docker/compose.yml`              | `codex-server` + `codex-worker` (TaskIQ) + `codex-web` (Vite dev) + postgres + redis + minio + minio-init |
-| `docker/compose.codex.yml`        | `codex-cli` (admin sidecar) + `codex-cli-guest` (окремий проект `codex_codex`)  |
-| `docker/compose.bugsink.yml`      | Self-hosted Sentry-compatible Bugsink на `:8089`            |
-| `docker/compose.watch.yml`        | Watchdog контейнер — restart за `codex.watchdog=true` label |
+| Файл                       | Сценарій                                                          |
+|----------------------------|-------------------------------------------------------------------|
+| `docker/docker-compose.yml`       | Локалка: 13 сервісів — sidecars + app + storage + bugsink + watchdog |
+| `docker/docker-compose.prod.yml`  | Прод (Dokploy): 12 сервісів — без watchdog (Dokploy перебирає роль), web build через nginx, Traefik labels |
 
-`./docker/up.sh` піднімає все по черзі через спільну external network `codex_net`. `./docker/down.sh` валить усе.
+Локально все в одному project — codex-cli інтегрований з рештою, watchdog
+у тому ж стеку. Self-restart `docker compose up` зсередини codex-cli не
+підтримується (`/var/run/docker.sock` mount прибрано). Деплой на прод —
+через `git push` + Dokploy webhook, не зсередини агента.
 
 Перед першим запуском гостьового sidecar — авторизуватись окремо (alt-ChatGPT
 аккаунт, не admin):
 
 ```bash
-docker compose -f docker/compose.codex.yml -p codex_codex run --rm codex-cli-guest codex login --device-auth
+docker compose --env-file .env -f docker/docker-compose.yml run --rm codex-cli-guest codex login --device-auth
 ```
 
 Без docker (тільки FastAPI, без Codex sidecar):
@@ -434,7 +438,10 @@ codex_server/
 │   │   ├── auth/               JWT issue/verify + password hashing (argon2)
 │   │   ├── codex/              Codex CLI app-server клієнт (низький рівень):
 │   │   │   ├── transport.py    JSON-RPC over WS + bounded notification queue
-│   │   │   │                   (drop-oldest+WARN) + handler hook
+│   │   │   │                   (drop-oldest+WARN) + handler hook + Authorization
+│   │   │   │                   header (Bearer JWT для CLI 0.131+ ws-auth)
+│   │   │   ├── jwt.py          make_ws_token(sidecar) — HS256 short-TTL bearer
+│   │   │   │                   для WS handshake (per-audience shared secrets)
 │   │   │   ├── client.py       CodexClient — handshake, threads, run_turn
 │   │   │   │                   (on_started/on_idle callbacks; raises
 │   │   │   │                   StaleSidecarTurnError / StaleTurnStreamError)
@@ -530,13 +537,10 @@ codex_server/
 │   ├── codex/                  Dockerfile + entrypoint + AGENTS-guest.md
 │   ├── server/                 Dockerfile (multi-stage, free-threaded 3.14t)
 │   │                           + entrypoint.sh (alembic upgrade head + start)
-│   ├── web/                    ← порожній; production single-image build TODO
+│   ├── web/                    Dockerfile (Vite build → nginx static) + nginx.conf
 │   ├── watchdog/watch.sh       docker events → restart по label
-│   ├── compose.yml             app stack (codex-server + codex-worker + codex-web + pg/redis/minio)
-│   ├── compose.codex.yml       Codex CLI sidecars (admin + guest)
-│   ├── compose.bugsink.yml     self-hosted Sentry-compatible (порт :8089)
-│   ├── compose.watch.yml       watchdog контейнер
-│   ├── up.sh / down.sh         оркестрація всіх compose-файлів
+│   ├── docker-compose.yml      локалка: усе разом (sidecars + app + storage + bugsink + watchdog)
+│   ├── docker-compose.prod.yml прод (Dokploy): standalone, Traefik labels, web nginx, без watchdog
 ├── estimates/                  (gitignored — особисті планувальні нотатки)
 │   └── INTEGRATION.md          phase-by-phase status + TODO
 ├── docs/

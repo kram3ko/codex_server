@@ -29,7 +29,9 @@
   </div>
 {:else if url}
   <figure class="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-    <img class="max-h-96 w-full object-contain" src={url} alt="Generated result" />
+    <a href={url} target="_blank" rel="noopener noreferrer" aria-label="Open full-size image">
+      <img class="max-h-96 w-full cursor-zoom-in object-contain transition hover:opacity-90" src={url} alt="Generated result" />
+    </a>
   </figure>
 {:else}
   <div class="grid h-48 place-items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)]">

@@ -98,10 +98,10 @@ def _wire(monkeypatch: pytest.MonkeyPatch, *, user: User | None, auth_service: A
 
     monkeypatch.setattr(auth_rpc, "auth_service", auth_service)
     monkeypatch.setattr(auth_rpc, "user_service", users)
-    monkeypatch.setattr(auth_rpc, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(auth_rpc, "SessionLocal", _Session)
     monkeypatch.setattr(auth_helper, "auth_service", auth_service)
     monkeypatch.setattr(auth_helper, "user_service", users)
-    monkeypatch.setattr(auth_helper, "SessionLocal", lambda: _Session())
+    monkeypatch.setattr(auth_helper, "SessionLocal", _Session)
     yield captured
 
 

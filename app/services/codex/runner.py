@@ -25,6 +25,8 @@ from app.services.cache.default import cache
 from app.services.chats.default import chat_service
 from app.services.codex.client import CodexClient
 from app.services.codex.history import messages_to_history_items
+from app.services.codex.jwt import make_ws_token
+from app.services.codex.sidecar import SidecarName
 from app.services.messages.default import message_service
 
 log = structlog.get_logger(__name__)
@@ -60,6 +62,7 @@ async def open_codex_turn(
         log.info("codex_thread_quarantined_skip", thread_id=initial)
         initial = None
 
+    sidecar = SidecarName.ADMIN if is_admin else SidecarName.GUEST
     client = CodexClient(
         url=settings.CODEX_CLI_URL if is_admin else settings.CODEX_CLI_GUEST_URL,
         cwd=settings.CODEX_CWD,
@@ -74,6 +77,7 @@ async def open_codex_turn(
             if is_admin
             else settings.CODEX_NOTIFICATION_QUEUE_MAX_GUEST
         ),
+        auth_token=make_ws_token(sidecar),
     )
     await client.connect()
     try:

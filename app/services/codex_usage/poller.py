@@ -20,6 +20,7 @@ from redis.exceptions import RedisError
 from app.config import settings
 from app.services.cache.default import cache
 from app.services.codex.client import CodexClient
+from app.services.codex.jwt import make_ws_token
 from app.services.codex.sidecar import SidecarName
 from app.services.codex.transport import AppServerError
 from app.services.codex_usage.default import codex_usage_service
@@ -59,11 +60,7 @@ def deserialize(raw: bytes | str) -> CodexUsage | None:
 
 
 async def _fetch_once(sidecar: SidecarName) -> CodexUsage | None:
-    url = (
-        settings.CODEX_CLI_URL
-        if sidecar is SidecarName.ADMIN
-        else settings.CODEX_CLI_GUEST_URL
-    )
+    url = settings.CODEX_CLI_URL if sidecar is SidecarName.ADMIN else settings.CODEX_CLI_GUEST_URL
     queue_max = (
         settings.CODEX_NOTIFICATION_QUEUE_MAX_ADMIN
         if sidecar is SidecarName.ADMIN
@@ -76,6 +73,7 @@ async def _fetch_once(sidecar: SidecarName) -> CodexUsage | None:
         sandbox=settings.CODEX_SANDBOX,
         request_timeout=settings.CODEX_REQUEST_TIMEOUT_SECONDS,
         notification_queue_max=queue_max,
+        auth_token=make_ws_token(sidecar),
     )
     try:
         await client.connect()

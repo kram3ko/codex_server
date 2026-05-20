@@ -309,9 +309,7 @@ class ChatRPC(ChatProtocol):
         await pubsub.subscribe(channel)
         try:
             raw = await cache.get(snapshot_key)
-            bootstrap_usage = (
-                usage_poller.deserialize(raw) if raw is not None else None
-            )
+            bootstrap_usage = usage_poller.deserialize(raw) if raw is not None else None
             yield (
                 codex_usage_to_pb(bootstrap_usage)
                 if bootstrap_usage is not None

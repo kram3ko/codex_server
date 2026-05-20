@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     # Емпірика; калібрувати по `codex_stale_turn_notification_ignored`.
     CODEX_STALE_STORM_THRESHOLD: int = 25
 
+    # --- Codex WS handshake auth (CLI 0.131+ `--ws-auth signed-bearer-token`) ---
+    # Per-audience HS256 shared secrets. Leak одного не дає доступ до іншого
+    # sidecar-у. Generate via: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+    CODEX_WS_SECRET_ADMIN: str = ""
+    CODEX_WS_SECRET_GUEST: str = ""
+    CODEX_WS_ISSUER: str = "codex-server"
+    CODEX_WS_AUDIENCE_ADMIN: str = "codex-cli-admin"
+    CODEX_WS_AUDIENCE_GUEST: str = "codex-cli-guest"
+
     # --- Speech-to-text (Speechmatics batch v2) ---
     # `language='auto'` triggers Speechmatics Language Identification.
     SPEECHMATICS_API_KEY: str = ""
@@ -176,6 +185,13 @@ class Settings(BaseSettings):
                 f"JWT_SECRET must be ≥{_JWT_SECRET_MIN_LEN} chars (was "
                 f"{len(self.JWT_SECRET.strip())}); set in .env"
             )
+        for field in ("CODEX_WS_SECRET_ADMIN", "CODEX_WS_SECRET_GUEST"):
+            value = getattr(self, field).strip()
+            if len(value) < _JWT_SECRET_MIN_LEN:
+                raise ValueError(
+                    f"{field} must be ≥{_JWT_SECRET_MIN_LEN} chars (was "
+                    f"{len(value)}); set in .env"
+                )
         return self
 
 

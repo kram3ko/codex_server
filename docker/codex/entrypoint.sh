@@ -46,4 +46,24 @@ url = "http://codex-server:8000/mcp/streamable"
 bearer_token_env_var = "MCP_CALLBACK_TOKEN"
 EOF
 
-exec codex app-server --listen ws://0.0.0.0:4500
+if [ -n "${PLAYWRIGHT_MCP_URL:-}" ]; then
+cat >> "$HOME/.codex/config.toml" <<EOF
+
+[mcp_servers.playwright]
+url = "${PLAYWRIGHT_MCP_URL}"
+EOF
+fi
+
+# Codex 0.131+ refuses non-loopback WS listener без auth. Per-sidecar shared
+# secret (HS256), issuer/audience claims перевіряються на handshake.
+: "${CODEX_WS_SECRET:?required for ws-auth signed-bearer-token}"
+: "${CODEX_WS_AUDIENCE:?required (e.g. codex-cli-admin)}"
+umask 077
+printf '%s' "$CODEX_WS_SECRET" > "$HOME/.codex/ws-secret"
+
+exec codex app-server \
+  --listen ws://0.0.0.0:4500 \
+  --ws-auth signed-bearer-token \
+  --ws-shared-secret-file "$HOME/.codex/ws-secret" \
+  --ws-issuer "${CODEX_WS_ISSUER:-codex-server}" \
+  --ws-audience "$CODEX_WS_AUDIENCE"

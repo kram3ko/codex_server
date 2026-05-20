@@ -39,6 +39,7 @@ log = structlog.get_logger(__name__)
 
 _CLIENT_INFO = {"name": "codex-api", "version": "0.1.0"}
 
+
 class StaleTurnStreamError(RuntimeError):
     """Raised when a resumed thread only emits events for an older turn."""
 
@@ -195,6 +196,9 @@ class _TurnDiagnostics:
             return (None, None, None)
         return max(self._active_items.values(), key=_active_item_rank)
 
+    def has_active_items(self) -> bool:
+        return bool(self._active_items)
+
 
 class CodexClient:
     """One CodexClient = one Codex sidecar conversation (one turn)."""
@@ -210,6 +214,7 @@ class CodexClient:
         on_thread_change: ThreadChangeCallback | None = None,
         reasoning_effort: str | None = None,
         notification_queue_max: int | None = None,
+        auth_token: str | None = None,
     ) -> None:
         self._url = url
         self._cwd = cwd
@@ -219,6 +224,8 @@ class CodexClient:
         transport_kwargs: dict[str, Any] = {"url": url, "request_timeout": request_timeout}
         if notification_queue_max is not None:
             transport_kwargs["notification_queue_max"] = notification_queue_max
+        if auth_token is not None:
+            transport_kwargs["auth_token"] = auth_token
         self._transport = AppServerClient(**transport_kwargs)
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
@@ -341,9 +348,7 @@ class CodexClient:
                 await on_started(self._current_turn_id, self._thread_id)
             accumulated = ""
 
-            async for note in self._current_turn_notifications(
-                idle_s, on_idle, on_usage_signal
-            ):
+            async for note in self._current_turn_notifications(idle_s, on_idle, on_usage_signal):
                 self._record_raw_note(note)
                 event = _translate(note, accumulated)
                 if event is not None:
@@ -540,7 +545,7 @@ class CodexClient:
                 return await anext(notes)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                if on_idle is not None and await on_idle():
+                if await self._handle_idle(on_idle):
                     continue
                 raise TimeoutError
             try:
@@ -549,9 +554,35 @@ class CodexClient:
             except TimeoutError:
                 if self._idle_deadline is not None and time.monotonic() < self._idle_deadline:
                     continue
-                if on_idle is not None and await on_idle():
+                if await self._handle_idle(on_idle):
                     continue
                 raise
+
+    async def _handle_idle(
+        self,
+        on_idle: Callable[[], Awaitable[bool | None]] | None,
+    ) -> bool:
+        """Idle hit — decide whether to extend.
+
+        Fast path: trust locally-tracked `_active_items` (sidecar already
+        acknowledged item/started без matching item/completed) → extend без
+        RPC. Queue policy drop-**oldest** зберігає терминальні події, тому
+        item/completed для in-flight tool-у не може загубитись через overflow.
+        Якщо sidecar помер — transport reader пушить sentinel у queue, наступний
+        `anext` raise-ить StopAsyncIteration → loop exits природньо.
+
+        Fallback: локально пусто → on_idle (зазвичай `probe_or_extend_idle`
+        робить thread/read до sidecar)."""
+        if self._turn_diagnostics is not None and self._turn_diagnostics.has_active_items():
+            self.extend_idle_deadline()
+            log.debug(
+                "codex_idle_extended_via_local_state",
+                **self._turn_diagnostics.snapshot(self._transport),
+            )
+            return True
+        if on_idle is None:
+            return False
+        return bool(await on_idle())
 
     def _is_stale_turn_note(self, note: Notification) -> bool:
         return (

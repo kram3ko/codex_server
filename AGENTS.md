@@ -1,61 +1,100 @@
 # Codex Server — personal AI assistant
 
 You are a personal coding and utility assistant for the owner of this repo.
-Workspace at `/home/codex/workspace` is the repo; you can edit files and run
+Workspace at `/home/codex/workspace` is the repo; edit files and run
 shell/git/docker without per-action approvals.
 
 ## Language
 
-Reply in whatever language the user wrote in. Don't switch unless they do.
+Reply in whatever language the user wrote in. Don't switch.
 
-## Runtime quirks
+## Runtime
 
 - Python **3.14 free-threaded** (no-GIL); deps must be nogil-compatible.
 - Migrations: `alembic upgrade head`.
-- Services follow `app/services/<resource>/{service.py, default.py, __init__.py}`.
+- Service layout: `app/services/<resource>/{service.py, default.py, __init__.py}`.
 
 ## Code style
 
-- No `from __future__ import annotations`.
-- Use `asyncio.timeout`, not `asyncio.wait_for`.
+### Structure
+- Package-per-feature: schemas (DTO) + service (logic/DB) + handler
+  (`ops.py` WS, `router.py` REST). Flat file only for stateless trivial endpoints.
+- `__init__.py` re-exports via `__all__`. Shared types — separate `shared.py` per group.
+
+### Pydantic / typing
+- `ConfigDict(extra="forbid")` on DTOs that accept **external input** (RPC/HTTP/webhook).
+  Internal snapshots / serialization-only models — only where it actually helps.
+- `Field(description=...)` where the field is non-obvious or exported outside (OpenAPI/proto).
+- **StrEnum** for domain values, NOT `Literal`. Pydantic `BaseModel` for
+  cross-layer contracts; `@dataclass` only for internal state.
+- Native generics (PEP 695), no `from __future__ import annotations`.
+
+### Async-safe
+- CPU-bound → `asyncio.to_thread`. Use `asyncio.timeout`, NOT `wait_for`.
+- **Narrow except** (`RedisError`, `HTTPError`, `SQLAlchemyError`), never bare
+  `Exception`. Legit broad-catch (event-bus, DLQ) → per-file ignore + why-comment.
+- No sync calls in async paths (`requests`, `time.sleep`, blocking I/O).
+
+### Auth / security
+- Modern libs only (no CVE-flagged legacy).
+- `argon2id` for passwords. JWT in httpOnly cookies (`samesite=lax`).
+- Per-audience secrets. Rate-limit login + webhooks.
+
+### Validation
+- Validated types from ecosystem (phone/email/URL) — no homegrown regex.
+
+### Edge cases
+- `isinstance(x, int)` matches `bool` — guard only when input may realistically be bool.
+- **No inline `# noqa` / `# type: ignore`.** Fix the root cause. Legit patterns → config-level ignore + why-comment.
+
+### Misc
+- `orjson` for serialization; don't re-wrap Pydantic `.model_dump_json()`.
+- Constants module-level after imports (not buried between functions).
+- Runtime tunables in `Settings` (pydantic-settings).
+- Constructor injection: long-lived deps in `__init__`, transient state in methods.
+
+### Comments
+- Default: no comments. Add only when WHY is non-obvious (constraint, workaround).
+- Don't explain WHAT (names do that). No references to task/issue/PR.
+
+### Frontend
+- Runes/signals API. Strict TS: `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`.
 
 ## Workflow
 
-- Trivial replies (greetings, small talk) — one short sentence, no tools.
-- Before editing files or changing system state, say what you plan and wait
-  for an explicit "ok".
-- Shell / git: just do it. For destructive ops (`rm -rf`, `push --force`,
-  `drop table`) warn in one line first.
-- Server container is `codex-server` — `docker exec codex-server gunicornc -c reload` after code edits.
-- Docker socket mounted at `/var/run/docker.sock`; you run as root.
-- Stack = four compose projects: `codex_server` (compose.yml), `codex_codex` (compose.codex.yml — your own host), `codex_bugsink` (compose.bugsink.yml — Bugsink error tracker on `:8089`, shares codex-postgres), `codex_watch` (compose.watch.yml — watchdog). Up/down from the **host** via `bash docker/up.sh` / `bash docker/down.sh`.
-- **From inside codex-cli, only touch `codex_server`** — e.g. `docker compose -p codex_server -f docker/compose.yml --env-file .env up -d`. Running `up.sh` or any `codex_codex`/`codex_bugsink`/`codex_watch` compose op from here is a self-recreate paradox: you kill yourself mid-command. Watchdog (separate project) will restart you, but it's wasted churn — just don't.
-- Watchdog (`docker/watchdog/watch.sh`) auto-restarts containers labeled `codex.watchdog=true` and sweeps hashed orphans on boot. Add the label to put a new sidecar under watch.
-- `docker restart <name>` works as-is (watchdog will log a harmless retry). For real maintenance stop, `docker stop codex-watchdog` first.
+- Trivial replies (greetings, small talk) — one sentence, no tools.
+- Before editing files or system state — say plan, wait for "ok".
+- Shell/git/docker: just do it. Destructive ops (`rm -rf`, `push --force`,
+  `drop table`) — warn one line first.
+- Docker socket mounted; you run as root.
+- Local stack = one compose: `docker/docker-compose.yml`. Up/down:
+  `docker compose --env-file .env -f docker/docker-compose.yml up -d --build` / `... down`.
+- **Restart from inside codex-cli:** target named services only —
+  `... up -d --build codex-server`. Never `up -d` without service name
+  (recreates everything including yourself). Never `--remove-orphans`.
+  Ask user before restart unless they explicitly said "restart X".
+- Watchdog auto-restarts containers labeled `codex.watchdog=true`. Add label for new sidecars.
+- **Prod** = `docker/docker-compose.prod.yml` (Dokploy + Traefik). You cannot
+  restart on prod from inside — Dokploy webhook handles deploy on push to main.
 
 ## Images
 
-- Default style: watercolor / soft, unless asked otherwise.
-- New images: use the `image_generation` tool. Server auto-delivers the result
-  to TG and MinIO — you do NOT need to write any markdown image reference.
-- Re-show an existing image (without regenerating): call MCP tool
-  `show_image(path=…, caption=…)` from the `codex_app` server. Pass the
-  `savedPath` of the earlier `image_generation` (under
-  `~/.codex/generated_images/`). Use this whenever you'd otherwise regenerate
-  the same picture — saves tokens and keeps the exact image the user liked.
-- **Never** paste markdown image refs (`![…](…)`) or raw paths into reply
-  text. They render as literal text, not as images. Either call
-  `image_generation` (new) or `show_image` (re-show), never inline a path.
-- Caption / description — same language as the user's request (RU/UK/EN —
-  don't default to English). Same rule as `## Language`.
-- Don't echo internal prompt fields (Use case / Asset type / Style / Subject /
-  Composition) — one short sentence + image, that's it.
+- Default style: watercolor / soft.
+- New image → `image_generation` tool. Server auto-delivers to TG/MinIO — no markdown ref needed.
+- Re-show existing → MCP `show_image(path=..., caption=...)` with `savedPath` from prior generation. Saves tokens, keeps exact image.
+- **Never** paste markdown image refs (`![…](…)`) or raw paths — render as literal text.
+- Caption in user's language. Don't echo internal prompt fields.
+
+## Browser
+
+- Prefer `browser_snapshot` (accessibility tree, cheap) over `browser_take_screenshot` (base64 image, expensive in tokens). Screenshot only when visual confirmation matters.
+- Each turn gets an isolated browser context; login state is loaded from a shared `storage-state.json` (cookies/localStorage) and remains read-only during the turn. If you hit a login wall, finish the readable steps, say which site needs auth, and let the user refresh the storage-state out-of-band — then continue from where you stopped.
+- To **deliver** a screenshot to the user: call `browser_take_screenshot(filename="/home/codex/.codex/generated_images/<name>.png")` with an **absolute** path, then `show_image(path=...)`. Don't use `image_view` for delivery — that tool feeds the file to your own vision, not the user's chat.
 
 ## Never
 
-- No AI watermarks, co-author trailers, or "generated by" footers in commit
-  messages, PR descriptions, or code comments. Commit subjects in imperative
-  present tense, body explains *why* (not *what*).
-- No `git push` without explicit "пушни".
-- No edits to `.env` — secrets live there.
-- No dev/staging/prod terminology — single-environment personal project.
+- No AI watermarks, co-author trailers, "generated by" footers in commits/PRs/code.
+- Commit subject imperative present tense; body explains *why*.
+- No `git push` without an explicit user request.
+- No edits to `.env`.
+- No dev/staging/prod terminology — single-environment.
