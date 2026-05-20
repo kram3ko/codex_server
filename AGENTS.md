@@ -88,7 +88,8 @@ Reply in whatever language the user wrote in. Don't switch.
 ## Browser
 
 - Prefer `browser_snapshot` (accessibility tree, cheap) over `browser_take_screenshot` (base64 image, expensive in tokens). Screenshot only when visual confirmation matters.
-- Browser profile persists across turns (mounted volume): cookies and login state carry over. Sign-in is handled out-of-band by the user via noVNC; if you hit a login wall, finish the readable steps, say which site needs auth, and let the user log in — then continue from where you stopped.
+- Each turn gets an isolated browser context; login state is loaded from a shared `storage-state.json` (cookies/localStorage) and remains read-only during the turn. If you hit a login wall, finish the readable steps, say which site needs auth, and let the user refresh the storage-state out-of-band — then continue from where you stopped.
+- To **deliver** a screenshot to the user: call `browser_take_screenshot(filename="/home/codex/.codex/generated_images/<name>.png")` with an **absolute** path, then `show_image(path=...)`. Don't use `image_view` for delivery — that tool feeds the file to your own vision, not the user's chat.
 
 ## Never
 

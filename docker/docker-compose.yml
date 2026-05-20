@@ -311,6 +311,7 @@ services:
       TZ: ${TZ:-Europe/Kyiv}
     volumes:
       - playwright_profile:/profile
+      - ../.codex/generated_images:/home/codex/.codex/generated_images:rw
     expose:
       - "8931"
     ports:

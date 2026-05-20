@@ -338,6 +338,7 @@ services:
       TZ: ${TZ:-Europe/Kyiv}
     volumes:
       - playwright_profile:/profile
+      - codex_generated_images:/home/codex/.codex/generated_images:rw
     expose:
       - "8931"
       - "6080"
