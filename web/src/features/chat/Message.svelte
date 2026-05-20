@@ -3,6 +3,7 @@
 
   import CompletedTools from "./CompletedTools.svelte";
   import HistoricalAudio from "./HistoricalAudio.svelte";
+  import HistoricalFile from "./HistoricalFile.svelte";
   import HistoricalImage from "./HistoricalImage.svelte";
   import { type ToolEvent } from "./ToolCall.svelte";
   import { renderMarkdown } from "./markdown";
@@ -36,6 +37,9 @@
   const uploadIds = $derived.by((): number[] => idsFromMeta(metaJson?.upload_ids));
   const audioUploadIds = $derived.by((): number[] =>
     idsFromMeta(metaJson?.audio_upload_ids)
+  );
+  const fileUploadIds = $derived.by((): number[] =>
+    idsFromMeta(metaJson?.file_upload_ids)
   );
   const historicalCalls = $derived.by((): ToolEvent[] => {
     const raw = metaJson?.calls;
@@ -181,6 +185,14 @@
         <div class="mt-3 space-y-2">
           {#each audioUploadIds as uploadId (uploadId)}
             <HistoricalAudio {uploadId} />
+          {/each}
+        </div>
+      {/if}
+
+      {#if fileUploadIds.length}
+        <div class="mt-3 space-y-2">
+          {#each fileUploadIds as uploadId (uploadId)}
+            <HistoricalFile {uploadId} />
           {/each}
         </div>
       {/if}

@@ -74,6 +74,7 @@ class UploadsRPC(UploadsProtocol):
         return uploads_pb2.GetPresignedResponse(
             url=url,
             expires_at=to_ts(datetime.now(UTC) + timedelta(seconds=ttl_s)),
+            upload=upload_to_pb(upload),
         )
 
     @override

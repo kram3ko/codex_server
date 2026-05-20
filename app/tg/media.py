@@ -23,7 +23,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.base import SessionLocal
 from app.services.stt.base import STTBackend
-from app.services.uploads.default import upload_service
+from app.services.uploads.default import upload_service, workspace_uploads
 
 log = structlog.get_logger(__name__)
 
@@ -54,6 +54,7 @@ async def prepare_turn(
     text = (message.caption or message.text or "").strip()
     attachments: list[str] = []
     upload_ids: list[int] = []
+    file_paths: list[str] = []
     had_voice_input = message.voice is not None or message.video_note is not None
 
     if message.photo:
@@ -65,7 +66,7 @@ async def prepare_turn(
 
     document = message.document
     if document is not None:
-        doc_text, doc_attachment, doc_upload_id = await _prepare_document(
+        doc_text, doc_attachment, doc_upload_id, doc_file_path = await _prepare_document(
             message, document, transcriber, db_user_id, db_chat_id
         )
         text = _merge_text(text, doc_text)
@@ -73,6 +74,8 @@ async def prepare_turn(
             attachments.append(doc_attachment)
         if doc_upload_id is not None:
             upload_ids.append(doc_upload_id)
+        if doc_file_path is not None:
+            file_paths.append(doc_file_path)
 
     if message.voice:
         voice_text, upload_id = await _transcribe_and_persist(
@@ -118,8 +121,11 @@ async def prepare_turn(
         if upload_id is not None:
             upload_ids.append(upload_id)
 
-    if attachments and not text:
-        text = "Опиши зображення і виділи ключові деталі."
+    if (attachments or file_paths) and not text:
+        text = "Open the attached files and answer based on them."
+    mentions = workspace_uploads.format_mentions(file_paths)
+    if mentions:
+        text = f"{text}\n\n{mentions}" if text else mentions
 
     return PreparedTurn(
         text=text,
@@ -180,13 +186,19 @@ async def _prepare_document(
     transcriber: STTBackend,
     user_id: int,
     chat_id: int,
-) -> tuple[str, str | None, int | None]:
+) -> tuple[str, str | None, int | None, str | None]:
+    """Returns ``(text, image_data_url, upload_id, workspace_path)``.
+
+    Image documents → data URI. Audio → transcript у ``text``. Решта (PDF/DOCX/
+    code/архіви) — пишемо у workspace і повертаємо relative path; caller
+    додає mention у user-текст, Codex читає через свій shell tool.
+    """
     mime_type = getattr(document, "mime_type", None)
     file_name = getattr(document, "file_name", None)
     if is_image_document(mime_type, file_name):
         mime = mime_type or (mimetypes.guess_type(file_name or "")[0] or "image/jpeg")
         data_url, upload_id = await _save_image(message, document, mime, user_id, chat_id)
-        return "", data_url, upload_id
+        return "", data_url, upload_id, None
     if is_audio_document(mime_type, file_name):
         mime = mime_type or (mimetypes.guess_type(file_name or "")[0] or "audio/mpeg")
         text, upload_id = await _transcribe_and_persist(
@@ -198,8 +210,17 @@ async def _prepare_document(
             user_id,
             chat_id,
         )
-        return text, None, upload_id
-    return "", None, None
+        return text, None, upload_id, None
+    mime = mime_type or (mimetypes.guess_type(file_name or "")[0] or "application/octet-stream")
+    filename = file_name or f"document{_guess_ext(mime, None, '.bin')}"
+    buf = await _download_to_buf(message, document)
+    upload_id = await _persist_buf(
+        buf, filename=filename, mime=mime, user_id=user_id, chat_id=chat_id
+    )
+    workspace_path = await workspace_uploads.materialize_for_chat(
+        buf, chat_id=chat_id, upload_id=upload_id, filename=filename
+    )
+    return "", None, upload_id, workspace_path
 
 
 async def _download_to_buf(message: Message, media: Any) -> BytesIO:

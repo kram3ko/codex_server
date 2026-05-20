@@ -47,6 +47,7 @@ from app.services.turns.default import turn_service, turn_stream
 from app.services.turns.recovery import reconcile_if_stale
 from app.services.turns.schemas import TurnCreate, TurnRow
 from app.services.turns.tasks import execute_turn
+from app.services.uploads.default import workspace_uploads
 
 # OS / WS / JSON-RPC / connect-timeout — типовий network-помилковий пакет.
 _CONTROL_RPC_ERRORS = (
@@ -67,6 +68,8 @@ class _PreparedRunTurn:
     data_urls: tuple[str, ...]
     image_ids: list[int]
     audio_ids: list[int]
+    file_paths: tuple[str, ...]
+    file_ids: list[int]
     voice_reply: bool
     has_uploads: bool
     sidecar: SidecarName
@@ -133,7 +136,7 @@ class ChatRPC(ChatProtocol):
     ) -> AsyncIterator[chat_pb2.ChatEvent]:
         user = await require_user(ctx)
         text = request.text.strip()
-        if not text:
+        if not text and not request.upload_ids:
             yield error_event(CodexErrorCode.EMPTY_TEXT, "text is required")
             return
 
@@ -363,18 +366,25 @@ async def _prepare_run_turn(
     if request.HasField("chat_id") and request.chat_id != chat_id:
         raise ConnectError(Code.NOT_FOUND, f"chat {request.chat_id} not found")
 
-    data_urls, image_ids, audio_ids = await resolve_uploads(
-        list(request.upload_ids), user_id=user_pk
+    data_urls, image_ids, audio_ids, file_paths, file_ids = await resolve_uploads(
+        list(request.upload_ids), user_id=user_pk, chat_id=chat_id
     )
+    if not text and (data_urls or file_paths):
+        text = "Open the attached files and answer based on them."
+    mentions = workspace_uploads.format_mentions(file_paths)
+    if mentions:
+        text = f"{text}\n\n{mentions}" if text else mentions
     return _PreparedRunTurn(
         chat_id=chat_id,
         user_id=user_pk,
         text=text,
-        data_urls=tuple(data_urls),
+        data_urls=data_urls,
         image_ids=image_ids,
         audio_ids=audio_ids,
+        file_paths=file_paths,
+        file_ids=file_ids,
         voice_reply=bool(audio_ids),
-        has_uploads=bool(data_urls) or bool(audio_ids),
+        has_uploads=bool(data_urls or file_paths or audio_ids),
         sidecar=SidecarName.ADMIN,
         client_id=request.client_id or None,
     )
@@ -531,6 +541,7 @@ async def _create_web_turn(
                 "turn_id": turn.id,
                 "text_len": len(prepared.text),
                 "attachments": len(prepared.data_urls),
+                "files": len(prepared.file_paths),
             },
         )
         await db.commit()
@@ -543,6 +554,8 @@ def _user_message_meta(prepared: _PreparedRunTurn) -> dict[str, Any] | None:
         meta["upload_ids"] = prepared.image_ids
     if prepared.audio_ids:
         meta["audio_upload_ids"] = prepared.audio_ids
+    if prepared.file_ids:
+        meta["file_upload_ids"] = prepared.file_ids
     return meta or None
 
 

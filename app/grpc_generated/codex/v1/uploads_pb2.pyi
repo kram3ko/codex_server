@@ -61,12 +61,14 @@ class GetPresignedRequest(_message.Message):
     def __init__(self, upload_id: _Optional[int] = ..., ttl_seconds: _Optional[int] = ...) -> None: ...
 
 class GetPresignedResponse(_message.Message):
-    __slots__ = ("url", "expires_at")
+    __slots__ = ("url", "expires_at", "upload")
     URL_FIELD_NUMBER: _ClassVar[int]
     EXPIRES_AT_FIELD_NUMBER: _ClassVar[int]
+    UPLOAD_FIELD_NUMBER: _ClassVar[int]
     url: str
     expires_at: _timestamp_pb2.Timestamp
-    def __init__(self, url: _Optional[str] = ..., expires_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    upload: Upload
+    def __init__(self, url: _Optional[str] = ..., expires_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., upload: _Optional[_Union[Upload, _Mapping]] = ...) -> None: ...
 
 class ListUploadsRequest(_message.Message):
     __slots__ = ("chat_id", "pagination")

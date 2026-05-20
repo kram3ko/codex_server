@@ -48,6 +48,7 @@ message GetPresignedRequest {
 message GetPresignedResponse {
   string url = 1;
   google.protobuf.Timestamp expires_at = 2;
+  Upload upload = 3;  // metadata для UI (filename / mime / size) без extra round-trip
 }
 
 message ListUploadsRequest {
