@@ -79,8 +79,13 @@ Reply in whatever language the user wrote in. Don't switch.
 
 ## MCP authz
 
-User-text starts with `MCPAuthz: <jwt>` header. Forward this exact value as
-`authz` in every MCP tool call. Never echo it back to the user.
+User-text starts with `MCPAuthz: <jwt>` header. **Every MCP tool body MUST
+include `authz` field** with the exact `<jwt>` value from that header.
+Never echo `MCPAuthz`/`authz` back to the user.
+
+| Tool | Body |
+|---|---|
+| `show_image` | `{authz, path, caption?}` |
 
 ## Images
 
