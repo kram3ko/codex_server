@@ -1,4 +1,4 @@
-"""Resolve upload_ids → (codex-input data URIs, image_ids, audio_ids, file_paths, file_ids).
+"""Resolve upload_ids → typed bundle for codex-input.
 
 Codex отримує image data URIs inline (його `url` форвардиться у OpenAI, де
 Docker-internal MinIO unreachable). Audio з codex-input виключений — transcript
@@ -13,9 +13,22 @@ from io import BytesIO
 
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.base import SessionLocal
 from app.services.uploads.default import upload_service, workspace_uploads
+
+
+class ResolvedUploads(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    image_urls: tuple[str, ...] = Field(description="Inline `data:` URIs для зображень.")
+    image_ids: tuple[int, ...] = Field(description="DB upload ids зображень.")
+    audio_ids: tuple[int, ...] = Field(description="DB upload ids аудіо (transcript у text).")
+    file_paths: tuple[str, ...] = Field(
+        description="Workspace-relative paths не-image файлів для shell-доступу Codex'у."
+    )
+    file_ids: tuple[int, ...] = Field(description="DB upload ids не-image файлів.")
 
 
 async def resolve_uploads(
@@ -23,10 +36,11 @@ async def resolve_uploads(
     *,
     user_id: int,
     chat_id: int,
-) -> tuple[tuple[str, ...], list[int], list[int], tuple[str, ...], list[int]]:
-    """Returns ``(image_data_uris, image_ids, audio_ids, file_paths, file_ids)``."""
+) -> ResolvedUploads:
     if not upload_ids:
-        return (), [], [], (), []
+        return ResolvedUploads(
+            image_urls=(), image_ids=(), audio_ids=(), file_paths=(), file_ids=()
+        )
     urls: list[str] = []
     image_ids: list[int] = []
     audio_ids: list[int] = []
@@ -56,4 +70,10 @@ async def resolve_uploads(
             )
             file_paths.append(path)
             file_ids.append(uid)
-    return tuple(urls), image_ids, audio_ids, tuple(file_paths), file_ids
+    return ResolvedUploads(
+        image_urls=tuple(urls),
+        image_ids=tuple(image_ids),
+        audio_ids=tuple(audio_ids),
+        file_paths=tuple(file_paths),
+        file_ids=tuple(file_ids),
+    )

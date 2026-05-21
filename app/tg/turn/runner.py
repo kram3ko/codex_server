@@ -328,7 +328,8 @@ async def _handle_active_tg_turn(
     try:
         interrupted = await codex_remote.send_interrupt_turn_id(
             is_admin_sidecar,
-            active.codex_turn_id,
+            thread_id=active.codex_thread_id,
+            turn_id=active.codex_turn_id,
         )
     except _STEER_RPC_ERRORS as exc:
         log.warning("tg_inline_interrupt_rpc_failed", error=str(exc))

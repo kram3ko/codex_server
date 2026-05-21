@@ -30,17 +30,23 @@ class CodexTurnTerminal(Exception):
         super().__init__(f"codex turn terminal: {status.value}")
 
 
-async def interrupt_best_effort(
-    client: CodexClient, *, reason: str, turn_id: str | None = None
-) -> None:
-    """Best-effort interrupt: ловить всі винятки, логує. `client.interrupt`
-    сам логує AppServerError; тут — катчимо network/timeout/etc."""
+async def interrupt_best_effort(client: CodexClient, *, reason: str) -> None:
+    """Best-effort interrupt по live-state клієнта (active turn у тому ж WS).
+
+    Catches network/timeout/etc — `client.interrupt` сам логує AppServerError.
+    Якщо thread/turn ще не виставлені (виклик до того як sidecar відповів на
+    `turn/start`) — нічого не шлемо."""
+    thread_id = client.current_thread_id
+    turn_id = client.current_turn_id
+    if not thread_id or not turn_id:
+        return
     try:
-        await client.interrupt(turn_id=turn_id)
+        await client.interrupt(thread_id=thread_id, turn_id=turn_id)
     except Exception as exc:
         log.warning(
             "codex_interrupt_best_effort_failed",
             reason=reason,
+            thread_id=thread_id,
             turn_id=turn_id,
             error=str(exc),
             exc_type=type(exc).__name__,

@@ -30,7 +30,7 @@ from app.rpc._auth import require_user
 from app.rpc._mappers import chat_to_pb, message_to_pb
 from app.rpc.chat.guards import load_chat_owned, resolve_limit
 from app.rpc.chat.mappers import codex_usage_to_pb, error_event
-from app.rpc.chat.uploads import resolve_uploads
+from app.rpc.chat.uploads import ResolvedUploads, resolve_uploads
 from app.services import rate_limit
 from app.services.cache.default import cache
 from app.services.chats.default import chat_service
@@ -65,11 +65,7 @@ class _PreparedRunTurn:
     chat_id: int
     user_id: int
     text: str
-    data_urls: tuple[str, ...]
-    image_ids: list[int]
-    audio_ids: list[int]
-    file_paths: tuple[str, ...]
-    file_ids: list[int]
+    uploads: ResolvedUploads
     voice_reply: bool
     has_uploads: bool
     sidecar: SidecarName
@@ -239,7 +235,8 @@ class ChatRPC(ChatProtocol):
         try:
             await codex_remote.send_interrupt_turn_id(
                 SidecarName.normalize(active.sidecar) is SidecarName.ADMIN,
-                active.codex_turn_id,
+                thread_id=active.codex_thread_id,
+                turn_id=active.codex_turn_id,
             )
         except StaleSidecarTurnError as exc:
             await _handle_stale_turn(chat.id, active, exc)
@@ -366,25 +363,19 @@ async def _prepare_run_turn(
     if request.HasField("chat_id") and request.chat_id != chat_id:
         raise ConnectError(Code.NOT_FOUND, f"chat {request.chat_id} not found")
 
-    data_urls, image_ids, audio_ids, file_paths, file_ids = await resolve_uploads(
-        list(request.upload_ids), user_id=user_pk, chat_id=chat_id
-    )
-    if not text and (data_urls or file_paths):
+    uploads = await resolve_uploads(list(request.upload_ids), user_id=user_pk, chat_id=chat_id)
+    if not text and (uploads.image_urls or uploads.file_paths):
         text = "Open the attached files and answer based on them."
-    mentions = workspace_uploads.format_mentions(file_paths)
+    mentions = workspace_uploads.format_mentions(uploads.file_paths)
     if mentions:
         text = f"{text}\n\n{mentions}" if text else mentions
     return _PreparedRunTurn(
         chat_id=chat_id,
         user_id=user_pk,
         text=text,
-        data_urls=data_urls,
-        image_ids=image_ids,
-        audio_ids=audio_ids,
-        file_paths=file_paths,
-        file_ids=file_ids,
-        voice_reply=bool(audio_ids),
-        has_uploads=bool(data_urls or file_paths or audio_ids),
+        uploads=uploads,
+        voice_reply=bool(uploads.audio_ids),
+        has_uploads=bool(uploads.image_urls or uploads.file_paths or uploads.audio_ids),
         sidecar=SidecarName.ADMIN,
         client_id=request.client_id or None,
     )
@@ -486,7 +477,9 @@ async def _try_interrupt_active_turn(
     assert active.codex_turn_id is not None  # caller-narrowed
     try:
         interrupted = await codex_remote.send_interrupt_turn_id(
-            SidecarName.normalize(active.sidecar) is SidecarName.ADMIN, active.codex_turn_id
+            SidecarName.normalize(active.sidecar) is SidecarName.ADMIN,
+            thread_id=active.codex_thread_id,
+            turn_id=active.codex_turn_id,
         )
         return interrupted, None
     except StaleSidecarTurnError as exc:
@@ -540,8 +533,8 @@ async def _create_web_turn(
             payload={
                 "turn_id": turn.id,
                 "text_len": len(prepared.text),
-                "attachments": len(prepared.data_urls),
-                "files": len(prepared.file_paths),
+                "attachments": len(prepared.uploads.image_urls),
+                "files": len(prepared.uploads.file_paths),
             },
         )
         await db.commit()
@@ -550,12 +543,12 @@ async def _create_web_turn(
 
 def _user_message_meta(prepared: _PreparedRunTurn) -> dict[str, Any] | None:
     meta: dict[str, Any] = {}
-    if prepared.image_ids:
-        meta["upload_ids"] = prepared.image_ids
-    if prepared.audio_ids:
-        meta["audio_upload_ids"] = prepared.audio_ids
-    if prepared.file_ids:
-        meta["file_upload_ids"] = prepared.file_ids
+    if prepared.uploads.image_ids:
+        meta["upload_ids"] = list(prepared.uploads.image_ids)
+    if prepared.uploads.audio_ids:
+        meta["audio_upload_ids"] = list(prepared.uploads.audio_ids)
+    if prepared.uploads.file_ids:
+        meta["file_upload_ids"] = list(prepared.uploads.file_ids)
     return meta or None
 
 
@@ -567,7 +560,7 @@ async def _enqueue_turn(
         await execute_turn.kiq(
             turn.id,
             text=prepared.text,
-            image_urls=list(prepared.data_urls),
+            image_urls=list(prepared.uploads.image_urls),
             voice_reply=prepared.voice_reply,
             client_id=prepared.client_id,
         )
@@ -609,7 +602,9 @@ async def _handle_stale_turn(
     )
     with contextlib.suppress(Exception):
         await codex_remote.send_interrupt_turn_id(
-            SidecarName.normalize(turn.sidecar) is SidecarName.ADMIN, exc.actual_turn_id
+            SidecarName.normalize(turn.sidecar) is SidecarName.ADMIN,
+            thread_id=turn.codex_thread_id,
+            turn_id=exc.actual_turn_id,
         )
     await quarantine_thread(turn.codex_thread_id)
     async with SessionLocal() as db:

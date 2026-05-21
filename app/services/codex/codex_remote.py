@@ -86,10 +86,22 @@ async def consume_steer(chat_id: int, codex_turn_id: str | None) -> bool:
         return False
 
 
-async def send_interrupt_turn_id(is_admin: bool, codex_turn_id: str) -> bool:
-    """Best-effort interrupt by sidecar-reported turn id."""
+async def send_interrupt_turn_id(
+    is_admin: bool,
+    *,
+    thread_id: str | None,
+    turn_id: str,
+) -> bool:
+    """Best-effort interrupt by sidecar-reported turn id.
+
+    Skip-and-log коли thread_id ще None (turn у STARTING, `mark_started`
+    не виконався) — sidecar нічого не знає про цей turn, interrupt no-op.
+    """
+    if thread_id is None:
+        log.info("codex_remote_interrupt_skipped_no_thread", turn_id=turn_id)
+        return False
     async with _one_shot_client(is_admin) as client:
-        return await client.interrupt(turn_id=codex_turn_id)
+        return await client.interrupt(thread_id=thread_id, turn_id=turn_id)
 
 
 async def send_steer_by_ids(

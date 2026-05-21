@@ -26,6 +26,7 @@ from app.services.codex.runner import quarantine_thread
 from app.services.codex.sidecar import SidecarName
 from app.services.codex_usage import poller as usage_poller
 from app.services.events.default import event_service
+from app.services.mcp_authz import inject_authz
 from app.services.sessions.store import ChatSession
 from app.services.turns.default import turn_service
 from app.services.turns.probe import (
@@ -83,8 +84,14 @@ async def stream_turn(
     async def _on_usage_signal() -> None:
         usage_poller.schedule_refresh(sidecar)
 
-    stream = client.run_turn(
+    authz_text = inject_authz(
         prepared.text,
+        user_id=session.db_user_id,
+        chat_id=session.db_chat_id,
+        sidecar=sidecar,
+    )
+    stream = client.run_turn(
+        authz_text,
         attachments=prepared.attachments,
         on_started=_on_started,
         idle_s=settings.TG_TURN_TIMEOUT_SECONDS,
