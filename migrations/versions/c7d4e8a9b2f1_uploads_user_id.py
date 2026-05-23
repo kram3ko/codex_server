@@ -19,10 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.execute("DELETE FROM uploads WHERE chat_id IS NULL")
     op.add_column("uploads", sa.Column("user_id", sa.BigInteger(), nullable=True))
-    op.execute(
-        "UPDATE uploads SET user_id = c.user_id "
-        "FROM chats c WHERE uploads.chat_id = c.id"
-    )
+    op.execute("UPDATE uploads SET user_id = c.user_id FROM chats c WHERE uploads.chat_id = c.id")
     op.execute("DELETE FROM uploads WHERE user_id IS NULL")
     op.alter_column("uploads", "user_id", nullable=False)
     op.create_foreign_key(

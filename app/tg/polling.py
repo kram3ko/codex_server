@@ -143,9 +143,7 @@ class PollingMode:
             await self._dispatcher.stop_polling()
         self._polling_task = None
         self._lock_renew_task = None
-        self._lock_wait_task = asyncio.create_task(
-            self._wait_for_lock(), name="tg_polling_wait"
-        )
+        self._lock_wait_task = asyncio.create_task(self._wait_for_lock(), name="tg_polling_wait")
 
     async def _release_lock(self) -> None:
         token = self._lock_token
