@@ -20,6 +20,8 @@ Never echo `MCPAuthz`/`authz` back to the user.
 | Tool | Body |
 |---|---|
 | `show_image` | `{authz, path, caption?}` |
+| `list_errors` | `{authz, project_slug?, limit?}` |
+| `get_error` | `{authz, issue_id}` |
 
 ## Images
 

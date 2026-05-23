@@ -43,6 +43,8 @@ from app.services.codex.transport import AppServerError
 from app.services.codex_usage import poller as usage_poller
 from app.services.events.default import event_service
 from app.services.messages.default import message_service
+from app.services.turns import lease as turn_lease
+from app.services.turns import locks
 from app.services.turns.default import turn_service, turn_stream
 from app.services.turns.recovery import reconcile_if_stale
 from app.services.turns.schemas import TurnCreate, TurnRow
@@ -385,6 +387,30 @@ async def _handle_active_turn(prepared: _PreparedRunTurn) -> chat_pb2.ChatEvent 
     async with SessionLocal() as db:
         active = await turn_service.get_active_for_chat(db, prepared.chat_id)
     if active is not None and await reconcile_if_stale(active):
+        active = None
+    # Lease missing → worker мертвий, але DB heartbeat міг бути освіжений
+    # минулим steer (zombie). Inline finalize, не чекати TTL expiry event —
+    # юзер одразу зможе створити новий turn без BUSY-loop.
+    # ВАЖЛИВО: тільки для turn'ів які ВЖЕ зробили codex-handshake. Для свіжо
+    # створеного STARTING (`codex_turn_id is None`) lease ще не acquire-нутий
+    # worker-ом — це нормальне race window, не zombie. Pending-конфлікт нижче
+    # обробляє цей випадок окремо.
+    if (
+        active is not None
+        and active.codex_turn_id is not None
+        and not await turn_lease.exists(active.id)
+    ):
+        log.warning("turn_zombie_no_lease", chat_id=prepared.chat_id, turn_id=active.id)
+        async with SessionLocal() as db:
+            await turn_service.finalize_once(
+                db,
+                active.id,
+                TurnStatus.FAILED,
+                error_code="lease_expired",
+                error_detail="worker lease missing — runner dead",
+            )
+            await db.commit()
+        await locks.release_active(active.chat_id, active.id)
         active = None
     if active is None:
         return None

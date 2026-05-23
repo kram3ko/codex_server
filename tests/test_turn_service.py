@@ -52,6 +52,7 @@ class _FakeSession:
         rowcount: int = 0,
         get_row: Any = None,
         rows: Iterable | None = None,
+        scalar: Any = None,
     ) -> None:
         self.added: list = []
         self.flushed = 0
@@ -59,6 +60,7 @@ class _FakeSession:
         self._rowcount = rowcount
         self._get_row = get_row
         self._rows = rows
+        self._scalar = scalar
 
     def add(self, obj: Any) -> None:
         # SQLAlchemy ORM зазвичай заповнює `id` після flush; для тесту назначаємо
@@ -72,7 +74,7 @@ class _FakeSession:
 
     async def execute(self, statement: Any) -> _Result:
         self.executed.append(statement)
-        return _Result(rowcount=self._rowcount, all_rows=self._rows)
+        return _Result(rowcount=self._rowcount, scalar=self._scalar, all_rows=self._rows)
 
     async def get(self, _entity: Any, _pk: Any) -> Any:
         return self._get_row
@@ -199,13 +201,7 @@ async def test_get_active_for_chat_filters_by_live_statuses() -> None:
         created_at=now,
         updated_at=now,
     )
-    session = _FakeSession(get_row=None)
-
-    async def execute(statement: Any) -> _Result:
-        session.executed.append(statement)
-        return _Result(scalar=live)
-
-    session.execute = execute  # type: ignore[assignment]
+    session = _FakeSession(get_row=None, scalar=live)
     service = TurnService()
 
     found = await service.get_active_for_chat(session, 1)
