@@ -13,6 +13,7 @@ Redis emit'ить keyspace `expired` event, listener finalize-ить turn у Б�
 import os
 import socket
 import uuid
+from typing import Any, cast
 
 from redis.exceptions import RedisError
 
@@ -40,6 +41,14 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then
 end
 return 0
 """
+
+
+async def _eval(script: str, num_keys: int, *args: Any) -> Any:
+    """Async-typed EVAL wrapper. `redis.asyncio.Redis.eval` має ResponseT
+    union (`Awaitable[T] | T`) у stubs, через що pyright бачить sync-overload
+    і скаржиться `str not awaitable`. Тут точково кастуємо до `Awaitable`."""
+    return await cast("Any", cache.eval(script, num_keys, *args))
+
 
 # Per-process registry активних lease-ів. SIGTERM-handler у `app.worker` обходить
 # цей set і робить graceful release — інакше при rebuild/restart worker-а
@@ -77,7 +86,7 @@ async def acquire(turn_id: int, holder: str, ttl: int = LEASE_TTL_S) -> bool:
 
 async def refresh(turn_id: int, holder: str, ttl: int = LEASE_TTL_S) -> bool:
     try:
-        result = await cache.eval(_REFRESH_LUA, 1, lease_key(turn_id), holder, ttl)
+        result = await _eval(_REFRESH_LUA, 1, lease_key(turn_id), holder, ttl)
     except RedisError:
         return False
     return bool(result)
@@ -86,7 +95,7 @@ async def refresh(turn_id: int, holder: str, ttl: int = LEASE_TTL_S) -> bool:
 async def release(turn_id: int, holder: str) -> bool:
     _ACTIVE_LEASES.discard((turn_id, holder))
     try:
-        result = await cache.eval(_RELEASE_LUA, 1, lease_key(turn_id), holder)
+        result = await _eval(_RELEASE_LUA, 1, lease_key(turn_id), holder)
     except RedisError:
         return False
     return bool(result)
@@ -100,7 +109,7 @@ async def release_all_local() -> int:
     released = 0
     for turn_id, holder in snapshot:
         try:
-            result = await cache.eval(_RELEASE_LUA, 1, lease_key(turn_id), holder)
+            result = await _eval(_RELEASE_LUA, 1, lease_key(turn_id), holder)
         except RedisError:
             continue
         if result:
@@ -137,7 +146,7 @@ async def acquire_leader(name: str, holder: str, ttl: int = LEADER_TTL_S) -> boo
 
 async def refresh_leader(name: str, holder: str, ttl: int = LEADER_TTL_S) -> bool:
     try:
-        result = await cache.eval(_REFRESH_LUA, 1, leader_key(name), holder, ttl)
+        result = await _eval(_REFRESH_LUA, 1, leader_key(name), holder, ttl)
     except RedisError:
         return False
     return bool(result)
@@ -145,7 +154,7 @@ async def refresh_leader(name: str, holder: str, ttl: int = LEADER_TTL_S) -> boo
 
 async def release_leader(name: str, holder: str) -> bool:
     try:
-        result = await cache.eval(_RELEASE_LUA, 1, leader_key(name), holder)
+        result = await _eval(_RELEASE_LUA, 1, leader_key(name), holder)
     except RedisError:
         return False
     return bool(result)

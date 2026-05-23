@@ -35,10 +35,15 @@ _HEARTBEAT_INTERVAL_S = 10.0
 
 
 async def heartbeat_loop(
-    turn_id: int, chat_id: int, holder: str, ownership_lost: asyncio.Event
+    turn_id: int,
+    chat_id: int,
+    holder: str | None = None,
+    ownership_lost: asyncio.Event | None = None,
 ) -> None:
-    """CAS-refresh False = ownership lost → set event + exit. Main runner
-    loop перевіряє `ownership_lost` між stream-events і виходить з FAILED.
+    """CAS-refresh False = ownership lost → set event + exit. Web runner
+    main loop перевіряє `ownership_lost` між stream-events. TG runner
+    зараз без lease — викликає з `holder=None`, lease refresh скіпається.
+
     Не cancel'ємо main task напряму — `CancelledError` помітив би це як
     user-cancel і поставив CANCELLED замість FAILED."""
     while True:
@@ -51,15 +56,18 @@ async def heartbeat_loop(
             await db.commit()
         if not owned:
             log.warning("turn_heartbeat_ownership_lost", turn_id=turn_id)
-            ownership_lost.set()
+            if ownership_lost is not None:
+                ownership_lost.set()
             return
         if not await locks.heartbeat_active(chat_id, turn_id):
             log.warning("turn_active_lock_lost", turn_id=turn_id)
-            ownership_lost.set()
+            if ownership_lost is not None:
+                ownership_lost.set()
             return
-        if not await lease.refresh(turn_id, holder):
+        if holder is not None and not await lease.refresh(turn_id, holder):
             log.warning("turn_lease_lost", turn_id=turn_id)
-            ownership_lost.set()
+            if ownership_lost is not None:
+                ownership_lost.set()
             return
 
 
