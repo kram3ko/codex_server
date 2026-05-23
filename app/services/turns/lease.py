@@ -24,7 +24,8 @@ LEASE_KEY_PREFIX = "turn:lease:"
 # Per-process holder ID: hostname + pid + random suffix. gunicorn forks і
 # TaskIQ workers ділять hostname/pid-namespace, тому suffix обов'язковий
 # щоб lease ownership не плутався між sibling-процесами на одному host-і.
-_PROCESS_HOLDER_ID = f"{os.getenv('HOSTNAME') or socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+_HOST = os.getenv("HOSTNAME") or socket.gethostname()
+_PROCESS_HOLDER_ID = f"{_HOST}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 _REFRESH_LUA = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
