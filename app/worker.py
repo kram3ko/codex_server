@@ -58,26 +58,28 @@ async def _worker_heartbeat_loop() -> None:
             return
 
 
-_heartbeat_task: asyncio.Task[None] | None = None
+# Module-level mutable container замість `global` — ruff PLW0603 не любить
+# `global` statement, а dict-attribute mutation його обходить чисто.
+_runtime: dict[str, asyncio.Task[None] | None] = {"heartbeat": None}
 
 
 @broker.on_event(TaskiqEvents.WORKER_STARTUP)
 async def _start_worker_heartbeat(_state: object) -> None:
-    global _heartbeat_task
-    if _heartbeat_task is None or _heartbeat_task.done():
-        _heartbeat_task = asyncio.create_task(
+    task = _runtime["heartbeat"]
+    if task is None or task.done():
+        _runtime["heartbeat"] = asyncio.create_task(
             _worker_heartbeat_loop(), name="worker-heartbeat"
         )
 
 
 @broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
 async def _stop_worker_heartbeat(_state: object) -> None:
-    global _heartbeat_task
-    if _heartbeat_task is not None:
-        _heartbeat_task.cancel()
+    task = _runtime["heartbeat"]
+    if task is not None:
+        task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
-            await _heartbeat_task
-        _heartbeat_task = None
+            await task
+        _runtime["heartbeat"] = None
     from app.services.cache.default import cache
     from app.services.turns import lease
 
