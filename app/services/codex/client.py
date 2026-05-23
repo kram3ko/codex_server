@@ -200,6 +200,33 @@ class _TurnDiagnostics:
         return bool(self._active_items)
 
 
+class IdleDecision(StrEnum):
+    HARD_CAP_EXCEEDED = "hard_cap_exceeded"
+    NEEDS_PROBE = "needs_probe"
+    EXTEND_SILENTLY = "extend_silently"
+
+
+def decide_idle(
+    *,
+    now: float,
+    turn_started_at: float | None,
+    has_active_items: bool,
+    last_idle_probe_at: float | None,
+    hard_cap_s: float,
+    probe_interval_s: float,
+) -> IdleDecision:
+    """Pure idle-action policy. Testable без CodexClient instance."""
+    if turn_started_at is not None and now - turn_started_at >= hard_cap_s:
+        return IdleDecision.HARD_CAP_EXCEEDED
+    if not has_active_items:
+        return IdleDecision.NEEDS_PROBE
+    if last_idle_probe_at is None:
+        return IdleDecision.NEEDS_PROBE
+    if now - last_idle_probe_at >= probe_interval_s:
+        return IdleDecision.NEEDS_PROBE
+    return IdleDecision.EXTEND_SILENTLY
+
+
 class CodexClient:
     """One CodexClient = one Codex sidecar conversation (one turn)."""
 
@@ -215,24 +242,29 @@ class CodexClient:
         reasoning_effort: str | None = None,
         notification_queue_max: int | None = None,
         auth_token: str | None = None,
+        transport: AppServerClient | None = None,
     ) -> None:
         self._url = url
         self._cwd = cwd
         self._approval_policy = approval_policy
         self._sandbox = sandbox
         self._reasoning_effort = reasoning_effort
-        transport_kwargs: dict[str, Any] = {"url": url, "request_timeout": request_timeout}
-        if notification_queue_max is not None:
-            transport_kwargs["notification_queue_max"] = notification_queue_max
-        if auth_token is not None:
-            transport_kwargs["auth_token"] = auth_token
-        self._transport = AppServerClient(**transport_kwargs)
+        if transport is None:
+            transport_kwargs: dict[str, Any] = {"url": url, "request_timeout": request_timeout}
+            if notification_queue_max is not None:
+                transport_kwargs["notification_queue_max"] = notification_queue_max
+            if auth_token is not None:
+                transport_kwargs["auth_token"] = auth_token
+            transport = AppServerClient(**transport_kwargs)
+        self._transport = transport
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
         self._thread_resumed_or_started = False
         self._current_turn_id: str | None = None
         self._idle_s: float | None = None
         self._idle_deadline: float | None = None
+        self._turn_started_at: float | None = None
+        self._last_idle_probe_at: float | None = None
         self._turn_diagnostics: _TurnDiagnostics | None = None
         self._on_thread_change = on_thread_change
 
@@ -343,6 +375,8 @@ class CodexClient:
             thread_id=self._thread_id,
             turn_id=self._current_turn_id,
         )
+        self._turn_started_at = time.monotonic()
+        self._last_idle_probe_at = None
         try:
             if on_started is not None and self._thread_id is not None:
                 await on_started(self._current_turn_id, self._thread_id)
@@ -361,6 +395,8 @@ class CodexClient:
         finally:
             self._idle_s = None
             self._idle_deadline = None
+            self._turn_started_at = None
+            self._last_idle_probe_at = None
             # Не чистимо _current_turn_id — callers у власному finally читають його для CAS-drop.
 
     async def read_thread(
@@ -419,22 +455,31 @@ class CodexClient:
                 return status if isinstance(status, str) else None
         return None
 
-    async def interrupt(self, turn_id: str | None = None) -> bool:
-        """Send turn/interrupt. `turn_id` override → cross-worker interrupt
-        через координати з `turns` table, не з in-memory state."""
-        target = turn_id or self._current_turn_id
-        if not target:
-            return False
+    async def interrupt(self, *, thread_id: str, turn_id: str) -> bool:
+        """Send turn/interrupt. Caller завжди передає координати — з `turns`
+        row (cross-worker) або з `current_thread_id`/`current_turn_id` (live)."""
         try:
-            await self._transport.request(_Method.TURN_INTERRUPT, {"turnId": target})
+            await self._transport.request(
+                _Method.TURN_INTERRUPT,
+                {"threadId": thread_id, "turnId": turn_id},
+            )
         except AppServerError as exc:
             stale = _stale_sidecar_turn_error(exc)
             if stale is not None:
                 raise stale from exc
             if exc.code == -32601:
-                log.info("codex_interrupt_unsupported", turn_id=target)
+                log.info(
+                    "codex_interrupt_unsupported",
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                )
             else:
-                log.warning("codex_interrupt_failed", turn_id=target, code=exc.code)
+                log.warning(
+                    "codex_interrupt_failed",
+                    thread_id=thread_id,
+                    turn_id=turn_id,
+                    code=exc.code,
+                )
             return False
         return True
 
@@ -562,27 +607,41 @@ class CodexClient:
         self,
         on_idle: Callable[[], Awaitable[bool | None]] | None,
     ) -> bool:
-        """Idle hit — decide whether to extend.
+        """Idle hit — apply `decide_idle` policy.
 
-        Fast path: trust locally-tracked `_active_items` (sidecar already
-        acknowledged item/started без matching item/completed) → extend без
-        RPC. Queue policy drop-**oldest** зберігає терминальні події, тому
-        item/completed для in-flight tool-у не може загубитись через overflow.
-        Якщо sidecar помер — transport reader пушить sentinel у queue, наступний
-        `anext` raise-ить StopAsyncIteration → loop exits природньо.
-
-        Fallback: локально пусто → on_idle (зазвичай `probe_or_extend_idle`
-        робить thread/read до sidecar)."""
-        if self._turn_diagnostics is not None and self._turn_diagnostics.has_active_items():
-            self.extend_idle_deadline()
+        Захист від "tool-active = alive" anti-pattern (`openai/codex#4337`):
+        hard cap > rate-limited L2 probe > local fast path.
+        """
+        now = time.monotonic()
+        decision = decide_idle(
+            now=now,
+            turn_started_at=self._turn_started_at,
+            has_active_items=bool(
+                self._turn_diagnostics and self._turn_diagnostics.has_active_items()
+            ),
+            last_idle_probe_at=self._last_idle_probe_at,
+            hard_cap_s=settings.CODEX_TURN_HARD_TIMEOUT_S,
+            probe_interval_s=settings.CODEX_IDLE_PROBE_INTERVAL_S,
+        )
+        if decision is IdleDecision.HARD_CAP_EXCEEDED:
+            log.warning(
+                "codex_turn_hard_cap_exceeded",
+                elapsed_s=now - (self._turn_started_at or 0),
+                cap_s=settings.CODEX_TURN_HARD_TIMEOUT_S,
+            )
+            return False
+        if decision is IdleDecision.NEEDS_PROBE:
+            if on_idle is None:
+                return False
+            self._last_idle_probe_at = now
+            return bool(await on_idle())
+        self.extend_idle_deadline()
+        if self._turn_diagnostics is not None:
             log.debug(
                 "codex_idle_extended_via_local_state",
                 **self._turn_diagnostics.snapshot(self._transport),
             )
-            return True
-        if on_idle is None:
-            return False
-        return bool(await on_idle())
+        return True
 
     def _is_stale_turn_note(self, note: Notification) -> bool:
         return (

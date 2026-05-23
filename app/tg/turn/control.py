@@ -24,7 +24,8 @@ async def cancel_turn(session: ChatSession) -> bool:
         with contextlib.suppress(Exception):
             await codex_remote.send_interrupt_turn_id(
                 SidecarName.normalize(active.sidecar) is SidecarName.ADMIN,
-                active.codex_turn_id,
+                thread_id=active.codex_thread_id,
+                turn_id=active.codex_turn_id,
             )
     if not await cancel_session_turn(session):
         return False

@@ -104,7 +104,8 @@ RPC server stream → HTTP/2 flow-control. Stream має TTL `TURN_STREAM_TTL_S=
   `note_steer(chat_id, codex_turn_id)` (idle-watchdog keepalive) +
   `bump_steer_count(turn_id)` (INCR-counter для stream-loop cut-segment
   boundary).
-- `send_interrupt_turn_id(is_admin, codex_turn_id)` — `turn/interrupt`.
+- `send_interrupt_turn_id(is_admin, *, thread_id, turn_id)` — `turn/interrupt`
+  (no-op if `thread_id` is None — turn у STARTING без sidecar acknowledge).
 - `consume_steer(chat_id, codex_turn_id)` — owner-worker idle-handler споживає
   keepalive щоб не вбити turn посеред steer-додатку.
 - `peek_steer_count(turn_id)` — stream-loop polling boundary signal.

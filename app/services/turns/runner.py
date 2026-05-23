@@ -19,7 +19,7 @@ from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
 from app.services.codex.sidecar import SidecarName
 from app.services.codex_usage import poller as usage_poller
-from app.services.turns import locks
+from app.services.turns import lease, locks
 from app.services.turns.default import turn_service, turn_stream
 from app.services.turns.locks import LockAcquireOutcome
 from app.services.users.default import user_service
@@ -34,8 +34,13 @@ log = structlog.get_logger(__name__)
 _HEARTBEAT_INTERVAL_S = 10.0
 
 
-async def heartbeat_loop(turn_id: int, chat_id: int) -> None:
-    """CAS-refresh False = ownership lost → loop exits; runner ловить далі."""
+async def heartbeat_loop(
+    turn_id: int, chat_id: int, holder: str, ownership_lost: asyncio.Event
+) -> None:
+    """CAS-refresh False = ownership lost → set event + exit. Main runner
+    loop перевіряє `ownership_lost` між stream-events і виходить з FAILED.
+    Не cancel'ємо main task напряму — `CancelledError` помітив би це як
+    user-cancel і поставив CANCELLED замість FAILED."""
     while True:
         try:
             await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
@@ -46,9 +51,15 @@ async def heartbeat_loop(turn_id: int, chat_id: int) -> None:
             await db.commit()
         if not owned:
             log.warning("turn_heartbeat_ownership_lost", turn_id=turn_id)
+            ownership_lost.set()
             return
         if not await locks.heartbeat_active(chat_id, turn_id):
             log.warning("turn_active_lock_lost", turn_id=turn_id)
+            ownership_lost.set()
+            return
+        if not await lease.refresh(turn_id, holder):
+            log.warning("turn_lease_lost", turn_id=turn_id)
+            ownership_lost.set()
             return
 
 
@@ -88,6 +99,8 @@ async def execute_turn_inner(
     terminal_published = False
     redelivery_skip = False
     heartbeat_task: asyncio.Task[None] | None = None
+    lease_holder: str | None = None
+    ownership_lost = asyncio.Event()
 
     from app.rpc.chat.stream import stream_turn
 
@@ -105,8 +118,18 @@ async def execute_turn_inner(
                 )
                 return
 
+            holder = lease.worker_id()
+            if not await lease.acquire(turn_id, holder):
+                # Інший worker-процес уже тримає lease на цей turn — TaskIQ
+                # at-least-once redelivery або race. Не стартуємо паралельну
+                # роботу, не finalize-имо (власник сам закриє); locks teardown
+                # context manager release-не active lock автоматично.
+                log.warning("turn_lease_acquire_lost", turn_id=turn_id, holder=holder)
+                redelivery_skip = True
+                return
+            lease_holder = holder
             heartbeat_task = asyncio.create_task(
-                heartbeat_loop(turn_id, chat_id),
+                heartbeat_loop(turn_id, chat_id, holder, ownership_lost),
                 name=f"turn-heartbeat:{turn_id}",
             )
 
@@ -125,6 +148,16 @@ async def execute_turn_inner(
                     turn_id=turn_id,
                     sidecar=sidecar,
                 ):
+                    if ownership_lost.is_set():
+                        # Heartbeat-loop потрапив на CAS-fail (DB/Redis lock/lease).
+                        # Recovery або інший runner уже забрали turn — не пишемо
+                        # подальші події, finalize як FAILED без race-write.
+                        terminal_status = TurnStatus.FAILED
+                        terminal_error = (
+                            "ownership_lost",
+                            "heartbeat/lease CAS failed mid-stream",
+                        )
+                        break
                     event.event_id = await turn_stream.publish(turn_id, event)
                     async with SessionLocal() as db:
                         await turn_service.update_last_event(db, turn_id, event.event_id)
@@ -166,6 +199,8 @@ async def execute_turn_inner(
                 pass
             except Exception:
                 log.exception("turn_heartbeat_task_failed", turn_id=turn_id)
+            if lease_holder is not None:
+                await lease.release(turn_id, lease_holder)
 
         # Cancelled/redelivery skip-аємо: browser-cancel сам сигнал, owner finalize.
         if not terminal_published and not cancelled and not redelivery_skip:

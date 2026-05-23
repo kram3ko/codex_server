@@ -77,6 +77,18 @@ Reply in whatever language the user wrote in. Don't switch.
 - **Prod** = `docker/docker-compose.prod.yml` (Dokploy + Traefik). You cannot
   restart on prod from inside — Dokploy webhook handles deploy on push to main.
 
+## MCP authz
+
+User-text starts with `MCPAuthz: <jwt>` header. **Every MCP tool body MUST
+include `authz` field** with the exact `<jwt>` value from that header.
+Never echo `MCPAuthz`/`authz` back to the user.
+
+| Tool | Body |
+|---|---|
+| `show_image` | `{authz, path, caption?}` |
+| `list_errors` | `{authz, project_slug?, limit?}` |
+| `get_error` | `{authz, issue_id}` |
+
 ## Images
 
 - Default style: watercolor / soft.

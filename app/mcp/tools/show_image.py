@@ -13,11 +13,22 @@ from pydantic import Field
 
 from app.mcp.core import mcp
 from app.mcp.schemas.show_image import ImageDelivery
+from app.services.mcp_authz import McpAuthzError, verify_authz
 from app.utils.paths import resolve_trusted_local_path
 
 
 @mcp.tool(name="show_image")
 async def show_image(
+    *,
+    authz: Annotated[
+        str | None,
+        Field(
+            description=(
+                "JWT з prompt-header `MCPAuthz: <token>` — обов'язково форвардити "
+                "точне значення з останнього header line. Без нього виклик відхиляється."
+            ),
+        ),
+    ] = None,
     path: Annotated[
         str,
         Field(
@@ -41,6 +52,12 @@ async def show_image(
     saves tokens, gives the exact image. Never paste markdown ![](...) or
     raw paths in reply text.
     """
+    if not authz:
+        raise ToolError("authz required: forward `MCPAuthz: <jwt>` header from prompt")
+    try:
+        verify_authz(authz)
+    except McpAuthzError as exc:
+        raise ToolError(str(exc)) from exc
     local_path = resolve_trusted_local_path(path)
     if local_path is None:
         raise ToolError(f"file_not_found_or_untrusted: {path}")

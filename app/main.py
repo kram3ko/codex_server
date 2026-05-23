@@ -70,7 +70,7 @@ from app.services.auth.default import auth_service
 from app.services.cache.default import cache
 from app.services.codex_usage.poller import bootstrap_usage, drain_bg_tasks
 from app.services.errors.default import bugsink_client
-from app.services.turns.recovery import reconcile_stale_turns
+from app.services.turns.recovery import lease_expired_listener, reconcile_stale_turns
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
 
@@ -89,10 +89,19 @@ async def lifespan(_app: FastAPI):
             log.info("app_startup_stale_turns_finalized", count=stale)
         await tg_bot_service.start()
         usage_bootstrap = bootstrap_usage()
+        lease_listener_stop = asyncio.Event()
+        lease_listener_task = asyncio.create_task(
+            lease_expired_listener(lease_listener_stop),
+            name="lease-expired-listener",
+        )
         try:
             yield
         finally:
             log.info("app_shutdown")
+            lease_listener_stop.set()
+            lease_listener_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await lease_listener_task
             if not usage_bootstrap.done():
                 usage_bootstrap.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
