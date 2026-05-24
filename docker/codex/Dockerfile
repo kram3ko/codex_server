@@ -1,6 +1,5 @@
 FROM alpine:3.20
 
-ARG CODEX_VERSION=0.132.0
 ARG TARGETARCH
 
 RUN set -eux \
@@ -30,7 +29,7 @@ RUN set -eux \
         amd64) CODEX_ARCH=x86_64-unknown-linux-musl ;; \
         *) echo "Unsupported arch: ${TARGETARCH}"; exit 1 ;; \
     esac \
- && curl -fsSL "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-${CODEX_ARCH}.tar.gz" -o /tmp/codex.tar.gz \
+ && curl -fsSL "https://github.com/openai/codex/releases/latest/download/codex-${CODEX_ARCH}.tar.gz" -o /tmp/codex.tar.gz \
  && tar -xzf /tmp/codex.tar.gz -C /tmp \
  && mv "/tmp/codex-${CODEX_ARCH}" /usr/local/bin/codex \
  && chmod +x /usr/local/bin/codex \

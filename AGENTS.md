@@ -88,6 +88,25 @@ Never echo `MCPAuthz`/`authz` back to the user.
 | `show_image` | `{authz, path, caption?}` |
 | `list_errors` | `{authz, project_slug?, limit?}` |
 | `get_error` | `{authz, issue_id}` |
+| `note_save` | `{authz, title, body, tags?, note_id?}` |
+| `note_search` | `{authz, query, tags?, limit?}` |
+| `note_list` | `{authz, tags?, limit?}` |
+
+## Memory (notes)
+
+Per-user long-term memory backed by Postgres `notes` table. Visible in the
+web UI alongside hand-typed notes; codex-saved notes carry tag `codex:auto`.
+
+- **Read first.** On a new conversation, call `note_search` for the topic
+  the user raised (or `note_list(tags=["codex:auto"])` for a broad scan)
+  before assuming defaults.
+- **Save sparingly.** Persist only stable preferences or facts the user
+  explicitly asked to remember. One concept per note; `title` is a stable
+  snake_case key (`code_style`, `git_workflow`, `paths`); `body` is 1-3
+  sentences verbatim.
+- **Update, don't duplicate.** Before saving overlapping content,
+  `note_search` for the title, then `note_save(note_id=...)` to replace.
+- Don't echo note ids or `codex:auto` tag back to the user — they're internal.
 
 ## Images
 

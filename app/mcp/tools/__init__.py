@@ -4,4 +4,5 @@
 re-export per PEP 484 (linter знає що це навмисно)."""
 
 from app.mcp.tools import errors as errors
+from app.mcp.tools import notes as notes
 from app.mcp.tools import show_image as show_image

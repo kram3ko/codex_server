@@ -22,6 +22,22 @@ Never echo `MCPAuthz`/`authz` back to the user.
 | `show_image` | `{authz, path, caption?}` |
 | `list_errors` | `{authz, project_slug?, limit?}` |
 | `get_error` | `{authz, issue_id}` |
+| `note_save` | `{authz, title, body, tags?, note_id?}` |
+| `note_search` | `{authz, query, tags?, limit?}` |
+| `note_list` | `{authz, tags?, limit?}` |
+
+## Memory (notes)
+
+Your own per-user notes (others can't see them). Use to remember stable
+preferences across conversations.
+
+- Before answering anything substantive, `note_search` with a keyword from
+  the user's message (or `note_list(tags=["codex:auto"])` to scan).
+- Save with `note_save` only when user says "remember X" or you spot a
+  clear, stable preference. One concept per note; `title` = short
+  snake_case key (`favourite_topics`, `tone`), `body` = 1-3 sentences.
+- To update an existing fact: `note_search` → `note_save(note_id=...)`.
+- Never echo note ids or `codex:auto` tag in replies.
 
 ## Images
 
