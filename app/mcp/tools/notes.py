@@ -65,7 +65,7 @@ async def note_save(
     `note_search` to get its id, then pass via `note_id`.
     """
     claims = _require_authz(authz)
-    final_tags = sorted({*(tags or []), _CODEX_TAG})
+    final_tags: list[str] = sorted({*(tags or []), _CODEX_TAG})
     async with SessionLocal() as db:
         try:
             note = await note_service.upsert(
