@@ -1,7 +1,7 @@
 """Progress indication for Telegram turns.
 
-Assistant text is intentionally not mirrored into the draft bubble — some
-clients render it as a duplicate final message.
+Assistant text is streamed by editing one Telegram message, not by sending
+many small bubbles.
 """
 
 import asyncio
@@ -37,11 +37,8 @@ _STATUS_ICONS: dict[_ToolStatus, str] = {
 
 
 _DRAFT_TEXT_MAX = 4000
-
-# 180-char chunks + 1.2s throttle = ≤50 edits/min worst case (TG limit ≈30/min on send).
-_STREAM_MIN_CHARS = 180
 _STREAM_BUBBLE_MAX = 3500
-_STREAM_THROTTLE_S = 1.2
+_STREAM_THROTTLE_S = 1.0
 
 
 @dataclass(slots=True)
@@ -81,18 +78,14 @@ class TurnProgressReporter:
         self._last_draft_at: float = 0.0
         self._status_message: Message | None = None
         self._last_status_text: str = ""
-        self._committed_text: str = ""
+        self._stream_message: Message | None = None
+        self._stream_text: str = ""
         self._stream_throttle_at: float = 0.0
         self._status_paused_until: float = 0.0
         self._draft_lock = asyncio.Lock()
         self._status_lock = asyncio.Lock()
         self._stream_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
-
-    @property
-    def committed_text(self) -> str:
-        """Text already published as separate bubbles via `note_partial`."""
-        return self._committed_text
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="tg_turn_progress")
@@ -125,13 +118,7 @@ class TurnProgressReporter:
         await self._render_draft(force=True)
 
     async def note_partial(self, full_text: str) -> None:
-        """Multi-bubble streaming: commit `full_text` tail as standalone TG
-        bubbles when it grows past the threshold and throttle window passes.
-
-        Caller stores the cumulative buffer; we publish only the un-emitted
-        tail и tracking `_committed_text` so `TurnRunner` can deduplicate
-        when the final answer arrives.
-        """
+        """Mirror the current assistant buffer into one editable TG message."""
         if not full_text or tg_markdown.has_unclosed_fence(full_text):
             return
         if self._message.bot is None or self._message.chat is None:
@@ -140,24 +127,59 @@ class TurnProgressReporter:
             now = time.monotonic()
             if now - self._stream_throttle_at < _STREAM_THROTTLE_S:
                 return
-            tail = full_text[len(self._committed_text) :]
-            if len(tail) < _STREAM_MIN_CHARS:
+            visible = _stream_window(full_text).strip()
+            if not visible or visible == self._stream_text:
                 return
-            cut = _find_stream_split(tail)
-            if cut is None:
-                return
-            raw_chunk = tail[:cut]
-            visible = raw_chunk.strip()
-            if not visible:
+            if tg_markdown.has_unclosed_fence(visible):
                 return
             try:
-                for piece in tg_markdown.render_html(visible):
-                    await self._message.answer(piece)
+                await self._upsert_stream_message(visible)
             except TelegramAPIError as exc:
-                log.warning("tg_stream_chunk_failed", error=str(exc))
+                log.warning("tg_stream_edit_failed", error=str(exc))
                 return
-            self._committed_text += raw_chunk
+            self._stream_text = visible
             self._stream_throttle_at = now
+
+    async def finalize_stream(self, final_text: str) -> str:
+        """Render final first chunk into the editable message and return it."""
+        if not final_text or self._message.bot is None or self._message.chat is None:
+            return ""
+        async with self._stream_lock:
+            visible = _stream_window(final_text).strip()
+            if not visible:
+                return ""
+            if tg_markdown.has_unclosed_fence(visible):
+                await self._delete_stream_message()
+                return ""
+            try:
+                await self._upsert_stream_message(visible)
+            except TelegramAPIError as exc:
+                log.warning("tg_stream_finalize_failed", error=str(exc))
+                return ""
+            self._stream_text = visible
+            return visible
+
+    async def _upsert_stream_message(self, text: str) -> None:
+        chunks = tg_markdown.render_html(text)
+        if not chunks:
+            return
+        rendered = chunks[0]
+        thread_id = self._message.message_thread_id if self._message.is_topic_message else None
+        if self._stream_message is None:
+            self._stream_message = await self._message.answer(
+                rendered,
+                message_thread_id=thread_id,
+            )
+            return
+        await self._stream_message.edit_text(rendered)
+
+    async def _delete_stream_message(self) -> None:
+        if self._stream_message is None:
+            return
+        with contextlib.suppress(TelegramAPIError):
+            await self._stream_message.delete()
+        self._stream_message = None
+        self._stream_text = ""
 
     async def _run(self) -> None:
         try:
@@ -256,17 +278,12 @@ class TurnProgressReporter:
         return ""
 
 
-def _find_stream_split(tail: str) -> int | None:
-    """Pick a natural break inside the first `_STREAM_BUBBLE_MAX` chars.
-
-    None → defer: тейл < bubble max і нема break — чекаємо ще дельт, інакше
-    порвемо слово типу `wait_agent` яке Codex стрімить по частинах.
-    """
-    window = tail[:_STREAM_BUBBLE_MAX]
+def _stream_window(text: str) -> str:
+    if len(text) <= _STREAM_BUBBLE_MAX:
+        return text
+    window = text[:_STREAM_BUBBLE_MAX]
     for sep in ("\n\n", "\n", ". ", " "):
         idx = window.rfind(sep)
-        if idx >= _STREAM_MIN_CHARS:
-            return idx + len(sep)
-    if len(tail) <= _STREAM_BUBBLE_MAX:
-        return None
-    return _STREAM_BUBBLE_MAX
+        if idx > 0:
+            return text[: idx + len(sep)]
+    return text[:_STREAM_BUBBLE_MAX]

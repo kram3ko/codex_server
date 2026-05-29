@@ -27,6 +27,10 @@ class MessageRole(enum.StrEnum):
     SYSTEM = "SYSTEM"
 
 
+class NotebookKind(enum.StrEnum):
+    PERSONAL = "PERSONAL"
+
+
 class EventKind(enum.StrEnum):
     """Журнал подій — таймлайн усього, що сталося в чаті/системі."""
 
@@ -68,6 +72,7 @@ ENUM_NAMES = {
     UserRole: "user_role",
     ChatSource: "chat_source",
     MessageRole: "message_role",
+    NotebookKind: "notebook_kind",
     EventKind: "event_kind",
     TurnStatus: "turn_status",
 }

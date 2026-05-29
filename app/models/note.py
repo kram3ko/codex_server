@@ -1,15 +1,39 @@
-"""Notes/knowledge base entries — full-text search via tsvector.
+"""Notebook-owned notes with per-user scoping and Postgres full-text search."""
 
-Per-user: кожен запис прив'язаний до `user_id` (CASCADE on user delete).
-Cross-user sharing наразі не передбачено — search/list/get/delete фільтруються
-по owner'у у `notes_service`.
-"""
-
-from sqlalchemy import BigInteger, Computed, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Computed,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.models.enums import ENUM_NAMES, NotebookKind
+
+
+class Notebook(Base):
+    __tablename__ = "notebooks"
+    __table_args__ = (UniqueConstraint("user_id", "kind", name="uq_notebooks_user_kind"),)
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[NotebookKind] = mapped_column(
+        Enum(NotebookKind, name=ENUM_NAMES[NotebookKind]),
+        nullable=False,
+        default=NotebookKind.PERSONAL,
+        server_default=NotebookKind.PERSONAL.value,
+    )
 
 
 class Note(Base):
@@ -18,6 +42,12 @@ class Note(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    notebook_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("notebooks.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
