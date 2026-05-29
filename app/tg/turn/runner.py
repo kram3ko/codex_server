@@ -33,7 +33,7 @@ from app.services.turns.schemas import TurnCreate, TurnRow
 from app.services.users.default import user_service
 from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn, prepare_turn
-from app.tg.progress import TurnOutcome, TurnProgressReporter
+from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSessionStore
 from app.tg.turn.control import auto_reset_thread, emit_failure
 from app.tg.turn.persistence import persist_user_turn
@@ -59,9 +59,10 @@ class TurnRunner:
             return
 
         display_name = message.from_user.full_name or message.from_user.username
+        thread_id = message.message_thread_id if message.is_topic_message else None
         async with SessionLocal() as db:
             user = await user_service.get_or_create_by_tg(db, message.from_user.id, display_name)
-            chat = await chat_service.get_or_create_for_tg(db, user.id, message.chat.id)
+            chat = await chat_service.get_or_create_for_tg(db, user.id, message.chat.id, thread_id)
             db_user_id = user.id
             db_chat_id = chat.id
             await db.commit()
@@ -75,6 +76,7 @@ class TurnRunner:
         log.info(
             "tg_prepared_turn",
             chat_id=message.chat.id,
+            thread_id=thread_id,
             message_id=message.message_id,
             attachments=len(prepared.attachments),
             text_len=len(prepared.text),
@@ -85,6 +87,7 @@ class TurnRunner:
         session = await self._sessions.get_or_open(
             tg_user_id=message.from_user.id,
             tg_chat_id=message.chat.id,
+            tg_message_thread_id=thread_id,
             display_name=display_name,
         )
 
@@ -159,7 +162,6 @@ class TurnRunner:
                             CodexErrorCode.TURN_BUSY,
                             f"lock unavailable: {outcome.value}",
                         )
-                        progress.mark_outcome(TurnOutcome.FAILED)
                         await message.answer(
                             tg_markdown.escape(
                                 "⏳ У цьому chat вже виконується turn — спробуй за мить."
@@ -210,7 +212,6 @@ class TurnRunner:
                 await self._on_timeout(session, message, progress)
             except asyncio.CancelledError:
                 terminal = TurnStatus.CANCELLED
-                progress.mark_outcome(TurnOutcome.INTERRUPTED)
                 raise
             except Exception as exc:
                 terminal = TurnStatus.FAILED
@@ -239,7 +240,6 @@ class TurnRunner:
         message: Message,
         progress: TurnProgressReporter,
     ) -> None:
-        progress.mark_outcome(TurnOutcome.FAILED)
         log.error(
             "tg_codex_timeout",
             chat_id=message.chat.id if message.chat else None,
@@ -266,7 +266,6 @@ class TurnRunner:
         progress: TurnProgressReporter,
         exc: Exception,
     ) -> None:
-        progress.mark_outcome(TurnOutcome.FAILED)
         log.error(
             "tg_codex_failed",
             exc_type=type(exc).__name__,
@@ -323,6 +322,11 @@ async def _handle_active_tg_turn(
             # Bump AFTER persist — stream-loop persist_segment гарантовано
             # побачить counter тільки коли USER row уже у БД.
             await codex_remote.bump_steer_count(active.id)
+            quoted = tg_markdown.escape(prepared.text)
+            await message.answer(
+                "↪️ <i>Додано в поточну сесію агента</i>\n\n"
+                f"<blockquote expandable>{quoted}</blockquote>",
+            )
             return True
 
     try:

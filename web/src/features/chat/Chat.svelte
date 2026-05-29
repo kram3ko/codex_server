@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AlertTriangle } from "lucide-svelte";
   import { onDestroy, onMount, tick } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   import ChatList from "./ChatList.svelte";
   import Composer from "./Composer.svelte";
@@ -14,6 +15,8 @@
   import type { Attachment as ChatAttachment, Chat, ChatEvent } from "../../gen/codex/v1/chat_pb";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import { MessageSchema } from "../../gen/codex/v1/message_pb";
+  import Spinner from "../../shared/components/Spinner.svelte";
+  import { chatClient, messageClient } from "../../shared/lib/clients";
 
   function nowTimestamp() {
     const ms = Date.now();
@@ -22,8 +25,6 @@
       nanos: (ms % 1000) * 1_000_000
     });
   }
-  import Spinner from "../../shared/components/Spinner.svelte";
-  import { chatClient, messageClient } from "../../shared/lib/clients";
 
   let chats = $state<Chat[]>([]);
   let selected = $state<Chat | null>(null);
@@ -33,6 +34,14 @@
   let attachments = $state<ChatAttachment[]>([]);
   let loading = $state(false);
   let busy = $state(false);
+  /** Chat IDs with a server-side STARTING/RUNNING turn (sidebar spinner source). */
+  const busyChats = new SvelteSet<bigint>();
+
+  /** Rebuild busyChats from the authoritative ListChats snapshot. */
+  function syncBusyFromServer(list: Chat[]) {
+    busyChats.clear();
+    for (const c of list) if (c.activeTurnId) busyChats.add(c.id);
+  }
   let error = $state("");
   let info = $state("");
   let draftStartedAt = $state<number | undefined>(undefined);
@@ -55,6 +64,7 @@
   onDestroy(() => {
     if (infoTimer) clearTimeout(infoTimer);
     resumeAbort?.abort();
+    activityAbort?.abort();
   });
 
   const typer = createTypewriter();
@@ -80,6 +90,7 @@
     try {
       const response = await chatClient.listChats({ pagination: { limit: 100 } });
       chats = [...response.chats];
+      syncBusyFromServer(chats);
       if (!selected && chats[0]) {
         await selectChat(chats[0]);
       }
@@ -87,6 +98,43 @@
       error = exc instanceof Error ? exc.message : "Failed to load chats";
     } finally {
       loading = false;
+    }
+  }
+
+  async function createChat(title: string) {
+    error = "";
+    try {
+      const chat = await chatClient.createChat({ title });
+      chats = [chat, ...chats];
+      await selectChat(chat);
+    } catch (exc) {
+      error = exc instanceof Error ? exc.message : "Failed to create chat";
+    }
+  }
+
+  async function renameChat(chat: Chat, title: string) {
+    error = "";
+    try {
+      const updated = await chatClient.renameChat({ chatId: chat.id, title });
+      chats = chats.map((c) => (c.id === chat.id ? updated : c));
+      if (selected?.id === chat.id) selected = updated;
+    } catch (exc) {
+      error = exc instanceof Error ? exc.message : "Failed to rename chat";
+    }
+  }
+
+  async function deleteChat(chat: Chat) {
+    error = "";
+    try {
+      await chatClient.deleteChat({ chatId: chat.id });
+      chats = chats.filter((c) => c.id !== chat.id);
+      if (selected?.id === chat.id) {
+        selected = null;
+        messages = [];
+        if (chats[0]) await selectChat(chats[0]);
+      }
+    } catch (exc) {
+      error = exc instanceof Error ? exc.message : "Failed to delete chat";
     }
   }
 
@@ -142,6 +190,7 @@
       draftStartedAt = Date.now();
       lastActivityAt = Date.now();
       busy = true;
+      busyChats.add(chat.id);
     }
 
     try {
@@ -219,18 +268,19 @@
             } else if (persisted && !messages.some((m) => m.id === persisted.id)) {
               messages = [...messages, persisted];
             }
+            busyChats.delete(chat.id);
             cleanupResumeState(clientId);
             return;
           }
           case "error":
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
+            busyChats.delete(chat.id);
             cleanupResumeState(clientId);
             return;
         }
         await tick();
       }
     } catch {
-      // network drop / abort на switch chat — cleanup.
       messages = messages.filter((m) => clientIdOf(m) !== clientId);
       cleanupResumeState(clientId);
     }
@@ -267,10 +317,8 @@
     }
   }
 
+  /** Switch chat without interrupting the previous stream — `tailTurn` resumes on return. */
   async function selectChat(chat: Chat) {
-    // User explicitly switched chat — drop turn-local state.
-    const previous = selected;
-    const wasBusy = busy;
     activeTurnId += 1;
     busy = false;
     streamingClientId = null;
@@ -280,9 +328,6 @@
     tools = [];
     attachments = [];
     streamedPrefix = "";
-    if (wasBusy && previous) {
-      await chatClient.interruptTurn({ chatId: previous.id }).catch(() => undefined);
-    }
     await loadChatMessages(chat);
   }
 
@@ -351,6 +396,8 @@
     const turnId = activeTurnId + 1;
     activeTurnId = turnId;
     busy = true;
+    const chatAtSend = selected;
+    if (chatAtSend) busyChats.add(chatAtSend.id);
     error = "";
     tools = [];
     attachments = [];
@@ -592,6 +639,7 @@
     } finally {
       if (turnId === activeTurnId) {
         busy = false;
+        if (chatAtSend) busyChats.delete(chatAtSend.id);
       }
     }
   }
@@ -622,15 +670,44 @@
     lastActivityAt = undefined;
     await chatClient.interruptTurn({ chatId: selected.id });
     busy = false;
+    busyChats.delete(selected.id);
+  }
+
+  let activityAbort: AbortController | null = null;
+  const ACTIVITY_BACKOFF_INITIAL_MS = 1_000;
+  const ACTIVITY_BACKOFF_MAX_MS = 30_000;
+
+  /** Open the per-user activity stream; on drop, exp-backoff + snapshot resync. */
+  async function subscribeChatActivity() {
+    activityAbort?.abort();
+    const ctrl = new AbortController();
+    activityAbort = ctrl;
+    let backoff = ACTIVITY_BACKOFF_INITIAL_MS;
+    while (!ctrl.signal.aborted) {
+      try {
+        for await (const ev of chatClient.streamChatActivity({}, { signal: ctrl.signal })) {
+          backoff = ACTIVITY_BACKOFF_INITIAL_MS;
+          if (ev.kind.case === "turnStarted") busyChats.add(ev.chatId);
+          else if (ev.kind.case === "turnEnded") busyChats.delete(ev.chatId);
+        }
+        return;
+      } catch {
+        if (ctrl.signal.aborted) return;
+        void loadChats(true);
+        await new Promise((r) => setTimeout(r, backoff));
+        backoff = Math.min(backoff * 2, ACTIVITY_BACKOFF_MAX_MS);
+      }
+    }
   }
 
   onMount(() => {
     void loadChats();
+    void subscribeChatActivity();
   });
 </script>
 
 <main class="flex h-[calc(100vh-3.5rem)] min-h-0">
-  <ChatList chats={chats} selectedId={selected?.id ?? null} loading={loading} onrefresh={loadChats} onselect={selectChat} />
+  <ChatList chats={chats} selectedId={selected?.id ?? null} loading={loading} busyChats={busyChats} onrefresh={loadChats} onselect={selectChat} oncreate={createChat} onrename={renameChat} ondelete={deleteChat} />
 
   <section class="flex min-w-0 flex-1 flex-col">
     {#if error}

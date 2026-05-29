@@ -11,19 +11,23 @@ import websockets
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from taskiq.exceptions import TaskiqError
 
 from app.db.base import SessionLocal
 from app.grpc_generated.codex.v1 import chat_pb2, common_pb2
 from app.grpc_generated.codex.v1.chat_connect import ChatService as ChatProtocol
 from app.models import (
     TURN_TERMINAL_STATUSES,
+    ChatSource,
     EventKind,
     Message,
     MessageRole,
     Turn,
     TurnStatus,
+    User,
     UserRole,
 )
 from app.rpc._auth import require_user
@@ -31,7 +35,7 @@ from app.rpc._mappers import chat_to_pb, message_to_pb
 from app.rpc.chat.guards import load_chat_owned, resolve_limit
 from app.rpc.chat.mappers import codex_usage_to_pb, error_event
 from app.rpc.chat.uploads import ResolvedUploads, resolve_uploads
-from app.services import rate_limit
+from app.services import chat_activity, rate_limit
 from app.services.cache.default import cache
 from app.services.chats.default import chat_service
 from app.services.codex import codex_remote
@@ -84,8 +88,33 @@ class ChatRPC(ChatProtocol):
         user = await require_user(ctx)
         limit = resolve_limit(request.pagination)
         async with SessionLocal() as db:
-            chats = await chat_service.list_for_user(db, user.id, limit=limit)
-        return chat_pb2.ListChatsResponse(chats=[chat_to_pb(c) for c in chats])
+            chats = await chat_service.list_for_user(
+                db, user.id, limit=limit, source=ChatSource.WEB
+            )
+            active_by_chat = await turn_service.active_ids_by_chat_for_user(db, user.id)
+        return chat_pb2.ListChatsResponse(
+            chats=[chat_to_pb(c, active_turn_id=active_by_chat.get(c.id)) for c in chats]
+        )
+
+    @override
+    async def create_chat(
+        self,
+        request: chat_pb2.CreateChatRequest,
+        ctx: RequestContext,
+    ) -> chat_pb2.Chat:
+        user = await require_user(ctx)
+        title = request.title.strip() or None
+        async with SessionLocal() as db:
+            chat = await chat_service.create_web_chat(db, user.id)
+            if title is None:
+                # `count_web_for_user` уже включає щойно створений рядок (flush),
+                # тому це той самий номер що буде показано юзеру.
+                count = await chat_service.count_web_for_user(db, user.id)
+                title = f"Chat {count}"
+            chat.title = title
+            await db.commit()
+            await db.refresh(chat)
+            return chat_to_pb(chat)
 
     @override
     async def get_chat(
@@ -95,8 +124,11 @@ class ChatRPC(ChatProtocol):
     ) -> chat_pb2.Chat:
         user = await require_user(ctx)
         async with SessionLocal() as db:
-            chat = await load_chat_owned(db, request.chat_id, user.id)
-        return chat_to_pb(chat)
+            chat = await load_chat_owned(
+                db, request.chat_id, user.id, expected_source=ChatSource.WEB
+            )
+            active = await turn_service.get_active_for_chat(db, chat.id)
+        return chat_to_pb(chat, active_turn_id=active.id if active else None)
 
     @override
     async def rename_chat(
@@ -107,11 +139,14 @@ class ChatRPC(ChatProtocol):
         user = await require_user(ctx)
         new_title: str | None = request.title.strip() or None
         async with SessionLocal() as db:
-            chat = await load_chat_owned(db, request.chat_id, user.id)
+            chat = await load_chat_owned(
+                db, request.chat_id, user.id, expected_source=ChatSource.WEB
+            )
             chat.title = new_title
             await db.commit()
             await db.refresh(chat)
-            return chat_to_pb(chat)
+            active = await turn_service.get_active_for_chat(db, chat.id)
+            return chat_to_pb(chat, active_turn_id=active.id if active else None)
 
     @override
     async def delete_chat(
@@ -121,7 +156,17 @@ class ChatRPC(ChatProtocol):
     ) -> common_pb2.Empty:
         user = await require_user(ctx)
         async with SessionLocal() as db:
-            chat = await load_chat_owned(db, request.chat_id, user.id)
+            chat = await load_chat_owned(
+                db, request.chat_id, user.id, expected_source=ChatSource.WEB
+            )
+            active = await turn_service.get_active_for_chat(db, chat.id)
+            if active is not None:
+                # Cascade delete тут створив би zombie worker/heartbeat без рядків —
+                # вимагаємо явний interrupt перед видаленням.
+                raise ConnectError(
+                    Code.FAILED_PRECONDITION,
+                    "chat has an active turn; interrupt before deleting",
+                )
             await db.delete(chat)
             await db.commit()
         return common_pb2.Empty()
@@ -146,7 +191,7 @@ class ChatRPC(ChatProtocol):
 
         worker_owns_rate_limit = False
         try:
-            prepared = await _prepare_run_turn(request, text, user.id)
+            prepared = await _prepare_run_turn(request, text, user)
 
             active_event = await _handle_active_turn(prepared)
             if active_event is not None:
@@ -193,10 +238,14 @@ class ChatRPC(ChatProtocol):
             if target_turn is None:
                 raise ConnectError(Code.NOT_FOUND, f"turn {request.turn_id} not found")
             async with SessionLocal() as db:
-                await load_chat_owned(db, target_turn.chat_id, user.id)
+                await load_chat_owned(
+                    db, target_turn.chat_id, user.id, expected_source=ChatSource.WEB
+                )
         else:
             async with SessionLocal() as db:
-                await load_chat_owned(db, request.chat_id, user.id)
+                await load_chat_owned(
+                    db, request.chat_id, user.id, expected_source=ChatSource.WEB
+                )
                 target_turn = await turn_service.get_active_for_chat(db, request.chat_id)
             if target_turn is None:
                 async with SessionLocal() as db:
@@ -230,7 +279,9 @@ class ChatRPC(ChatProtocol):
     ) -> chat_pb2.InterruptTurnResponse:
         user = await require_user(ctx)
         async with SessionLocal() as db:
-            chat = await load_chat_owned(db, request.chat_id, user.id)
+            chat = await load_chat_owned(
+                db, request.chat_id, user.id, expected_source=ChatSource.WEB
+            )
             active = await turn_service.get_active_for_chat(db, chat.id)
         if active is None or active.codex_turn_id is None:
             return chat_pb2.InterruptTurnResponse()
@@ -262,7 +313,9 @@ class ChatRPC(ChatProtocol):
         if not text:
             return chat_pb2.SteerTurnResponse(accepted=False)
         async with SessionLocal() as db:
-            chat = await load_chat_owned(db, request.chat_id, user.id)
+            chat = await load_chat_owned(
+                db, request.chat_id, user.id, expected_source=ChatSource.WEB
+            )
             active = await turn_service.get_active_for_chat(db, chat.id)
         if active is None or active.codex_turn_id is None:
             return chat_pb2.SteerTurnResponse(accepted=False)
@@ -290,6 +343,32 @@ class ChatRPC(ChatProtocol):
             # завжди має id > USER steer message id (chronology stable).
             await codex_remote.bump_steer_count(active.id)
         return chat_pb2.SteerTurnResponse(accepted=accepted)
+
+    @override
+    async def stream_chat_activity(
+        self,
+        request: chat_pb2.StreamChatActivityRequest,
+        ctx: RequestContext,
+    ) -> AsyncIterator[chat_pb2.ChatActivityEvent]:
+        del request
+        user = await require_user(ctx)
+        channel = chat_activity.channel_for_user(user.id)
+        pubsub = cache.pubsub()
+        await pubsub.subscribe(channel)
+        try:
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                payload = chat_activity.deserialize(message["data"])
+                if payload is None:
+                    continue
+                event = _chat_activity_to_pb(payload)
+                if event is not None:
+                    yield event
+        finally:
+            with contextlib.suppress(RedisError, OSError):
+                await pubsub.unsubscribe(channel)
+                await pubsub.aclose()
 
     @override
     async def stream_codex_usage(
@@ -324,7 +403,7 @@ class ChatRPC(ChatProtocol):
                 if usage is not None:
                     yield codex_usage_to_pb(usage)
         finally:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(RedisError, OSError):
                 await pubsub.unsubscribe(channel)
                 await pubsub.aclose()
 
@@ -349,23 +428,27 @@ class ChatRPC(ChatProtocol):
         return codex_usage_to_pb(usage)
 
 
-async def _ensure_web_chat(user_id: int) -> tuple[int, int]:
+async def _resolve_web_chat(request: chat_pb2.RunTurnRequest, user_id: int) -> int:
     async with SessionLocal() as db:
+        if request.HasField("chat_id"):
+            chat = await load_chat_owned(
+                db, request.chat_id, user_id, expected_source=ChatSource.WEB
+            )
+            return chat.id
         chat = await chat_service.get_or_create_for_web(db, user_id)
         await db.commit()
-        return chat.id, user_id
+        return chat.id
 
 
 async def _prepare_run_turn(
     request: chat_pb2.RunTurnRequest,
     text: str,
-    user_id: int,
+    user: User,
 ) -> _PreparedRunTurn:
-    chat_id, user_pk = await _ensure_web_chat(user_id)
-    if request.HasField("chat_id") and request.chat_id != chat_id:
-        raise ConnectError(Code.NOT_FOUND, f"chat {request.chat_id} not found")
+    chat_id = await _resolve_web_chat(request, user.id)
+    sidecar = SidecarName.ADMIN if user.role is UserRole.ADMIN else SidecarName.GUEST
 
-    uploads = await resolve_uploads(list(request.upload_ids), user_id=user_pk, chat_id=chat_id)
+    uploads = await resolve_uploads(list(request.upload_ids), user_id=user.id, chat_id=chat_id)
     if not text and (uploads.image_urls or uploads.file_paths):
         text = "Open the attached files and answer based on them."
     mentions = workspace_uploads.format_mentions(uploads.file_paths)
@@ -373,13 +456,32 @@ async def _prepare_run_turn(
         text = f"{text}\n\n{mentions}" if text else mentions
     return _PreparedRunTurn(
         chat_id=chat_id,
-        user_id=user_pk,
+        user_id=user.id,
         text=text,
         uploads=uploads,
         voice_reply=bool(uploads.audio_ids),
         has_uploads=bool(uploads.image_urls or uploads.file_paths or uploads.audio_ids),
-        sidecar=SidecarName.ADMIN,
+        sidecar=sidecar,
         client_id=request.client_id or None,
+    )
+
+
+def _chat_activity_to_pb(payload: dict[str, Any]) -> chat_pb2.ChatActivityEvent | None:
+    chat_id = payload.get("chat_id")
+    turn_id = payload.get("turn_id")
+    raw_kind = payload.get("kind")
+    if not isinstance(chat_id, int) or not isinstance(turn_id, int):
+        return None
+    try:
+        kind = chat_activity.ChatActivityKind(raw_kind)
+    except ValueError:
+        return None
+    if kind is chat_activity.ChatActivityKind.STARTED:
+        return chat_pb2.ChatActivityEvent(
+            chat_id=chat_id, turn_started=chat_pb2.ChatTurnStarted(turn_id=turn_id)
+        )
+    return chat_pb2.ChatActivityEvent(
+        chat_id=chat_id, turn_ended=chat_pb2.ChatTurnEnded(turn_id=turn_id)
     )
 
 
@@ -590,7 +692,7 @@ async def _enqueue_turn(
             voice_reply=prepared.voice_reply,
             client_id=prepared.client_id,
         )
-    except Exception as exc:
+    except (TaskiqError, RedisError, OSError, ValueError) as exc:
         log.exception("turn_enqueue_failed", turn_id=turn.id)
         async with SessionLocal() as db:
             await turn_service.finalize_once(
@@ -626,7 +728,7 @@ async def _handle_stale_turn(
         expected_turn_id=exc.expected_turn_id,
         actual_turn_id=exc.actual_turn_id,
     )
-    with contextlib.suppress(Exception):
+    with contextlib.suppress(*_CONTROL_RPC_ERRORS, StaleSidecarTurnError):
         await codex_remote.send_interrupt_turn_id(
             SidecarName.normalize(turn.sidecar) is SidecarName.ADMIN,
             thread_id=turn.codex_thread_id,

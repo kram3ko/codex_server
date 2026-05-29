@@ -16,7 +16,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file codex/v1/chat.proto.
  */
 export const file_codex_v1_chat: GenFile = /*@__PURE__*/
-  fileDesc("ChNjb2RleC92MS9jaGF0LnByb3RvEghjb2RleC52MSKiAgoEQ2hhdBIKCgJpZBgBIAEoAxIPCgd1c2VyX2lkGAIgASgDEiQKBnNvdXJjZRgDIAEoDjIULmNvZGV4LnYxLkNoYXRTb3VyY2USFwoKdGdfY2hhdF9pZBgEIAEoA0gAiAEBEhwKD2NvZGV4X3RocmVhZF9pZBgFIAEoCUgBiAEBEhIKBXRpdGxlGAYgASgJSAKIAQESLgoKY3JlYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLbGFzdF9tc2dfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQg0KC190Z19jaGF0X2lkQhIKEF9jb2RleF90aHJlYWRfaWRCCAoGX3RpdGxlIjwKEExpc3RDaGF0c1JlcXVlc3QSKAoKcGFnaW5hdGlvbhgBIAEoCzIULmNvZGV4LnYxLlBhZ2luYXRpb24iMgoRTGlzdENoYXRzUmVzcG9uc2USHQoFY2hhdHMYASADKAsyDi5jb2RleC52MS5DaGF0IiEKDkdldENoYXRSZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMiMwoRUmVuYW1lQ2hhdFJlcXVlc3QSDwoHY2hhdF9pZBgBIAEoAxINCgV0aXRsZRgCIAEoCSIkChFEZWxldGVDaGF0UmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDImcKDlJ1blR1cm5SZXF1ZXN0EhQKB2NoYXRfaWQYASABKANIAIgBARIMCgR0ZXh0GAIgASgJEhIKCnVwbG9hZF9pZHMYAyADKAMSEQoJY2xpZW50X2lkGAQgASgJQgoKCF9jaGF0X2lkIqwCCglDaGF0RXZlbnQSJQoFdG9rZW4YASABKAsyFC5jb2RleC52MS5Ub2tlbkV2ZW50SAASLAoJdG9vbF9jYWxsGAIgASgLMhcuY29kZXgudjEuVG9vbENhbGxFdmVudEgAEjAKC3Rvb2xfcmVzdWx0GAMgASgLMhkuY29kZXgudjEuVG9vbFJlc3VsdEV2ZW50SAASIwoEZG9uZRgEIAEoCzITLmNvZGV4LnYxLkRvbmVFdmVudEgAEiUKBWVycm9yGAUgASgLMhQuY29kZXgudjEuRXJyb3JFdmVudEgAEjIKDHR1cm5fc3RhcnRlZBgHIAEoCzIaLmNvZGV4LnYxLlR1cm5TdGFydGVkRXZlbnRIABIQCghldmVudF9pZBgGIAEoCUIGCgRraW5kIiMKEFR1cm5TdGFydGVkRXZlbnQSDwoHdHVybl9pZBgBIAEoAyIbCgpUb2tlbkV2ZW50Eg0KBWRlbHRhGAEgASgJIkQKDVRvb2xDYWxsRXZlbnQSDAoEbmFtZRgBIAEoCRIlCgRhcmdzGAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCI7CgpBdHRhY2htZW50EgwKBGtpbmQYASABKAkSDgoGc291cmNlGAIgASgJEg8KB2NhcHRpb24YAyABKAkidgoPVG9vbFJlc3VsdEV2ZW50EgwKBG5hbWUYASABKAkSDAoEdGV4dBgCIAEoCRIpCgthdHRhY2htZW50cxgDIAMoCzIULmNvZGV4LnYxLkF0dGFjaG1lbnQSEgoFZXJyb3IYBCABKAlIAIgBAUIICgZfZXJyb3IibgoJRG9uZUV2ZW50Eg8KB2NoYXRfaWQYASABKAMSEgoKZmluYWxfdGV4dBgCIAEoCRIiCgdtZXNzYWdlGAMgASgLMhEuY29kZXgudjEuTWVzc2FnZRIYChBzdGVlcmVkX2ZhbGxiYWNrGAQgASgIIjoKCkVycm9yRXZlbnQSDAoEY29kZRgBIAEoCRITCgZkZXRhaWwYAiABKAlIAIgBAUIJCgdfZGV0YWlsIicKFEludGVycnVwdFR1cm5SZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMiFwoVSW50ZXJydXB0VHVyblJlc3BvbnNlIlYKD1RhaWxUdXJuUmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDEhAKCGFmdGVyX2lkGAIgASgJEhQKB3R1cm5faWQYAyABKANIAIgBAUIKCghfdHVybl9pZCIxChBTdGVlclR1cm5SZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMSDAoEdGV4dBgCIAEoCSIlChFTdGVlclR1cm5SZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCCIZChdTdHJlYW1Db2RleFVzYWdlUmVxdWVzdCIaChhSZWZyZXNoQ29kZXhVc2FnZVJlcXVlc3QifQoLVXNhZ2VXaW5kb3cSFAoMdXNlZF9wZXJjZW50GAEgASgBEhYKDndpbmRvd19taW51dGVzGAIgASgFEjIKCXJlc2V0c19hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBAUIMCgpfcmVzZXRzX2F0IqgBCgpDb2RleFVzYWdlEhYKCXBsYW5fdHlwZRgBIAEoCUgAiAEBEisKB3ByaW1hcnkYAiABKAsyFS5jb2RleC52MS5Vc2FnZVdpbmRvd0gBiAEBEi0KCXNlY29uZGFyeRgDIAEoCzIVLmNvZGV4LnYxLlVzYWdlV2luZG93SAKIAQFCDAoKX3BsYW5fdHlwZUIKCghfcHJpbWFyeUIMCgpfc2Vjb25kYXJ5KlgKCkNoYXRTb3VyY2USGwoXQ0hBVF9TT1VSQ0VfVU5TUEVDSUZJRUQQABITCg9DSEFUX1NPVVJDRV9XRUIQARIYChRDSEFUX1NPVVJDRV9URUxFR1JBTRACMq8FCgtDaGF0U2VydmljZRJECglMaXN0Q2hhdHMSGi5jb2RleC52MS5MaXN0Q2hhdHNSZXF1ZXN0GhsuY29kZXgudjEuTGlzdENoYXRzUmVzcG9uc2USMwoHR2V0Q2hhdBIYLmNvZGV4LnYxLkdldENoYXRSZXF1ZXN0Gg4uY29kZXgudjEuQ2hhdBI5CgpSZW5hbWVDaGF0EhsuY29kZXgudjEuUmVuYW1lQ2hhdFJlcXVlc3QaDi5jb2RleC52MS5DaGF0EjoKCkRlbGV0ZUNoYXQSGy5jb2RleC52MS5EZWxldGVDaGF0UmVxdWVzdBoPLmNvZGV4LnYxLkVtcHR5EjoKB1J1blR1cm4SGC5jb2RleC52MS5SdW5UdXJuUmVxdWVzdBoTLmNvZGV4LnYxLkNoYXRFdmVudDABEjwKCFRhaWxUdXJuEhkuY29kZXgudjEuVGFpbFR1cm5SZXF1ZXN0GhMuY29kZXgudjEuQ2hhdEV2ZW50MAESUAoNSW50ZXJydXB0VHVybhIeLmNvZGV4LnYxLkludGVycnVwdFR1cm5SZXF1ZXN0Gh8uY29kZXgudjEuSW50ZXJydXB0VHVyblJlc3BvbnNlEkQKCVN0ZWVyVHVybhIaLmNvZGV4LnYxLlN0ZWVyVHVyblJlcXVlc3QaGy5jb2RleC52MS5TdGVlclR1cm5SZXNwb25zZRJNChBTdHJlYW1Db2RleFVzYWdlEiEuY29kZXgudjEuU3RyZWFtQ29kZXhVc2FnZVJlcXVlc3QaFC5jb2RleC52MS5Db2RleFVzYWdlMAESTQoRUmVmcmVzaENvZGV4VXNhZ2USIi5jb2RleC52MS5SZWZyZXNoQ29kZXhVc2FnZVJlcXVlc3QaFC5jb2RleC52MS5Db2RleFVzYWdlYgZwcm90bzM", [file_google_protobuf_timestamp, file_google_protobuf_struct, file_codex_v1_common, file_codex_v1_message]);
+  fileDesc("ChNjb2RleC92MS9jaGF0LnByb3RvEghjb2RleC52MSLSAgoEQ2hhdBIKCgJpZBgBIAEoAxIPCgd1c2VyX2lkGAIgASgDEiQKBnNvdXJjZRgDIAEoDjIULmNvZGV4LnYxLkNoYXRTb3VyY2USFwoKdGdfY2hhdF9pZBgEIAEoA0gAiAEBEhwKD2NvZGV4X3RocmVhZF9pZBgFIAEoCUgBiAEBEhIKBXRpdGxlGAYgASgJSAKIAQESLgoKY3JlYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLbGFzdF9tc2dfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhsKDmFjdGl2ZV90dXJuX2lkGAkgASgDSAOIAQFCDQoLX3RnX2NoYXRfaWRCEgoQX2NvZGV4X3RocmVhZF9pZEIICgZfdGl0bGVCEQoPX2FjdGl2ZV90dXJuX2lkIjwKEExpc3RDaGF0c1JlcXVlc3QSKAoKcGFnaW5hdGlvbhgBIAEoCzIULmNvZGV4LnYxLlBhZ2luYXRpb24iMgoRTGlzdENoYXRzUmVzcG9uc2USHQoFY2hhdHMYASADKAsyDi5jb2RleC52MS5DaGF0IjEKEUNyZWF0ZUNoYXRSZXF1ZXN0EhIKBXRpdGxlGAEgASgJSACIAQFCCAoGX3RpdGxlIiEKDkdldENoYXRSZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMiMwoRUmVuYW1lQ2hhdFJlcXVlc3QSDwoHY2hhdF9pZBgBIAEoAxINCgV0aXRsZRgCIAEoCSIkChFEZWxldGVDaGF0UmVxdWVzdBIPCgdjaGF0X2lkGAEgASgDImcKDlJ1blR1cm5SZXF1ZXN0EhQKB2NoYXRfaWQYASABKANIAIgBARIMCgR0ZXh0GAIgASgJEhIKCnVwbG9hZF9pZHMYAyADKAMSEQoJY2xpZW50X2lkGAQgASgJQgoKCF9jaGF0X2lkIqwCCglDaGF0RXZlbnQSJQoFdG9rZW4YASABKAsyFC5jb2RleC52MS5Ub2tlbkV2ZW50SAASLAoJdG9vbF9jYWxsGAIgASgLMhcuY29kZXgudjEuVG9vbENhbGxFdmVudEgAEjAKC3Rvb2xfcmVzdWx0GAMgASgLMhkuY29kZXgudjEuVG9vbFJlc3VsdEV2ZW50SAASIwoEZG9uZRgEIAEoCzITLmNvZGV4LnYxLkRvbmVFdmVudEgAEiUKBWVycm9yGAUgASgLMhQuY29kZXgudjEuRXJyb3JFdmVudEgAEjIKDHR1cm5fc3RhcnRlZBgHIAEoCzIaLmNvZGV4LnYxLlR1cm5TdGFydGVkRXZlbnRIABIQCghldmVudF9pZBgGIAEoCUIGCgRraW5kIiMKEFR1cm5TdGFydGVkRXZlbnQSDwoHdHVybl9pZBgBIAEoAyIbCgpUb2tlbkV2ZW50Eg0KBWRlbHRhGAEgASgJIkQKDVRvb2xDYWxsRXZlbnQSDAoEbmFtZRgBIAEoCRIlCgRhcmdzGAIgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCI7CgpBdHRhY2htZW50EgwKBGtpbmQYASABKAkSDgoGc291cmNlGAIgASgJEg8KB2NhcHRpb24YAyABKAkiOAoJVG9vbEVycm9yEg8KB21lc3NhZ2UYASABKAkSEQoEY29kZRgCIAEoCUgAiAEBQgcKBV9jb2RlIosBCg9Ub29sUmVzdWx0RXZlbnQSDAoEbmFtZRgBIAEoCRIMCgR0ZXh0GAIgASgJEikKC2F0dGFjaG1lbnRzGAMgAygLMhQuY29kZXgudjEuQXR0YWNobWVudBInCgVlcnJvchgEIAEoCzITLmNvZGV4LnYxLlRvb2xFcnJvckgAiAEBQggKBl9lcnJvciJuCglEb25lRXZlbnQSDwoHY2hhdF9pZBgBIAEoAxISCgpmaW5hbF90ZXh0GAIgASgJEiIKB21lc3NhZ2UYAyABKAsyES5jb2RleC52MS5NZXNzYWdlEhgKEHN0ZWVyZWRfZmFsbGJhY2sYBCABKAgiOgoKRXJyb3JFdmVudBIMCgRjb2RlGAEgASgJEhMKBmRldGFpbBgCIAEoCUgAiAEBQgkKB19kZXRhaWwiJwoUSW50ZXJydXB0VHVyblJlcXVlc3QSDwoHY2hhdF9pZBgBIAEoAyIXChVJbnRlcnJ1cHRUdXJuUmVzcG9uc2UiVgoPVGFpbFR1cm5SZXF1ZXN0Eg8KB2NoYXRfaWQYASABKAMSEAoIYWZ0ZXJfaWQYAiABKAkSFAoHdHVybl9pZBgDIAEoA0gAiAEBQgoKCF90dXJuX2lkIjEKEFN0ZWVyVHVyblJlcXVlc3QSDwoHY2hhdF9pZBgBIAEoAxIMCgR0ZXh0GAIgASgJIiUKEVN0ZWVyVHVyblJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIIhsKGVN0cmVhbUNoYXRBY3Rpdml0eVJlcXVlc3QiIgoPQ2hhdFR1cm5TdGFydGVkEg8KB3R1cm5faWQYASABKAMiIAoNQ2hhdFR1cm5FbmRlZBIPCgd0dXJuX2lkGAEgASgDIo4BChFDaGF0QWN0aXZpdHlFdmVudBIPCgdjaGF0X2lkGAEgASgDEjEKDHR1cm5fc3RhcnRlZBgCIAEoCzIZLmNvZGV4LnYxLkNoYXRUdXJuU3RhcnRlZEgAEi0KCnR1cm5fZW5kZWQYAyABKAsyFy5jb2RleC52MS5DaGF0VHVybkVuZGVkSABCBgoEa2luZCIZChdTdHJlYW1Db2RleFVzYWdlUmVxdWVzdCIaChhSZWZyZXNoQ29kZXhVc2FnZVJlcXVlc3QifQoLVXNhZ2VXaW5kb3cSFAoMdXNlZF9wZXJjZW50GAEgASgBEhYKDndpbmRvd19taW51dGVzGAIgASgFEjIKCXJlc2V0c19hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBAUIMCgpfcmVzZXRzX2F0IqgBCgpDb2RleFVzYWdlEhYKCXBsYW5fdHlwZRgBIAEoCUgAiAEBEisKB3ByaW1hcnkYAiABKAsyFS5jb2RleC52MS5Vc2FnZVdpbmRvd0gBiAEBEi0KCXNlY29uZGFyeRgDIAEoCzIVLmNvZGV4LnYxLlVzYWdlV2luZG93SAKIAQFCDAoKX3BsYW5fdHlwZUIKCghfcHJpbWFyeUIMCgpfc2Vjb25kYXJ5KlgKCkNoYXRTb3VyY2USGwoXQ0hBVF9TT1VSQ0VfVU5TUEVDSUZJRUQQABITCg9DSEFUX1NPVVJDRV9XRUIQARIYChRDSEFUX1NPVVJDRV9URUxFR1JBTRACMsQGCgtDaGF0U2VydmljZRJECglMaXN0Q2hhdHMSGi5jb2RleC52MS5MaXN0Q2hhdHNSZXF1ZXN0GhsuY29kZXgudjEuTGlzdENoYXRzUmVzcG9uc2USOQoKQ3JlYXRlQ2hhdBIbLmNvZGV4LnYxLkNyZWF0ZUNoYXRSZXF1ZXN0Gg4uY29kZXgudjEuQ2hhdBIzCgdHZXRDaGF0EhguY29kZXgudjEuR2V0Q2hhdFJlcXVlc3QaDi5jb2RleC52MS5DaGF0EjkKClJlbmFtZUNoYXQSGy5jb2RleC52MS5SZW5hbWVDaGF0UmVxdWVzdBoOLmNvZGV4LnYxLkNoYXQSOgoKRGVsZXRlQ2hhdBIbLmNvZGV4LnYxLkRlbGV0ZUNoYXRSZXF1ZXN0Gg8uY29kZXgudjEuRW1wdHkSOgoHUnVuVHVybhIYLmNvZGV4LnYxLlJ1blR1cm5SZXF1ZXN0GhMuY29kZXgudjEuQ2hhdEV2ZW50MAESPAoIVGFpbFR1cm4SGS5jb2RleC52MS5UYWlsVHVyblJlcXVlc3QaEy5jb2RleC52MS5DaGF0RXZlbnQwARJQCg1JbnRlcnJ1cHRUdXJuEh4uY29kZXgudjEuSW50ZXJydXB0VHVyblJlcXVlc3QaHy5jb2RleC52MS5JbnRlcnJ1cHRUdXJuUmVzcG9uc2USRAoJU3RlZXJUdXJuEhouY29kZXgudjEuU3RlZXJUdXJuUmVxdWVzdBobLmNvZGV4LnYxLlN0ZWVyVHVyblJlc3BvbnNlElgKElN0cmVhbUNoYXRBY3Rpdml0eRIjLmNvZGV4LnYxLlN0cmVhbUNoYXRBY3Rpdml0eVJlcXVlc3QaGy5jb2RleC52MS5DaGF0QWN0aXZpdHlFdmVudDABEk0KEFN0cmVhbUNvZGV4VXNhZ2USIS5jb2RleC52MS5TdHJlYW1Db2RleFVzYWdlUmVxdWVzdBoULmNvZGV4LnYxLkNvZGV4VXNhZ2UwARJNChFSZWZyZXNoQ29kZXhVc2FnZRIiLmNvZGV4LnYxLlJlZnJlc2hDb2RleFVzYWdlUmVxdWVzdBoULmNvZGV4LnYxLkNvZGV4VXNhZ2ViBnByb3RvMw", [file_google_protobuf_timestamp, file_google_protobuf_struct, file_codex_v1_common, file_codex_v1_message]);
 
 /**
  * @generated from message codex.v1.Chat
@@ -64,6 +64,14 @@ export type Chat = Message<"codex.v1.Chat"> & {
    * @generated from field: google.protobuf.Timestamp last_msg_at = 8;
    */
   lastMsgAt?: Timestamp | undefined;
+
+  /**
+   * Set коли в чаті STARTING/RUNNING turn — для sidebar-індикатора активності.
+   * UI знімає індикатор сам по DoneEvent/ErrorEvent у його tail-стрімі.
+   *
+   * @generated from field: optional int64 active_turn_id = 9;
+   */
+  activeTurnId?: bigint | undefined;
 };
 
 /**
@@ -108,6 +116,23 @@ export const ListChatsResponseSchema: GenMessage<ListChatsResponse> = /*@__PURE_
   messageDesc(file_codex_v1_chat, 2);
 
 /**
+ * @generated from message codex.v1.CreateChatRequest
+ */
+export type CreateChatRequest = Message<"codex.v1.CreateChatRequest"> & {
+  /**
+   * @generated from field: optional string title = 1;
+   */
+  title?: string | undefined;
+};
+
+/**
+ * Describes the message codex.v1.CreateChatRequest.
+ * Use `create(CreateChatRequestSchema)` to create a new message.
+ */
+export const CreateChatRequestSchema: GenMessage<CreateChatRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_chat, 3);
+
+/**
  * @generated from message codex.v1.GetChatRequest
  */
 export type GetChatRequest = Message<"codex.v1.GetChatRequest"> & {
@@ -122,7 +147,7 @@ export type GetChatRequest = Message<"codex.v1.GetChatRequest"> & {
  * Use `create(GetChatRequestSchema)` to create a new message.
  */
 export const GetChatRequestSchema: GenMessage<GetChatRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 3);
+  messageDesc(file_codex_v1_chat, 4);
 
 /**
  * @generated from message codex.v1.RenameChatRequest
@@ -144,7 +169,7 @@ export type RenameChatRequest = Message<"codex.v1.RenameChatRequest"> & {
  * Use `create(RenameChatRequestSchema)` to create a new message.
  */
 export const RenameChatRequestSchema: GenMessage<RenameChatRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 4);
+  messageDesc(file_codex_v1_chat, 5);
 
 /**
  * @generated from message codex.v1.DeleteChatRequest
@@ -161,7 +186,7 @@ export type DeleteChatRequest = Message<"codex.v1.DeleteChatRequest"> & {
  * Use `create(DeleteChatRequestSchema)` to create a new message.
  */
 export const DeleteChatRequestSchema: GenMessage<DeleteChatRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 5);
+  messageDesc(file_codex_v1_chat, 6);
 
 /**
  * @generated from message codex.v1.RunTurnRequest
@@ -202,7 +227,7 @@ export type RunTurnRequest = Message<"codex.v1.RunTurnRequest"> & {
  * Use `create(RunTurnRequestSchema)` to create a new message.
  */
 export const RunTurnRequestSchema: GenMessage<RunTurnRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 6);
+  messageDesc(file_codex_v1_chat, 7);
 
 /**
  * @generated from message codex.v1.ChatEvent
@@ -263,7 +288,7 @@ export type ChatEvent = Message<"codex.v1.ChatEvent"> & {
  * Use `create(ChatEventSchema)` to create a new message.
  */
 export const ChatEventSchema: GenMessage<ChatEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 7);
+  messageDesc(file_codex_v1_chat, 8);
 
 /**
  * First event у RunTurn stream — несе local `turn_id` для per-turn reconnect.
@@ -283,7 +308,7 @@ export type TurnStartedEvent = Message<"codex.v1.TurnStartedEvent"> & {
  * Use `create(TurnStartedEventSchema)` to create a new message.
  */
 export const TurnStartedEventSchema: GenMessage<TurnStartedEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 8);
+  messageDesc(file_codex_v1_chat, 9);
 
 /**
  * @generated from message codex.v1.TokenEvent
@@ -300,7 +325,7 @@ export type TokenEvent = Message<"codex.v1.TokenEvent"> & {
  * Use `create(TokenEventSchema)` to create a new message.
  */
 export const TokenEventSchema: GenMessage<TokenEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 9);
+  messageDesc(file_codex_v1_chat, 10);
 
 /**
  * @generated from message codex.v1.ToolCallEvent
@@ -322,7 +347,7 @@ export type ToolCallEvent = Message<"codex.v1.ToolCallEvent"> & {
  * Use `create(ToolCallEventSchema)` to create a new message.
  */
 export const ToolCallEventSchema: GenMessage<ToolCallEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 10);
+  messageDesc(file_codex_v1_chat, 11);
 
 /**
  * @generated from message codex.v1.Attachment
@@ -349,7 +374,34 @@ export type Attachment = Message<"codex.v1.Attachment"> & {
  * Use `create(AttachmentSchema)` to create a new message.
  */
 export const AttachmentSchema: GenMessage<Attachment> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 11);
+  messageDesc(file_codex_v1_chat, 12);
+
+/**
+ * @generated from message codex.v1.ToolError
+ */
+export type ToolError = Message<"codex.v1.ToolError"> & {
+  /**
+   * Людинозрозумілий опис помилки (string-форма для UI).
+   *
+   * @generated from field: string message = 1;
+   */
+  message: string;
+
+  /**
+   * Стабільний machine-readable код (напр. "user_rejected" з MCP) — опційний,
+   * builtin-тулзи Codex його не виставляють.
+   *
+   * @generated from field: optional string code = 2;
+   */
+  code?: string | undefined;
+};
+
+/**
+ * Describes the message codex.v1.ToolError.
+ * Use `create(ToolErrorSchema)` to create a new message.
+ */
+export const ToolErrorSchema: GenMessage<ToolError> = /*@__PURE__*/
+  messageDesc(file_codex_v1_chat, 13);
 
 /**
  * @generated from message codex.v1.ToolResultEvent
@@ -371,9 +423,9 @@ export type ToolResultEvent = Message<"codex.v1.ToolResultEvent"> & {
   attachments: Attachment[];
 
   /**
-   * @generated from field: optional string error = 4;
+   * @generated from field: optional codex.v1.ToolError error = 4;
    */
-  error?: string | undefined;
+  error?: ToolError | undefined;
 };
 
 /**
@@ -381,7 +433,7 @@ export type ToolResultEvent = Message<"codex.v1.ToolResultEvent"> & {
  * Use `create(ToolResultEventSchema)` to create a new message.
  */
 export const ToolResultEventSchema: GenMessage<ToolResultEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 12);
+  messageDesc(file_codex_v1_chat, 14);
 
 /**
  * @generated from message codex.v1.DoneEvent
@@ -419,7 +471,7 @@ export type DoneEvent = Message<"codex.v1.DoneEvent"> & {
  * Use `create(DoneEventSchema)` to create a new message.
  */
 export const DoneEventSchema: GenMessage<DoneEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 13);
+  messageDesc(file_codex_v1_chat, 15);
 
 /**
  * @generated from message codex.v1.ErrorEvent
@@ -441,7 +493,7 @@ export type ErrorEvent = Message<"codex.v1.ErrorEvent"> & {
  * Use `create(ErrorEventSchema)` to create a new message.
  */
 export const ErrorEventSchema: GenMessage<ErrorEvent> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 14);
+  messageDesc(file_codex_v1_chat, 16);
 
 /**
  * @generated from message codex.v1.InterruptTurnRequest
@@ -458,7 +510,7 @@ export type InterruptTurnRequest = Message<"codex.v1.InterruptTurnRequest"> & {
  * Use `create(InterruptTurnRequestSchema)` to create a new message.
  */
 export const InterruptTurnRequestSchema: GenMessage<InterruptTurnRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 15);
+  messageDesc(file_codex_v1_chat, 17);
 
 /**
  * @generated from message codex.v1.InterruptTurnResponse
@@ -471,7 +523,7 @@ export type InterruptTurnResponse = Message<"codex.v1.InterruptTurnResponse"> & 
  * Use `create(InterruptTurnResponseSchema)` to create a new message.
  */
 export const InterruptTurnResponseSchema: GenMessage<InterruptTurnResponse> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 16);
+  messageDesc(file_codex_v1_chat, 18);
 
 /**
  * Resume mid-turn stream після reconnect. Server XREADає per-turn Redis stream
@@ -510,7 +562,7 @@ export type TailTurnRequest = Message<"codex.v1.TailTurnRequest"> & {
  * Use `create(TailTurnRequestSchema)` to create a new message.
  */
 export const TailTurnRequestSchema: GenMessage<TailTurnRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 17);
+  messageDesc(file_codex_v1_chat, 19);
 
 /**
  * Append text to the currently running turn (codex's `turn/steer` RPC).
@@ -536,7 +588,7 @@ export type SteerTurnRequest = Message<"codex.v1.SteerTurnRequest"> & {
  * Use `create(SteerTurnRequestSchema)` to create a new message.
  */
 export const SteerTurnRequestSchema: GenMessage<SteerTurnRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 18);
+  messageDesc(file_codex_v1_chat, 20);
 
 /**
  * @generated from message codex.v1.SteerTurnResponse
@@ -553,7 +605,92 @@ export type SteerTurnResponse = Message<"codex.v1.SteerTurnResponse"> & {
  * Use `create(SteerTurnResponseSchema)` to create a new message.
  */
 export const SteerTurnResponseSchema: GenMessage<SteerTurnResponse> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 19);
+  messageDesc(file_codex_v1_chat, 21);
+
+/**
+ * Server-streamed snapshot of "which of MY chats currently have a running turn".
+ * Bootstrap snapshot живе у `ListChats.Chat.active_turn_id` — стрім дає тільки
+ * delta-події (started/ended). Один підпис на користувача, працює крізь усі чати.
+ *
+ * @generated from message codex.v1.StreamChatActivityRequest
+ */
+export type StreamChatActivityRequest = Message<"codex.v1.StreamChatActivityRequest"> & {
+};
+
+/**
+ * Describes the message codex.v1.StreamChatActivityRequest.
+ * Use `create(StreamChatActivityRequestSchema)` to create a new message.
+ */
+export const StreamChatActivityRequestSchema: GenMessage<StreamChatActivityRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_chat, 22);
+
+/**
+ * @generated from message codex.v1.ChatTurnStarted
+ */
+export type ChatTurnStarted = Message<"codex.v1.ChatTurnStarted"> & {
+  /**
+   * @generated from field: int64 turn_id = 1;
+   */
+  turnId: bigint;
+};
+
+/**
+ * Describes the message codex.v1.ChatTurnStarted.
+ * Use `create(ChatTurnStartedSchema)` to create a new message.
+ */
+export const ChatTurnStartedSchema: GenMessage<ChatTurnStarted> = /*@__PURE__*/
+  messageDesc(file_codex_v1_chat, 23);
+
+/**
+ * @generated from message codex.v1.ChatTurnEnded
+ */
+export type ChatTurnEnded = Message<"codex.v1.ChatTurnEnded"> & {
+  /**
+   * @generated from field: int64 turn_id = 1;
+   */
+  turnId: bigint;
+};
+
+/**
+ * Describes the message codex.v1.ChatTurnEnded.
+ * Use `create(ChatTurnEndedSchema)` to create a new message.
+ */
+export const ChatTurnEndedSchema: GenMessage<ChatTurnEnded> = /*@__PURE__*/
+  messageDesc(file_codex_v1_chat, 24);
+
+/**
+ * @generated from message codex.v1.ChatActivityEvent
+ */
+export type ChatActivityEvent = Message<"codex.v1.ChatActivityEvent"> & {
+  /**
+   * @generated from field: int64 chat_id = 1;
+   */
+  chatId: bigint;
+
+  /**
+   * @generated from oneof codex.v1.ChatActivityEvent.kind
+   */
+  kind: {
+    /**
+     * @generated from field: codex.v1.ChatTurnStarted turn_started = 2;
+     */
+    value: ChatTurnStarted;
+    case: "turnStarted";
+  } | {
+    /**
+     * @generated from field: codex.v1.ChatTurnEnded turn_ended = 3;
+     */
+    value: ChatTurnEnded;
+    case: "turnEnded";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message codex.v1.ChatActivityEvent.
+ * Use `create(ChatActivityEventSchema)` to create a new message.
+ */
+export const ChatActivityEventSchema: GenMessage<ChatActivityEvent> = /*@__PURE__*/
+  messageDesc(file_codex_v1_chat, 25);
 
 /**
  * @generated from message codex.v1.StreamCodexUsageRequest
@@ -566,7 +703,7 @@ export type StreamCodexUsageRequest = Message<"codex.v1.StreamCodexUsageRequest"
  * Use `create(StreamCodexUsageRequestSchema)` to create a new message.
  */
 export const StreamCodexUsageRequestSchema: GenMessage<StreamCodexUsageRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 20);
+  messageDesc(file_codex_v1_chat, 26);
 
 /**
  * @generated from message codex.v1.RefreshCodexUsageRequest
@@ -579,7 +716,7 @@ export type RefreshCodexUsageRequest = Message<"codex.v1.RefreshCodexUsageReques
  * Use `create(RefreshCodexUsageRequestSchema)` to create a new message.
  */
 export const RefreshCodexUsageRequestSchema: GenMessage<RefreshCodexUsageRequest> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 21);
+  messageDesc(file_codex_v1_chat, 27);
 
 /**
  * @generated from message codex.v1.UsageWindow
@@ -606,7 +743,7 @@ export type UsageWindow = Message<"codex.v1.UsageWindow"> & {
  * Use `create(UsageWindowSchema)` to create a new message.
  */
 export const UsageWindowSchema: GenMessage<UsageWindow> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 22);
+  messageDesc(file_codex_v1_chat, 28);
 
 /**
  * Sidecar may not expose `account/rateLimits/read` — in that case all fields
@@ -636,7 +773,7 @@ export type CodexUsage = Message<"codex.v1.CodexUsage"> & {
  * Use `create(CodexUsageSchema)` to create a new message.
  */
 export const CodexUsageSchema: GenMessage<CodexUsage> = /*@__PURE__*/
-  messageDesc(file_codex_v1_chat, 23);
+  messageDesc(file_codex_v1_chat, 29);
 
 /**
  * @generated from enum codex.v1.ChatSource
@@ -675,6 +812,14 @@ export const ChatService: GenService<{
     methodKind: "unary";
     input: typeof ListChatsRequestSchema;
     output: typeof ListChatsResponseSchema;
+  },
+  /**
+   * @generated from rpc codex.v1.ChatService.CreateChat
+   */
+  createChat: {
+    methodKind: "unary";
+    input: typeof CreateChatRequestSchema;
+    output: typeof ChatSchema;
   },
   /**
    * @generated from rpc codex.v1.ChatService.GetChat
@@ -737,6 +882,14 @@ export const ChatService: GenService<{
    * snapshot для instant first frame), далі pub/sub-driven (event на кожен
    * `finalize_once`). Жодного periodic polling.
    *
+   * @generated from rpc codex.v1.ChatService.StreamChatActivity
+   */
+  streamChatActivity: {
+    methodKind: "server_streaming";
+    input: typeof StreamChatActivityRequestSchema;
+    output: typeof ChatActivityEventSchema;
+  },
+  /**
    * @generated from rpc codex.v1.ChatService.StreamCodexUsage
    */
   streamCodexUsage: {

@@ -1,15 +1,31 @@
 """Atomic turn lifecycle transitions. Tx boundary lives at the caller."""
 
+import asyncio
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import CursorResult, event, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Turn, TurnStatus
+from app.services.chat_activity import publish_turn_ended, publish_turn_started
 from app.services.turns.schemas import TurnCreate, TurnRow
+
+_PENDING_PUBLISHES: set[asyncio.Task[None]] = set()
+
+
+def _publish_after_commit(session: AsyncSession, coro_factory) -> None:
+    """Defer a publish until the caller's transaction actually commits.
+    On rollback the hook does not fire → no phantom events for unpersisted rows.
+    Strong-ref tasks in _PENDING_PUBLISHES so the GC doesn't kill them mid-flight."""
+
+    @event.listens_for(session.sync_session, "after_commit", once=True)
+    def _fire(_session) -> None:
+        task = asyncio.create_task(coro_factory())
+        _PENDING_PUBLISHES.add(task)
+        task.add_done_callback(_PENDING_PUBLISHES.discard)
 
 
 def _stream_key(turn_id: int) -> str:
@@ -30,10 +46,15 @@ class TurnService:
         (інший active turn у тому ж chat). Caller-у пропонує retry-сценарій
         без catch-у DB-exception на handler-рівні."""
         try:
-            return await self.create_starting(session, payload)
+            row = await self.create_starting(session, payload)
         except IntegrityError:
             await session.rollback()
             return None
+        _publish_after_commit(
+            session,
+            lambda: publish_turn_started(row.user_id, row.chat_id, row.id),
+        )
+        return row
 
     async def create_starting(
         self,
@@ -152,9 +173,17 @@ class TurnService:
                 error_detail=error_detail,
                 completed_at=now,
             )
+            .returning(Turn.chat_id, Turn.user_id)
         )
-        result = cast(CursorResult, await session.execute(stmt))
-        return bool(result.rowcount)
+        row = (await session.execute(stmt)).first()
+        if row is None:
+            return False
+        chat_id, user_id = row
+        _publish_after_commit(
+            session,
+            lambda: publish_turn_ended(user_id, chat_id, turn_id),
+        )
+        return True
 
     async def get_active_for_chat(
         self,
@@ -172,6 +201,20 @@ class TurnService:
         row = await session.execute(stmt)
         turn = row.scalar_one_or_none()
         return TurnRow.model_validate(turn) if turn is not None else None
+
+    async def active_ids_by_chat_for_user(
+        self,
+        session: AsyncSession,
+        user_id: int,
+    ) -> dict[int, int]:
+        """Карта `{chat_id: turn_id}` для всіх живих турнів юзера. Зі snapshot-ом
+        UI ініціалізує sidebar-індикатор без додаткових round-trip'ів."""
+        stmt = select(Turn.chat_id, Turn.id).where(
+            Turn.user_id == user_id,
+            Turn.status.in_((TurnStatus.STARTING, TurnStatus.RUNNING)),
+        )
+        rows = (await session.execute(stmt)).all()
+        return {chat_id: turn_id for chat_id, turn_id in rows}
 
     async def get_by_id(
         self,

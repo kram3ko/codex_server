@@ -107,16 +107,16 @@
   }
 </script>
 
-<div class="relative overflow-hidden border-t border-[var(--color-border)] bg-gradient-to-br from-[oklch(22%_0.012_250/0.7)] to-[oklch(18%_0.014_280/0.5)] px-3.5 py-3 backdrop-blur">
+<div class="usage-panel relative overflow-hidden px-3.5 py-3">
   <div class="mb-2.5 flex items-center justify-between">
     <div class="flex items-center gap-1.5">
       <Sparkles size={12} class="text-[var(--color-accent)]" />
-      <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[oklch(82%_0.012_100)]">
+      <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--usage-text)]">
         {usage?.planType || "Codex"}
       </span>
     </div>
     <button
-      class="grid size-7 place-items-center rounded-md text-[oklch(72%_0.012_100)] transition hover:bg-[oklch(96%_0.01_100/0.08)] hover:text-[var(--color-accent)] active:scale-90"
+      class="usage-button grid size-7 place-items-center rounded-md transition active:scale-90"
       title="Refresh usage"
       type="button"
       onclick={refresh}
@@ -131,13 +131,13 @@
         {#each windows as w (w.windowMinutes)}
           <div class="space-y-1">
             <div class="flex items-baseline justify-between text-[11.5px]">
-              <span class="font-medium text-[oklch(82%_0.012_100)]">{labelFor(w.windowMinutes)}</span>
+              <span class="font-medium text-[var(--usage-text)]">{labelFor(w.windowMinutes)}</span>
               <span class="flex items-baseline gap-1.5 tabular-nums">
-                <span class="font-semibold text-[oklch(82%_0.012_100)]">{w.usedPercent.toFixed(0)}%</span>
-                <span class="text-[10.5px] text-[oklch(72%_0.012_100)]">· reset {formatReset(w)}</span>
+                <span class="font-semibold text-[var(--usage-text)]">{w.usedPercent.toFixed(0)}%</span>
+                <span class="text-[10.5px] text-[var(--usage-muted)]">· reset {formatReset(w)}</span>
               </span>
             </div>
-            <div class="relative h-1.5 overflow-hidden rounded-full bg-[oklch(96%_0.01_100/0.08)]">
+            <div class="usage-track relative h-1.5 overflow-hidden rounded-full">
               <div
                 class="h-full rounded-full bar-fill"
                 style="width: {Math.min(100, w.usedPercent)}%; background: {barGradient(w.usedPercent)};"
@@ -149,21 +149,51 @@
     {/key}
   {:else if loading}
     <div class="space-y-2">
-      <div class="h-1.5 animate-pulse rounded-full bg-[oklch(96%_0.01_100/0.08)]"></div>
-      <div class="h-1.5 animate-pulse rounded-full bg-[oklch(96%_0.01_100/0.08)]"></div>
+      <div class="usage-track h-1.5 animate-pulse rounded-full"></div>
+      <div class="usage-track h-1.5 animate-pulse rounded-full"></div>
     </div>
   {:else}
-    <div class="text-[11px] text-[oklch(72%_0.012_100)]">No data</div>
+    <div class="text-[11px] text-[var(--usage-muted)]">No data</div>
   {/if}
 
   {#if loadedAt}
-    <div class="mt-2.5 text-[10px] text-[oklch(72%_0.012_100)]">
+    <div class="mt-2.5 text-[10px] text-[var(--usage-muted)]">
       updated {formatLocal(loadedAt)}
     </div>
   {/if}
 </div>
 
 <style>
+  .usage-panel {
+    --usage-text: color-mix(in oklch, var(--color-text) 84%, transparent);
+    --usage-muted: color-mix(in oklch, var(--color-text) 62%, transparent);
+    --usage-panel-bg: color-mix(in oklch, var(--color-surface) 42%, transparent);
+    --usage-track-bg: color-mix(in oklch, var(--color-border) 42%, transparent);
+
+    color: var(--usage-text);
+    background: var(--usage-panel-bg);
+    border-top: 1px solid color-mix(in oklch, var(--color-border) 64%, transparent);
+    backdrop-filter: blur(12px) saturate(125%);
+    -webkit-backdrop-filter: blur(12px) saturate(125%);
+  }
+
+  :global(:root[data-theme="light"]) .usage-panel {
+    --usage-panel-bg: color-mix(in oklch, var(--color-surface) 72%, transparent);
+    --usage-muted: color-mix(in oklch, var(--color-text) 58%, white 16%);
+  }
+
+  .usage-button {
+    color: var(--usage-muted);
+  }
+  .usage-button:hover {
+    color: var(--color-accent);
+    background: color-mix(in oklch, var(--color-surface-2) 54%, transparent);
+  }
+
+  .usage-track {
+    background: var(--usage-track-bg);
+  }
+
   .bar-fill {
     transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1), background 0.4s ease;
     box-shadow: 0 0 8px oklch(72% 0.18 175 / 0.35);
