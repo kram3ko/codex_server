@@ -35,13 +35,13 @@ async def _publish(
     payload = orjson.dumps({"chat_id": chat_id, "turn_id": turn_id, "kind": kind.value})
     try:
         await cache.publish(channel_for_user(user_id), payload)
-    except (RedisError, OSError):
+    except (RedisError, OSError) as exc:
         log.warning(
             "chat_activity_publish_failed",
             user_id=user_id,
             chat_id=chat_id,
             kind=kind.value,
-            exc_info=True,
+            exc_info=exc,
         )
 
 

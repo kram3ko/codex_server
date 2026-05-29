@@ -236,9 +236,7 @@ class TurnProgressReporter:
         async with self._draft_lock:
             try:
                 thread_id = (
-                    self._message.message_thread_id
-                    if self._message.is_topic_message
-                    else None
+                    self._message.message_thread_id if self._message.is_topic_message else None
                 )
                 await bot.send_message_draft(
                     chat_id=self._message.chat.id,

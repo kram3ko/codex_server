@@ -243,9 +243,7 @@ class ChatRPC(ChatProtocol):
                 )
         else:
             async with SessionLocal() as db:
-                await load_chat_owned(
-                    db, request.chat_id, user.id, expected_source=ChatSource.WEB
-                )
+                await load_chat_owned(db, request.chat_id, user.id, expected_source=ChatSource.WEB)
                 target_turn = await turn_service.get_active_for_chat(db, request.chat_id)
             if target_turn is None:
                 async with SessionLocal() as db:
