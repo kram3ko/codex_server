@@ -36,7 +36,7 @@ from app.services.turns.probe import (
 )
 from app.tg.markdown import tg_markdown
 from app.tg.media import PreparedTurn
-from app.tg.progress import TurnOutcome, TurnProgressReporter
+from app.tg.progress import TurnProgressReporter
 from app.tg.turn.control import emit_failure
 from app.tg.turn.outcomes import handle_done, handle_dropped_stream
 from app.tg.turn.persistence import persist_assistant_turn
@@ -114,7 +114,6 @@ async def stream_turn(
                 case ToolResultEvent(name=name, error=error):
                     await progress.mark_tool_done(name, error=bool(error))
                 case ErrorEvent(code=code, detail=detail):
-                    progress.mark_outcome(TurnOutcome.FAILED)
                     await message.answer(
                         tg_markdown.escape(f"Codex error [{code}]: {detail or 'unknown error'}"),
                     )
@@ -139,7 +138,6 @@ async def stream_turn(
     except CodexTurnTerminal:
         raise
     except StaleTurnStreamError as exc:
-        progress.mark_outcome(TurnOutcome.FAILED)
         await interrupt_best_effort(client, reason="tg_stale_turn_stream")
         await quarantine_thread(client.current_thread_id)
         if collector.buffer or collector.tool_calls or collector.attachments:
@@ -173,7 +171,6 @@ async def stream_turn(
         ) from exc
 
     # Stream завершився без done/error → STREAM_DROPPED.
-    progress.mark_outcome(TurnOutcome.FAILED)
     if not collector.done_seen:
         await handle_dropped_stream(
             session,

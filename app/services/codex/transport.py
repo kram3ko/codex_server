@@ -11,7 +11,7 @@ Lifecycle: `connect()` ідемпотентний; `close()` final, reconnect п
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import orjson
@@ -21,7 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 log = structlog.get_logger(__name__)
 
+type RequestHandler = Callable[[dict[str, Any]], Awaitable[Any]]
+
 _JSONRPC_VERSION = "2.0"
+_JSONRPC_METHOD_NOT_FOUND = -32601
+_JSONRPC_INTERNAL_ERROR = -32603
 _DEFAULT_REQUEST_TIMEOUT = 60.0
 # Default — per-CodexClient. Caller (runner.py) override'ить через ctor
 # залежно від sidecar роль (admin: ~400, guest: ~1000+ для 500 юзерів).
@@ -85,6 +89,11 @@ class AppServerClient:
         self._reader_task: asyncio.Task | None = None
         self._explicit_close = False
         self._connect_lock = asyncio.Lock()
+        # Server-initiated JSON-RPC requests (id + method) — наприклад
+        # `elicitation/create` від MCP-серверів через codex-cli sidecar.
+        # Без handler'а такі запити висять до hard-cap timeout турну.
+        self._request_handlers: dict[str, RequestHandler] = {}
+        self._request_tasks: set[asyncio.Task] = set()
 
     @property
     def is_connected(self) -> bool:
@@ -160,6 +169,15 @@ class AppServerClient:
         }
         await self._send(payload)
 
+    def register_request_handler(self, method: str, handler: RequestHandler) -> None:
+        """Plug a handler for server-initiated JSON-RPC requests of `method`.
+
+        Handler returns the `result` payload; raised exceptions перетворюються
+        у JSON-RPC error response. Один method = один handler (re-register
+        перетирає попередній).
+        """
+        self._request_handlers[method] = handler
+
     async def notifications(self) -> AsyncIterator[Notification]:
         """Iterate received notifications until close. None у черзі = sentinel."""
         while True:
@@ -218,6 +236,12 @@ class AppServerClient:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._reader_task
             self._reader_task = None
+        for task in list(self._request_tasks):
+            task.cancel()
+        for task in list(self._request_tasks):
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        self._request_tasks.clear()
         if self._ws is not None:
             with contextlib.suppress(Exception):
                 await self._ws.close()
@@ -230,12 +254,72 @@ class AppServerClient:
             log.warning("app_server_bad_frame", frame=raw[:200])
             return
 
-        if "id" in message and message["id"] is not None:
+        has_id = "id" in message and message["id"] is not None
+        has_method = "method" in message
+        if has_id and has_method:
+            self._spawn_request_handler(message)
+        elif has_id:
             self._resolve_response(message)
-        elif "method" in message:
+        elif has_method:
             self._enqueue_notification(message)
         else:
             log.warning("app_server_unknown_message", keys=list(message.keys()))
+
+    def _spawn_request_handler(self, message: dict[str, Any]) -> None:
+        task = asyncio.create_task(
+            self._handle_request(message),
+            name=f"app_server_req_{message.get('method', 'unknown')}",
+        )
+        self._request_tasks.add(task)
+        task.add_done_callback(self._request_tasks.discard)
+
+    async def _handle_request(self, message: dict[str, Any]) -> None:
+        req_id = message["id"]
+        method = message["method"]
+        raw_params = message.get("params")
+        params = raw_params if isinstance(raw_params, dict) else {}
+        handler = self._request_handlers.get(method)
+        if handler is None:
+            log.warning(
+                "app_server_unhandled_request",
+                method=method,
+                param_keys=list(params.keys()),
+            )
+            await self._send_response(
+                req_id,
+                error={
+                    "code": _JSONRPC_METHOD_NOT_FOUND,
+                    "message": f"method not supported: {method}",
+                },
+            )
+            return
+        try:
+            result = await handler(params)
+        except Exception as exc:
+            log.exception("app_server_request_handler_failed", method=method)
+            await self._send_response(
+                req_id,
+                error={"code": _JSONRPC_INTERNAL_ERROR, "message": str(exc)},
+            )
+            return
+        await self._send_response(req_id, result=result)
+
+    async def _send_response(
+        self,
+        req_id: Any,
+        *,
+        result: Any = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {"jsonrpc": _JSONRPC_VERSION, "id": req_id}
+        if error is not None:
+            payload["error"] = error
+        else:
+            payload["result"] = result
+        try:
+            await self._send(payload)
+        except Exception:
+            log.exception("app_server_response_send_failed", id=req_id)
 
     def _enqueue_notification(self, message: dict[str, Any]) -> None:
         # JSON-RPC дозволяє params: object | array | absent — нам потрібен object,

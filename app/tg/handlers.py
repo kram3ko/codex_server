@@ -14,11 +14,18 @@ from app.services.codex_usage.default import codex_usage_service
 from app.services.codex_usage.service import CodexUsage, UsageWindow
 from app.services.events.default import event_service
 from app.tg.markdown import tg_markdown
-from app.tg.progress import CB_TURN_NEW, CB_TURN_STOP
-from app.tg.sessions import ChatSessionStore
+from app.tg.progress import CB_TURN_STOP
+from app.tg.sessions import ChatSessionStore, TGSessionKey
 from app.tg.turn import TurnRunner, cancel_turn
 
 log = structlog.get_logger(__name__)
+
+
+def _topic_key(message: Message) -> TGSessionKey:
+    # `is_topic_message` фільтрує не-форумні reply: у них теж є `message_thread_id`,
+    # але вони мають лишатись в одному чаті групи, не плодити нові.
+    thread_id = message.message_thread_id if message.is_topic_message else None
+    return (message.chat.id, thread_id)
 
 
 class TGHandlers:
@@ -36,7 +43,7 @@ class TGHandlers:
     async def on_reset(self, message: Message) -> None:
         if message.chat is None:
             return
-        existed = await self._sessions.reset(message.chat.id)
+        existed = await self._sessions.reset(_topic_key(message))
         await message.answer(
             tg_markdown.escape(
                 "Session reset." if existed else "No active session.",
@@ -47,7 +54,7 @@ class TGHandlers:
         # Очищає DB-кеш thread_id; наступний turn відкриє свіжий thread.
         if message.chat is None:
             return
-        session = await self._sessions.get(message.chat.id)
+        session = await self._sessions.get(_topic_key(message))
         if session is None:
             await message.answer(tg_markdown.escape("New thread will open with the next message."))
             return
@@ -66,7 +73,7 @@ class TGHandlers:
         # /stop кнопка/команда — interrupt running codex turn + cancel local task.
         if message.chat is None:
             return
-        session = await self._sessions.get(message.chat.id)
+        session = await self._sessions.get(_topic_key(message))
         if session is None:
             await message.answer(tg_markdown.escape("No active turn to stop."))
             return
@@ -83,9 +90,11 @@ class TGHandlers:
             or message.from_user.id not in settings.TG_ADMIN_USER_IDS
         ):
             return
+        _, thread_id = _topic_key(message)
         session = await self._sessions.get_or_open(
             tg_user_id=message.from_user.id,
             tg_chat_id=message.chat.id,
+            tg_message_thread_id=thread_id,
             display_name=message.from_user.full_name,
         )
         async with open_codex_turn(
@@ -98,31 +107,20 @@ class TGHandlers:
         await message.answer(tg_markdown.escape(_format_codex_usage(usage)))
 
     async def on_callback(self, query: CallbackQuery) -> None:
-        # Inline-кнопки: Stop (interrupt) і New (clear thread_id у БД). Steer
-        # кнопка прибрана — auto-steer спрацьовує сам коли юзер пише під час
-        # активного turn'а.
-        if query.message is None or query.message.chat is None:
+        # Тільки Stop у inline. /new команда лишається окремо як `on_new`.
+        # `query.message` може бути `InaccessibleMessage` (видалене) — там нема
+        # ні `is_topic_message`, ні `message_thread_id`; такий callback не має
+        # активної сесії за визначенням.
+        if not isinstance(query.message, Message):
             await query.answer()
             return
-        chat_id = query.message.chat.id
-        session = await self._sessions.get(chat_id)
+        session = await self._sessions.get(_topic_key(query.message))
         if session is None:
             await query.answer("No active session", show_alert=False)
             return
         if query.data == CB_TURN_STOP:
             cancelled = await cancel_turn(session)
             await query.answer("Зупинено" if cancelled else "Нема активного turn'а")
-        elif query.data == CB_TURN_NEW:
-            async with SessionLocal() as db:
-                await chat_service.set_codex_thread_id(db, session.db_chat_id, None)
-                await event_service.emit(
-                    db,
-                    EventKind.THREAD_RESET,
-                    chat_id=session.db_chat_id,
-                    user_id=session.db_user_id,
-                )
-                await db.commit()
-            await query.answer("Новий thread")
         else:
             await query.answer()
 

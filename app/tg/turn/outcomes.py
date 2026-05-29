@@ -104,18 +104,19 @@ async def send_response(
 ) -> None:
     # `handle()` уже відсік `message.chat is None`; bot гарантовано є.
     assert message.bot is not None and message.chat is not None
+    thread_id = message.message_thread_id if message.is_topic_message else None
     # Voice mode: повний текст одним голосовим — під час voice-input ми не
     # стрімили бульбашки, тож committed_prefix="". TTS-fail → текст-фолбек.
     if as_voice and final_text.strip():
-        sent = await send_voice_reply(message.bot, message.chat.id, final_text)
+        sent = await send_voice_reply(message.bot, message.chat.id, final_text, thread_id)
         if not sent:
-            await send_text(message.bot, message.chat.id, final_text)
+            await send_text(message.bot, message.chat.id, final_text, thread_id)
     else:
         remainder = strip_committed_prefix(final_text, committed_prefix)
         if remainder:
-            await send_text(message.bot, message.chat.id, remainder)
+            await send_text(message.bot, message.chat.id, remainder, thread_id)
     for attachment in attachments:
-        await send_attachment(message.bot, message.chat.id, attachment)
+        await send_attachment(message.bot, message.chat.id, attachment, thread_id)
 
 
 def strip_committed_prefix(text: str, committed: str) -> str:

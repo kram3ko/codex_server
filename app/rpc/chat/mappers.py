@@ -76,7 +76,9 @@ def chat_event_to_pb(event: ChatEvent) -> chat_pb2.ChatEvent:
                 attachments=[attachment_to_pb(a) for a in attachments],
             )
             if error is not None:
-                pb.error = redact_for_user(error, source="tool_result_error")
+                pb.error.message = redact_for_user(error.message, source="tool_result_error")
+                if error.code is not None:
+                    pb.error.code = error.code
             return chat_pb2.ChatEvent(tool_result=pb)
         case ErrorEvent(code=code, detail=detail):
             redacted = redact_for_user(detail, source="error_event") if detail else detail

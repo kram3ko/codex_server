@@ -23,30 +23,37 @@ class TGSessionBootstrap(BaseModel):
     display_name: str | None = Field(default=None, description="Display name з aiogram message.")
 
 
-class ChatSessionStore(BaseChatSessionStore[int, TGSessionBootstrap]):
+TGSessionKey = tuple[int, int | None]
+
+
+class ChatSessionStore(BaseChatSessionStore[TGSessionKey, TGSessionBootstrap]):
     async def get_or_open(
         self,
         tg_user_id: int,
         tg_chat_id: int,
+        tg_message_thread_id: int | None = None,
         display_name: str | None = None,
     ) -> ChatSession:
         return await self._get_or_open(
-            tg_chat_id,
+            (tg_chat_id, tg_message_thread_id),
             TGSessionBootstrap(tg_user_id=tg_user_id, display_name=display_name),
         )
 
     async def _bootstrap(
         self,
-        key: int,
+        key: TGSessionKey,
         bootstrap_arg: TGSessionBootstrap,
     ) -> SessionBootstrap:
+        tg_chat_id, tg_message_thread_id = key
         async with SessionLocal() as db:
             user = await user_service.get_or_create_by_tg(
                 db,
                 bootstrap_arg.tg_user_id,
                 bootstrap_arg.display_name,
             )
-            chat = await chat_service.get_or_create_for_tg(db, user.id, key)
+            chat = await chat_service.get_or_create_for_tg(
+                db, user.id, tg_chat_id, tg_message_thread_id
+            )
             is_admin = user.role == UserRole.ADMIN
             await db.commit()
             return SessionBootstrap(

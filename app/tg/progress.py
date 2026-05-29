@@ -21,7 +21,6 @@ from app.tg.markdown import tg_markdown
 log = structlog.get_logger(__name__)
 
 CB_TURN_STOP = "turn:stop"
-CB_TURN_NEW = "turn:new"
 
 
 class _ToolStatus(StrEnum):
@@ -37,31 +36,9 @@ _STATUS_ICONS: dict[_ToolStatus, str] = {
 }
 
 
-class TurnOutcome(StrEnum):
-    """Public — використовується callers'ами `mark_outcome`."""
-
-    SUCCESS = "success"
-    FAILED = "failed"
-    INTERRUPTED = "interrupted"
-
-
-_OUTCOME_ICON: dict[TurnOutcome, str] = {
-    TurnOutcome.SUCCESS: "✓",
-    TurnOutcome.FAILED: "✗",
-    TurnOutcome.INTERRUPTED: "⏸",
-}
-_OUTCOME_LABEL: dict[TurnOutcome, str] = {
-    TurnOutcome.SUCCESS: "Завершено",
-    TurnOutcome.FAILED: "Помилка",
-    TurnOutcome.INTERRUPTED: "Зупинено",
-}
-
 _DRAFT_TEXT_MAX = 4000
-_PROGRESS_BAR_WIDTH = 12
 
-# Multi-bubble streaming: чим більший chunk — тим менше edit'ів, тим менше
-# ratelimit-ризику. ~180 char-chunks з ≥1.2s паузою = ~50/min worst case,
-# Telegram per-chat send limit ≈ 30/min, тому throttle 1.2s — захист.
+# 180-char chunks + 1.2s throttle = ≤50 edits/min worst case (TG limit ≈30/min on send).
 _STREAM_MIN_CHARS = 180
 _STREAM_BUBBLE_MAX = 3500
 _STREAM_THROTTLE_S = 1.2
@@ -74,13 +51,10 @@ class _ToolEntry:
 
 
 def _turn_controls() -> InlineKeyboardMarkup:
-    # Steer-кнопку прибрано: достатньо просто написати наступне повідомлення —
-    # `runner._try_auto_steer` сам прив'яже його до running turn'а.
+    # Тільки Stop — Steer робить auto-steer на наступне повідомлення,
+    # New-thread був дублюючим (юзер може почати з /new коли треба).
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="⏸ Зупинити", callback_data=CB_TURN_STOP)],
-            [InlineKeyboardButton(text="🆕 Новий thread", callback_data=CB_TURN_NEW)],
-        ]
+        inline_keyboard=[[InlineKeyboardButton(text="⏹ Зупинити", callback_data=CB_TURN_STOP)]]
     )
 
 
@@ -102,13 +76,11 @@ class TurnProgressReporter:
         self._draft_throttle_s = draft_throttle_s
         self._draft_enabled = settings.TG_DRAFT_ENABLED if draft_enabled is None else draft_enabled
         self._draft_id = originator_message.message_id
-        self._started_at = time.monotonic()
         self._tools: list[_ToolEntry] = []
         self._last_draft_text: str = ""
         self._last_draft_at: float = 0.0
         self._status_message: Message | None = None
         self._last_status_text: str = ""
-        self._outcome: TurnOutcome = TurnOutcome.SUCCESS
         self._committed_text: str = ""
         self._stream_throttle_at: float = 0.0
         self._status_paused_until: float = 0.0
@@ -122,10 +94,6 @@ class TurnProgressReporter:
         """Text already published as separate bubbles via `note_partial`."""
         return self._committed_text
 
-    def mark_outcome(self, outcome: TurnOutcome) -> None:
-        """Caller signals final state; reflected у stop()'s edit."""
-        self._outcome = outcome
-
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="tg_turn_progress")
 
@@ -137,13 +105,10 @@ class TurnProgressReporter:
             self._task = None
         if self._status_message is None:
             return
-        text = self.compose_status_text(done=True)
-        # Skip edit якщо текст той самий — Telegram повертає `400 message
-        # not modified` і ми отримаємо марний log.warning.
-        if text != self._last_status_text:
-            with contextlib.suppress(Exception):
-                # No keyboard on the final state — turn is over, controls стали б no-op.
-                await self._status_message.edit_text(tg_markdown.escape(text), reply_markup=None)
+        # Видаляємо статус-повідомлення повністю — фінальний "✓ Завершено" не
+        # несе нової інфи (відповідь уже в потоці) і шумить у чаті.
+        with contextlib.suppress(Exception):
+            await self._status_message.delete()
         self._status_message = None
 
     async def note_tool(self, name: str) -> None:
@@ -205,10 +170,14 @@ class TurnProgressReporter:
                 await self.refresh_status()
                 now = time.monotonic()
                 if now - last_chat_action_at >= self._chat_action_period_s:
+                    thread_id = (
+                        self._message.message_thread_id if self._message.is_topic_message else None
+                    )
                     with contextlib.suppress(Exception):
                         await bot.send_chat_action(
                             chat_id=self._message.chat.id,
                             action=ChatAction.TYPING,
+                            message_thread_id=thread_id,
                         )
                     last_chat_action_at = now
                 await asyncio.sleep(self._tick_s)
@@ -244,17 +213,11 @@ class TurnProgressReporter:
                 return
         self._last_status_text = text
 
-    def compose_status_text(self, *, done: bool = False) -> str:
-        elapsed = int(time.monotonic() - self._started_at)
-        if done:
-            icon = _OUTCOME_ICON[self._outcome]
-            label = _OUTCOME_LABEL[self._outcome]
-        else:
-            icon = "⏳"
-            label = "Thinking…"
-        lines = [f"{icon} {label} {elapsed}s", _progress_bar(elapsed, done=done)]
-        lines.extend(f"{_STATUS_ICONS[entry.status]} {entry.name}" for entry in self._tools)
-        return "\n".join(lines)
+    def compose_status_text(self) -> str:
+        active = next((e for e in self._tools if e.status == _ToolStatus.RUNNING), None)
+        if active is not None:
+            return f"{_STATUS_ICONS[active.status]} {active.name}"
+        return "⏳ Thinking…"
 
     async def _render_draft(self, *, force: bool = False) -> None:
         if not self._draft_enabled:
@@ -272,10 +235,14 @@ class TurnProgressReporter:
             return
         async with self._draft_lock:
             try:
+                thread_id = (
+                    self._message.message_thread_id if self._message.is_topic_message else None
+                )
                 await bot.send_message_draft(
                     chat_id=self._message.chat.id,
                     draft_id=self._draft_id,
                     text=text[-_DRAFT_TEXT_MAX:],
+                    message_thread_id=thread_id,
                 )
             except TelegramAPIError as exc:
                 log.warning("tg_draft_failed", error=str(exc))
@@ -303,16 +270,3 @@ def _find_stream_split(tail: str) -> int | None:
     if len(tail) <= _STREAM_BUBBLE_MAX:
         return None
     return _STREAM_BUBBLE_MAX
-
-
-def _progress_bar(elapsed: int, *, done: bool = False) -> str:
-    if done:
-        return "▓" * _PROGRESS_BAR_WIDTH
-    width = _PROGRESS_BAR_WIDTH
-    window = 4
-    start = elapsed % width
-    cells = []
-    for index in range(width):
-        active = (index - start) % width < window
-        cells.append("▓" if active else "░")
-    return "".join(cells)

@@ -13,9 +13,10 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     String,
-    UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,7 +26,18 @@ from app.models.enums import ChatSource
 
 class Chat(Base):
     __tablename__ = "chats"
-    __table_args__ = (UniqueConstraint("source", "tg_chat_id", name="uq_chats_source_tg_chat_id"),)
+    # Partial: тільки TELEGRAM. WEB-рядки мають NULL у обох колонках і їх може бути
+    # багато на юзера. NULLS NOT DISTINCT — щоб личка (thread_id IS NULL) не дублилась.
+    __table_args__ = (
+        Index(
+            "uq_chats_tg_chat_thread",
+            "tg_chat_id",
+            "tg_message_thread_id",
+            unique=True,
+            postgresql_where=text("source = 'TELEGRAM'"),
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
 
     user_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -38,6 +50,7 @@ class Chat(Base):
         nullable=False,
     )
     tg_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    tg_message_thread_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Codex CLI sidecar тримає thread state in-memory. Зберігаємо id для
     # token-економії поки sidecar живе; на restart валідація йде через
     # optimistic retry: -32600 thread not found → invalidate + open new.

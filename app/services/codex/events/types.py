@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Any, ClassVar, TypedDict, cast
 
 import orjson
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ToolCallRecord(TypedDict):
@@ -53,6 +53,20 @@ class ToolCallEvent(_Frame):
     args: dict[str, Any] = Field(description="Аргументи виклику як отримано від Codex.")
 
 
+class ToolError(BaseModel):
+    """Структурована помилка tool-call.
+
+    Codex шле `error` як string (builtin-тулзи) або dict (MCP — наприклад
+    `{"message": "user rejected", "code": "user_rejected"}`). Зводимо в єдину
+    модель з обов'язковим `message` і опційним machine-readable `code`.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    message: str = Field(description="Людинозрозумілий опис помилки.")
+    code: str | None = Field(default=None, description="Стабільний код (для UI/розгалуження).")
+
+
 class ToolResultEvent(_Frame):
     type_tag: ClassVar[str] = "tool_result"
     name: str = Field(description="Ім'я тулзи, результат якої прийшов.")
@@ -60,7 +74,18 @@ class ToolResultEvent(_Frame):
     attachments: tuple[Attachment, ...] = Field(
         default=(), description="Файли/медіа, що їх тулза вкладає у результат."
     )
-    error: str | None = Field(default=None, description="Текст помилки, якщо тулза впала.")
+    error: ToolError | None = Field(default=None, description="Помилка тулзи, якщо була.")
+
+    @field_validator("error", mode="before")
+    @classmethod
+    def _coerce_error(cls, raw: Any) -> Any:
+        # Builtin-тулзи шлють plain string → wrap у ToolError(message=...).
+        # MCP шле dict → pydantic сам збере ToolError. None/empty → None.
+        if raw is None or raw == "":
+            return None
+        if isinstance(raw, str):
+            return {"message": raw}
+        return raw
 
 
 class DoneEvent(_Frame):

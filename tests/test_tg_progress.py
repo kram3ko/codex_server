@@ -1,6 +1,6 @@
 import pytest
 
-from app.tg.progress import TurnOutcome, TurnProgressReporter
+from app.tg.progress import TurnProgressReporter
 
 
 class _StubChat:
@@ -59,38 +59,44 @@ async def _setup_reporter_with_status() -> tuple[
 
 
 @pytest.mark.asyncio
-async def test_stop_marks_status_as_completed_and_drops_controls() -> None:
+async def test_stop_deletes_status_message() -> None:
     reporter, _originator, status = await _setup_reporter_with_status()
 
     await reporter.stop()
 
-    assert status.deleted is False
-    assert status.edited_text is not None
-    assert status.edited_text.startswith("✓ Завершено")
-    assert "▓▓▓▓▓▓▓▓▓▓▓▓" in status.edited_text
-    # Controls must be cleared after the turn — pressing them would be a no-op.
-    assert status.reply_markup is None
+    # Прибираємо статус повністю — фінального "Завершено" немає (юзеру важлива
+    # сама відповідь, а не post-факт індикатор).
+    assert status.deleted is True
 
 
 @pytest.mark.asyncio
-async def test_stop_marks_failed_outcome_when_set() -> None:
+async def test_stop_deletes_status_regardless_of_outcome() -> None:
     reporter, _originator, status = await _setup_reporter_with_status()
-    reporter.mark_outcome(TurnOutcome.FAILED)
 
     await reporter.stop()
 
-    assert status.edited_text is not None
-    assert status.edited_text.startswith("✗ Помилка")
-    assert status.reply_markup is None
+    assert status.deleted is True
 
 
-def test_status_message_contains_progress_bar() -> None:
+def test_status_text_thinking_when_no_active_tool() -> None:
     reporter = TurnProgressReporter(_OriginatorMessage())
 
-    text = reporter.compose_status_text()
+    assert reporter.compose_status_text() == "⏳ Thinking…"
 
-    assert text.startswith("⏳ Thinking…")
-    assert any(line.startswith("▓") or line.startswith("░") for line in text.splitlines())
+
+@pytest.mark.asyncio
+async def test_status_text_shows_only_running_tool() -> None:
+    reporter = TurnProgressReporter(_OriginatorMessage())
+
+    await reporter.note_tool("read_file")
+    assert reporter.compose_status_text() == "🔧 read_file"
+
+    await reporter.mark_tool_done("read_file")
+    # Завершені тулзи не висять у статусі — лишається базовий "Thinking".
+    assert reporter.compose_status_text() == "⏳ Thinking…"
+
+    await reporter.note_tool("write_file")
+    assert reporter.compose_status_text() == "🔧 write_file"
 
 
 @pytest.mark.asyncio

@@ -24,16 +24,21 @@ class _Result:
         rowcount: int = 0,
         scalar: Any = None,
         all_rows: Iterable | None = None,
+        first_row: Any = None,
     ) -> None:
         self.rowcount = rowcount
         self._scalar = scalar
         self._all = list(all_rows) if all_rows is not None else []
+        self._first = first_row
 
     def scalar_one_or_none(self) -> Any:
         return self._scalar
 
     def scalars(self) -> _Scalars:
         return _Scalars(self._all)
+
+    def first(self) -> Any:
+        return self._first
 
 
 class _Scalars:
@@ -53,6 +58,7 @@ class _FakeSession:
         get_row: Any = None,
         rows: Iterable | None = None,
         scalar: Any = None,
+        first_row: Any = None,
     ) -> None:
         self.added: list = []
         self.flushed = 0
@@ -61,6 +67,7 @@ class _FakeSession:
         self._get_row = get_row
         self._rows = rows
         self._scalar = scalar
+        self._first = first_row
 
     def add(self, obj: Any) -> None:
         # SQLAlchemy ORM зазвичай заповнює `id` після flush; для тесту назначаємо
@@ -74,7 +81,12 @@ class _FakeSession:
 
     async def execute(self, statement: Any) -> _Result:
         self.executed.append(statement)
-        return _Result(rowcount=self._rowcount, scalar=self._scalar, all_rows=self._rows)
+        return _Result(
+            rowcount=self._rowcount,
+            scalar=self._scalar,
+            all_rows=self._rows,
+            first_row=self._first,
+        )
 
     async def get(self, _entity: Any, _pk: Any) -> Any:
         return self._get_row
@@ -144,8 +156,14 @@ async def test_mark_running_returns_false_when_already_running() -> None:
     assert promoted is False
 
 
-async def test_finalize_once_emits_conditional_update() -> None:
-    session = _FakeSession(rowcount=1)
+async def test_finalize_once_emits_conditional_update(monkeypatch) -> None:
+    # Publish moved to an after_commit hook; FakeSession has no commit lifecycle,
+    # so we only assert the SQL contract here. The hook itself is exercised via
+    # integration paths in the live runner.
+    monkeypatch.setattr(
+        "app.services.turns.service._publish_after_commit", lambda *_a, **_kw: None
+    )
+    session = _FakeSession(rowcount=1, first_row=(99, 42))
     service = TurnService()
 
     finalized = await service.finalize_once(

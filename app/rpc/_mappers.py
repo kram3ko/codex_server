@@ -63,7 +63,7 @@ def user_to_pb(u: User) -> user_pb2.User:
     return msg
 
 
-def chat_to_pb(c: Chat) -> chat_pb2.Chat:
+def chat_to_pb(c: Chat, *, active_turn_id: int | None = None) -> chat_pb2.Chat:
     msg = chat_pb2.Chat(
         id=c.id,
         user_id=c.user_id,
@@ -77,6 +77,8 @@ def chat_to_pb(c: Chat) -> chat_pb2.Chat:
         msg.codex_thread_id = c.codex_thread_id
     if c.title is not None:
         msg.title = c.title
+    if active_turn_id is not None:
+        msg.active_turn_id = active_turn_id
     return msg
 
 

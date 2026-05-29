@@ -22,6 +22,9 @@ class ChatService(Protocol):
     async def list_chats(self, request: codex_dot_v1_dot_chat__pb2.ListChatsRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.ListChatsResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    async def create_chat(self, request: codex_dot_v1_dot_chat__pb2.CreateChatRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.Chat:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
     async def get_chat(self, request: codex_dot_v1_dot_chat__pb2.GetChatRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.Chat:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
@@ -41,6 +44,9 @@ class ChatService(Protocol):
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
     async def steer_turn(self, request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    def stream_chat_activity(self, request: codex_dot_v1_dot_chat__pb2.StreamChatActivityRequest, ctx: RequestContext) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.ChatActivityEvent]:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
     def stream_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest, ctx: RequestContext) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.CodexUsage]:
@@ -64,6 +70,16 @@ class ChatServiceASGIApplication(ConnectASGIApplication[ChatService]):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=svc.list_chats,
+                ),
+                "/codex.v1.ChatService/CreateChat": Endpoint.unary(
+                    method=MethodInfo(
+                        name="CreateChat",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.CreateChatRequest,
+                        output=codex_dot_v1_dot_chat__pb2.Chat,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.create_chat,
                 ),
                 "/codex.v1.ChatService/GetChat": Endpoint.unary(
                     method=MethodInfo(
@@ -135,6 +151,16 @@ class ChatServiceASGIApplication(ConnectASGIApplication[ChatService]):
                     ),
                     function=svc.steer_turn,
                 ),
+                "/codex.v1.ChatService/StreamChatActivity": Endpoint.server_stream(
+                    method=MethodInfo(
+                        name="StreamChatActivity",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.StreamChatActivityRequest,
+                        output=codex_dot_v1_dot_chat__pb2.ChatActivityEvent,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.stream_chat_activity,
+                ),
                 "/codex.v1.ChatService/StreamCodexUsage": Endpoint.server_stream(
                     method=MethodInfo(
                         name="StreamCodexUsage",
@@ -183,6 +209,26 @@ class ChatServiceClient(ConnectClient):
                 service_name="codex.v1.ChatService",
                 input=codex_dot_v1_dot_chat__pb2.ListChatsRequest,
                 output=codex_dot_v1_dot_chat__pb2.ListChatsResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    async def create_chat(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.CreateChatRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_chat__pb2.Chat:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="CreateChat",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.CreateChatRequest,
+                output=codex_dot_v1_dot_chat__pb2.Chat,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,
@@ -329,6 +375,26 @@ class ChatServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    def stream_chat_activity(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.StreamChatActivityRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> AsyncIterator[codex_dot_v1_dot_chat__pb2.ChatActivityEvent]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="StreamChatActivity",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.StreamChatActivityRequest,
+                output=codex_dot_v1_dot_chat__pb2.ChatActivityEvent,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
     def stream_codex_usage(
         self,
         request: codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest,
@@ -376,6 +442,8 @@ class ChatServiceClient(ConnectClient):
 class ChatServiceSync(Protocol):
     def list_chats(self, request: codex_dot_v1_dot_chat__pb2.ListChatsRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.ListChatsResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def create_chat(self, request: codex_dot_v1_dot_chat__pb2.CreateChatRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.Chat:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def get_chat(self, request: codex_dot_v1_dot_chat__pb2.GetChatRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.Chat:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def rename_chat(self, request: codex_dot_v1_dot_chat__pb2.RenameChatRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.Chat:
@@ -389,6 +457,8 @@ class ChatServiceSync(Protocol):
     def interrupt_turn(self, request: codex_dot_v1_dot_chat__pb2.InterruptTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.InterruptTurnResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def steer_turn(self, request: codex_dot_v1_dot_chat__pb2.SteerTurnRequest, ctx: RequestContext) -> codex_dot_v1_dot_chat__pb2.SteerTurnResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def stream_chat_activity(self, request: codex_dot_v1_dot_chat__pb2.StreamChatActivityRequest, ctx: RequestContext) -> Iterator[codex_dot_v1_dot_chat__pb2.ChatActivityEvent]:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def stream_codex_usage(self, request: codex_dot_v1_dot_chat__pb2.StreamCodexUsageRequest, ctx: RequestContext) -> Iterator[codex_dot_v1_dot_chat__pb2.CodexUsage]:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
@@ -409,6 +479,16 @@ class ChatServiceWSGIApplication(ConnectWSGIApplication):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=service.list_chats,
+                ),
+                "/codex.v1.ChatService/CreateChat": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="CreateChat",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.CreateChatRequest,
+                        output=codex_dot_v1_dot_chat__pb2.Chat,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.create_chat,
                 ),
                 "/codex.v1.ChatService/GetChat": EndpointSync.unary(
                     method=MethodInfo(
@@ -480,6 +560,16 @@ class ChatServiceWSGIApplication(ConnectWSGIApplication):
                     ),
                     function=service.steer_turn,
                 ),
+                "/codex.v1.ChatService/StreamChatActivity": EndpointSync.server_stream(
+                    method=MethodInfo(
+                        name="StreamChatActivity",
+                        service_name="codex.v1.ChatService",
+                        input=codex_dot_v1_dot_chat__pb2.StreamChatActivityRequest,
+                        output=codex_dot_v1_dot_chat__pb2.ChatActivityEvent,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.stream_chat_activity,
+                ),
                 "/codex.v1.ChatService/StreamCodexUsage": EndpointSync.server_stream(
                     method=MethodInfo(
                         name="StreamCodexUsage",
@@ -528,6 +618,26 @@ class ChatServiceClientSync(ConnectClientSync):
                 service_name="codex.v1.ChatService",
                 input=codex_dot_v1_dot_chat__pb2.ListChatsRequest,
                 output=codex_dot_v1_dot_chat__pb2.ListChatsResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def create_chat(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.CreateChatRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_chat__pb2.Chat:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="CreateChat",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.CreateChatRequest,
+                output=codex_dot_v1_dot_chat__pb2.Chat,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,
@@ -668,6 +778,26 @@ class ChatServiceClientSync(ConnectClientSync):
                 service_name="codex.v1.ChatService",
                 input=codex_dot_v1_dot_chat__pb2.SteerTurnRequest,
                 output=codex_dot_v1_dot_chat__pb2.SteerTurnResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def stream_chat_activity(
+        self,
+        request: codex_dot_v1_dot_chat__pb2.StreamChatActivityRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> Iterator[codex_dot_v1_dot_chat__pb2.ChatActivityEvent]:
+        return self.execute_server_stream(
+            request=request,
+            method=MethodInfo(
+                name="StreamChatActivity",
+                service_name="codex.v1.ChatService",
+                input=codex_dot_v1_dot_chat__pb2.StreamChatActivityRequest,
+                output=codex_dot_v1_dot_chat__pb2.ChatActivityEvent,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,

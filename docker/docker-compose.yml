@@ -26,6 +26,7 @@ services:
       - ../.codex:/home/codex/.codex:rw
       - /var/run/docker.sock:/var/run/docker.sock
       - ..:/home/codex/workspace:rw
+      - /Users/expert/My_Work/CivicAi:/home/codex/projects/CivicAi:rw
       - ~/.ssh:/home/codex/.ssh:ro
     tmpfs:
       - /codex-feedback:size=250m

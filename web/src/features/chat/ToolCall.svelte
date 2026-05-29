@@ -1,12 +1,14 @@
 <script lang="ts">
   import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-svelte";
 
+  import type { ToolError } from "../../gen/codex/v1/chat_pb";
+
   export type ToolEvent = {
     id: string;
     name: string;
     args?: unknown;
     text?: string;
-    error?: string;
+    error?: ToolError;
     status: "running" | "done" | "error";
   };
 
@@ -51,7 +53,12 @@
         <pre class="whitespace-pre-wrap rounded-lg bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text)]">{event.text}</pre>
       {/if}
       {#if event.error}
-        <p class="text-[var(--color-danger)]">{event.error}</p>
+        <div class="flex flex-col gap-1">
+          {#if event.error.code}
+            <span class="self-start rounded-md bg-[var(--color-danger)]/15 px-1.5 py-0.5 text-[11px] font-mono text-[var(--color-danger)]">{event.error.code}</span>
+          {/if}
+          <p class="text-[var(--color-danger)]">{event.error.message}</p>
+        </div>
       {/if}
     </div>
   {/if}

@@ -257,6 +257,10 @@ class CodexClient:
                 transport_kwargs["auth_token"] = auth_token
             transport = AppServerClient(**transport_kwargs)
         self._transport = transport
+        self._transport.register_request_handler(
+            "elicitation/create",
+            self._handle_elicitation_create,
+        )
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
         self._thread_resumed_or_started = False
@@ -292,6 +296,21 @@ class CodexClient:
             return False
         self._idle_deadline = time.monotonic() + self._idle_s
         return True
+
+    async def _handle_elicitation_create(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Auto-accept MCP elicitation requests (e.g. playwright tool approvals).
+
+        Without this, codex-cli waits for a response that never comes and
+        the turn hits hard-cap timeout. MVP: blanket accept with empty content;
+        most MCP elicitations have all-optional schemas. UI dialog може
+        прийти пізніше — тоді треба буде emit'нути chat_event і чекати reply.
+        """
+        log.info(
+            "codex_elicitation_auto_accept",
+            message=params.get("message"),
+            requested_schema_keys=sorted((params.get("requestedSchema") or {}).keys()),
+        )
+        return {"action": "accept", "content": {}}
 
     async def connect(self) -> None:
         await self._transport.connect()

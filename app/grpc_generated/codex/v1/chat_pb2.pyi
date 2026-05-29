@@ -23,7 +23,7 @@ CHAT_SOURCE_WEB: ChatSource
 CHAT_SOURCE_TELEGRAM: ChatSource
 
 class Chat(_message.Message):
-    __slots__ = ("id", "user_id", "source", "tg_chat_id", "codex_thread_id", "title", "created_at", "last_msg_at")
+    __slots__ = ("id", "user_id", "source", "tg_chat_id", "codex_thread_id", "title", "created_at", "last_msg_at", "active_turn_id")
     ID_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_FIELD_NUMBER: _ClassVar[int]
@@ -32,6 +32,7 @@ class Chat(_message.Message):
     TITLE_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     LAST_MSG_AT_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_TURN_ID_FIELD_NUMBER: _ClassVar[int]
     id: int
     user_id: int
     source: ChatSource
@@ -40,7 +41,8 @@ class Chat(_message.Message):
     title: str
     created_at: _timestamp_pb2.Timestamp
     last_msg_at: _timestamp_pb2.Timestamp
-    def __init__(self, id: _Optional[int] = ..., user_id: _Optional[int] = ..., source: _Optional[_Union[ChatSource, str]] = ..., tg_chat_id: _Optional[int] = ..., codex_thread_id: _Optional[str] = ..., title: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., last_msg_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+    active_turn_id: int
+    def __init__(self, id: _Optional[int] = ..., user_id: _Optional[int] = ..., source: _Optional[_Union[ChatSource, str]] = ..., tg_chat_id: _Optional[int] = ..., codex_thread_id: _Optional[str] = ..., title: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., last_msg_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., active_turn_id: _Optional[int] = ...) -> None: ...
 
 class ListChatsRequest(_message.Message):
     __slots__ = ("pagination",)
@@ -53,6 +55,12 @@ class ListChatsResponse(_message.Message):
     CHATS_FIELD_NUMBER: _ClassVar[int]
     chats: _containers.RepeatedCompositeFieldContainer[Chat]
     def __init__(self, chats: _Optional[_Iterable[_Union[Chat, _Mapping]]] = ...) -> None: ...
+
+class CreateChatRequest(_message.Message):
+    __slots__ = ("title",)
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    title: str
+    def __init__(self, title: _Optional[str] = ...) -> None: ...
 
 class GetChatRequest(_message.Message):
     __slots__ = ("chat_id",)
@@ -134,6 +142,14 @@ class Attachment(_message.Message):
     caption: str
     def __init__(self, kind: _Optional[str] = ..., source: _Optional[str] = ..., caption: _Optional[str] = ...) -> None: ...
 
+class ToolError(_message.Message):
+    __slots__ = ("message", "code")
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    message: str
+    code: str
+    def __init__(self, message: _Optional[str] = ..., code: _Optional[str] = ...) -> None: ...
+
 class ToolResultEvent(_message.Message):
     __slots__ = ("name", "text", "attachments", "error")
     NAME_FIELD_NUMBER: _ClassVar[int]
@@ -143,8 +159,8 @@ class ToolResultEvent(_message.Message):
     name: str
     text: str
     attachments: _containers.RepeatedCompositeFieldContainer[Attachment]
-    error: str
-    def __init__(self, name: _Optional[str] = ..., text: _Optional[str] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., error: _Optional[str] = ...) -> None: ...
+    error: ToolError
+    def __init__(self, name: _Optional[str] = ..., text: _Optional[str] = ..., attachments: _Optional[_Iterable[_Union[Attachment, _Mapping]]] = ..., error: _Optional[_Union[ToolError, _Mapping]] = ...) -> None: ...
 
 class DoneEvent(_message.Message):
     __slots__ = ("chat_id", "final_text", "message", "steered_fallback")
@@ -199,6 +215,32 @@ class SteerTurnResponse(_message.Message):
     ACCEPTED_FIELD_NUMBER: _ClassVar[int]
     accepted: bool
     def __init__(self, accepted: bool = ...) -> None: ...
+
+class StreamChatActivityRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ChatTurnStarted(_message.Message):
+    __slots__ = ("turn_id",)
+    TURN_ID_FIELD_NUMBER: _ClassVar[int]
+    turn_id: int
+    def __init__(self, turn_id: _Optional[int] = ...) -> None: ...
+
+class ChatTurnEnded(_message.Message):
+    __slots__ = ("turn_id",)
+    TURN_ID_FIELD_NUMBER: _ClassVar[int]
+    turn_id: int
+    def __init__(self, turn_id: _Optional[int] = ...) -> None: ...
+
+class ChatActivityEvent(_message.Message):
+    __slots__ = ("chat_id", "turn_started", "turn_ended")
+    CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    TURN_STARTED_FIELD_NUMBER: _ClassVar[int]
+    TURN_ENDED_FIELD_NUMBER: _ClassVar[int]
+    chat_id: int
+    turn_started: ChatTurnStarted
+    turn_ended: ChatTurnEnded
+    def __init__(self, chat_id: _Optional[int] = ..., turn_started: _Optional[_Union[ChatTurnStarted, _Mapping]] = ..., turn_ended: _Optional[_Union[ChatTurnEnded, _Mapping]] = ...) -> None: ...
 
 class StreamCodexUsageRequest(_message.Message):
     __slots__ = ()

@@ -29,12 +29,17 @@ _VOICE_ENCODING = "OGG_OPUS"
 _TTS_TMP_DIR = Path(tempfile.gettempdir()) / "codex_tts"
 
 
-async def send_text(bot: Bot, chat_id: int, text: str) -> None:
+async def send_text(bot: Bot, chat_id: int, text: str, thread_id: int | None = None) -> None:
     for piece in tg_markdown.render_html(text):
-        await bot.send_message(chat_id=chat_id, text=piece)
+        await bot.send_message(chat_id=chat_id, text=piece, message_thread_id=thread_id)
 
 
-async def send_voice_reply(bot: Bot, chat_id: int, text: str) -> bool:
+async def send_voice_reply(
+    bot: Bot,
+    chat_id: int,
+    text: str,
+    thread_id: int | None = None,
+) -> bool:
     """Synthesize `text` via TTS, send as TG voice. Returns False on failure."""
     spoken = tg_markdown.to_plain(text)
     if not spoken or not tts_service.enabled:
@@ -47,23 +52,38 @@ async def send_voice_reply(bot: Bot, chat_id: int, text: str) -> bool:
         log.warning("tg_tts_failed", chat_id=chat_id, error=str(exc)[:200])
         return False
     try:
-        await bot.send_voice(chat_id=chat_id, voice=FSInputFile(str(out_path)))
+        await bot.send_voice(
+            chat_id=chat_id,
+            voice=FSInputFile(str(out_path)),
+            message_thread_id=thread_id,
+        )
     finally:
         with contextlib.suppress(FileNotFoundError):
             out_path.unlink()
     return True
 
 
-async def send_attachment(bot: Bot, chat_id: int, attachment: Attachment) -> None:
+async def send_attachment(
+    bot: Bot,
+    chat_id: int,
+    attachment: Attachment,
+    thread_id: int | None = None,
+) -> None:
     file = _resolve_input_file(attachment.source)
     caption = tg_markdown.escape(attachment.caption) if attachment.caption else None
     match attachment.kind:
         case AttachmentKind.IMAGE:
-            await bot.send_photo(chat_id=chat_id, photo=file, caption=caption)
+            await bot.send_photo(
+                chat_id=chat_id, photo=file, caption=caption, message_thread_id=thread_id
+            )
         case AttachmentKind.AUDIO:
-            await bot.send_audio(chat_id=chat_id, audio=file, caption=caption)
+            await bot.send_audio(
+                chat_id=chat_id, audio=file, caption=caption, message_thread_id=thread_id
+            )
         case AttachmentKind.FILE:
-            await bot.send_document(chat_id=chat_id, document=file, caption=caption)
+            await bot.send_document(
+                chat_id=chat_id, document=file, caption=caption, message_thread_id=thread_id
+            )
 
 
 def _resolve_input_file(source: str) -> FSInputFile | URLInputFile:

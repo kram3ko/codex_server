@@ -27,6 +27,9 @@ message Chat {
   optional string title = 6;
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp last_msg_at = 8;
+  // Set коли в чаті STARTING/RUNNING turn — для sidebar-індикатора активності.
+  // UI знімає індикатор сам по DoneEvent/ErrorEvent у його tail-стрімі.
+  optional int64 active_turn_id = 9;
 }
 
 message ListChatsRequest {
@@ -35,6 +38,10 @@ message ListChatsRequest {
 
 message ListChatsResponse {
   repeated Chat chats = 1;
+}
+
+message CreateChatRequest {
+  optional string title = 1;
 }
 
 message GetChatRequest {
@@ -99,11 +106,19 @@ message Attachment {
   string caption = 3;
 }
 
+message ToolError {
+  // Людинозрозумілий опис помилки (string-форма для UI).
+  string message = 1;
+  // Стабільний machine-readable код (напр. "user_rejected" з MCP) — опційний,
+  // builtin-тулзи Codex його не виставляють.
+  optional string code = 2;
+}
+
 message ToolResultEvent {
   string name = 1;
   string text = 2;
   repeated Attachment attachments = 3;
-  optional string error = 4;
+  optional ToolError error = 4;
 }
 
 message DoneEvent {
@@ -154,6 +169,27 @@ message SteerTurnResponse {
   bool accepted = 1;
 }
 
+// Server-streamed snapshot of "which of MY chats currently have a running turn".
+// Bootstrap snapshot живе у `ListChats.Chat.active_turn_id` — стрім дає тільки
+// delta-події (started/ended). Один підпис на користувача, працює крізь усі чати.
+message StreamChatActivityRequest {}
+
+message ChatTurnStarted {
+  int64 turn_id = 1;
+}
+
+message ChatTurnEnded {
+  int64 turn_id = 1;
+}
+
+message ChatActivityEvent {
+  int64 chat_id = 1;
+  oneof kind {
+    ChatTurnStarted turn_started = 2;
+    ChatTurnEnded turn_ended = 3;
+  }
+}
+
 message StreamCodexUsageRequest {}
 
 message RefreshCodexUsageRequest {}
@@ -174,6 +210,7 @@ message CodexUsage {
 
 service ChatService {
   rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
+  rpc CreateChat(CreateChatRequest) returns (Chat);
   rpc GetChat(GetChatRequest) returns (Chat);
   rpc RenameChat(RenameChatRequest) returns (Chat);
   rpc DeleteChat(DeleteChatRequest) returns (Empty);
@@ -184,6 +221,7 @@ service ChatService {
   // Server-pushed Codex rate-limit snapshots. Bootstrap on connect (cache
   // snapshot для instant first frame), далі pub/sub-driven (event на кожен
   // `finalize_once`). Жодного periodic polling.
+  rpc StreamChatActivity(StreamChatActivityRequest) returns (stream ChatActivityEvent);
   rpc StreamCodexUsage(StreamCodexUsageRequest) returns (stream CodexUsage);
   // Force-fetch usage з sidecar (для manual refresh кнопки). Side effect:
   // publish у pub/sub channel → всі підписані StreamCodexUsage клієнти теж
