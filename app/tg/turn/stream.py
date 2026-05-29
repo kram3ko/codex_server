@@ -124,14 +124,20 @@ async def stream_turn(
                         detail=detail,
                     )
                 case DoneEvent():
+                    final_text = collector.final_text or collector.buffer
+                    committed_text = (
+                        ""
+                        if prepared.had_voice_input
+                        else await progress.finalize_stream(final_text)
+                    )
                     await handle_done(
                         session,
                         message,
                         prepared,
-                        collector.final_text or collector.buffer,
+                        final_text,
                         collector.attachments,
                         collector.tool_calls,
-                        progress.committed_text,
+                        committed_text,
                         turn_id=turn_id,
                     )
                     raise CodexTurnTerminal(TurnStatus.COMPLETED)
@@ -172,6 +178,9 @@ async def stream_turn(
 
     # Stream завершився без done/error → STREAM_DROPPED.
     if not collector.done_seen:
+        committed_text = (
+            "" if prepared.had_voice_input else await progress.finalize_stream(collector.buffer)
+        )
         await handle_dropped_stream(
             session,
             message,
@@ -179,7 +188,7 @@ async def stream_turn(
             collector.buffer,
             collector.attachments,
             collector.tool_calls,
-            progress.committed_text,
+            committed_text,
         )
     raise CodexTurnTerminal(
         TurnStatus.FAILED,

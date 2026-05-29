@@ -7,7 +7,7 @@
 Чотири категорії юзерів:
   - admin (UserRole.ADMIN)             → unlimited / unlimited
   - web user (USER + email)            → 2 / 30
-  - tg guest (USER + tg_user_id only)  → 1 / 10
+  - tg guest (USER + tg_user_id only)  → 3 / 10
 
 Atomicity: reserve_turn виконується через Lua-script (EVAL) — Redis крутить
 script у single-threaded loop, тому ZREMRANGEBYSCORE → ZCARD → INCR → ZADD
@@ -60,7 +60,7 @@ class _Limits:
 _LIMITS: dict[str, _Limits] = {
     "admin": _Limits(None, None),
     "web_user": _Limits(2, 30),
-    "tg_guest": _Limits(1, 10),
+    "tg_guest": _Limits(3, 10),
 }
 
 

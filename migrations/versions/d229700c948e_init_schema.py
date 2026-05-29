@@ -62,8 +62,21 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_invites_token'), 'invites', ['token'], unique=True)
+    op.create_table('notebooks',
+    sa.Column('user_id', sa.BigInteger(), nullable=False),
+    sa.Column('title', sa.String(length=255), nullable=False),
+    sa.Column('kind', sa.Enum('PERSONAL', name='notebook_kind'), server_default='PERSONAL', nullable=False),
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('user_id', 'kind', name='uq_notebooks_user_kind')
+    )
+    op.create_index(op.f('ix_notebooks_user_id'), 'notebooks', ['user_id'], unique=False)
     op.create_table('notes',
     sa.Column('user_id', sa.BigInteger(), nullable=False),
+    sa.Column('notebook_id', sa.BigInteger(), nullable=False),
     sa.Column('title', sa.String(length=255), nullable=False),
     sa.Column('body', sa.Text(), nullable=False),
     sa.Column('tags', postgresql.ARRAY(sa.String()), server_default='{}', nullable=False),
@@ -71,9 +84,11 @@ def upgrade() -> None:
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['notebook_id'], ['notebooks.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index(op.f('ix_notes_notebook_id'), 'notes', ['notebook_id'], unique=False)
     op.create_index('ix_notes_search_vector', 'notes', ['search_vector'], unique=False, postgresql_using='gin')
     op.create_index('ix_notes_tags', 'notes', ['tags'], unique=False, postgresql_using='gin')
     op.create_index(op.f('ix_notes_user_id'), 'notes', ['user_id'], unique=False)
@@ -171,7 +186,10 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_notes_user_id'), table_name='notes')
     op.drop_index('ix_notes_tags', table_name='notes', postgresql_using='gin')
     op.drop_index('ix_notes_search_vector', table_name='notes', postgresql_using='gin')
+    op.drop_index(op.f('ix_notes_notebook_id'), table_name='notes')
     op.drop_table('notes')
+    op.drop_index(op.f('ix_notebooks_user_id'), table_name='notebooks')
+    op.drop_table('notebooks')
     op.drop_index(op.f('ix_invites_token'), table_name='invites')
     op.drop_table('invites')
     op.drop_index('uq_chats_tg_chat_thread', table_name='chats', postgresql_where=sa.text("source = 'TELEGRAM'"), postgresql_nulls_not_distinct=True)

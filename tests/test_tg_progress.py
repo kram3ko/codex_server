@@ -1,5 +1,6 @@
 import pytest
 
+from app.tg import progress
 from app.tg.progress import TurnProgressReporter
 
 
@@ -29,6 +30,8 @@ class _OriginatorMessage:
     message_id = 42
     bot = _StubBot()
     chat = _StubChat()
+    is_topic_message = False
+    message_thread_id = None
 
     def __init__(self) -> None:
         self.answers: list[tuple[str, object | None]] = []
@@ -37,7 +40,9 @@ class _OriginatorMessage:
     def stub_next_status(self, status: _StatusMessage) -> None:
         self._next_status = status
 
-    async def answer(self, text: str, *, reply_markup=None) -> _StatusMessage:
+    async def answer(
+        self, text: str, *, reply_markup=None, message_thread_id=None
+    ) -> _StatusMessage:
         self.answers.append((text, reply_markup))
         status = self._next_status or _StatusMessage()
         self._next_status = None
@@ -112,25 +117,27 @@ async def test_refresh_status_creates_message_without_tools() -> None:
 
 
 @pytest.mark.asyncio
-async def test_note_partial_holds_back_short_buffer() -> None:
-    reporter = TurnProgressReporter(_OriginatorMessage())
-    short = "теж замало щоб публікувати окремою бульбашкою"
+async def test_note_partial_ignores_empty_buffer() -> None:
+    originator = _OriginatorMessage()
+    reporter = TurnProgressReporter(originator)
 
-    await reporter.note_partial(short)
+    await reporter.note_partial("   ")
 
-    assert reporter.committed_text == ""
+    # Порожній/пробільний буфер не створює стрім-бульбашку.
+    assert originator.answers == []
 
 
 @pytest.mark.asyncio
-async def test_note_partial_publishes_chunk_when_buffer_grows_past_threshold() -> None:
+async def test_note_partial_mirrors_buffer_into_single_message() -> None:
     originator = _OriginatorMessage()
     reporter = TurnProgressReporter(originator)
-    chunk = "Привіт. " * 40  # > _STREAM_MIN_CHARS
+    chunk = "Привіт. " * 40
 
     await reporter.note_partial(chunk)
 
+    # Один редагований меседж, не серія бульбашок.
     assert len(originator.answers) == 1
-    assert reporter.committed_text.startswith(chunk[:50])
+    assert "Привіт" in originator.answers[0][0]
 
 
 @pytest.mark.asyncio
@@ -143,3 +150,32 @@ async def test_note_partial_throttles_consecutive_calls() -> None:
     await reporter.note_partial(big + "ще трошки тексту, але одразу після першого виклику")
 
     assert len(originator.answers) == 1, "second call must hit throttle window"
+
+
+@pytest.mark.asyncio
+async def test_note_partial_edits_existing_message_after_throttle(monkeypatch) -> None:
+    monkeypatch.setattr(progress, "_STREAM_THROTTLE_S", 0.0)
+    originator = _OriginatorMessage()
+    status = _StatusMessage()
+    originator.stub_next_status(status)
+    reporter = TurnProgressReporter(originator)
+
+    await reporter.note_partial("Привіт. " * 40)
+    await reporter.note_partial("Привіт. " * 40 + "продовження після троттлу")
+
+    # Бульбашка створюється раз, далі лише edit_text того ж меседжа.
+    assert len(originator.answers) == 1
+    assert status.edited_text is not None
+    assert "продовження" in status.edited_text
+
+
+@pytest.mark.asyncio
+async def test_finalize_stream_publishes_and_returns_visible() -> None:
+    originator = _OriginatorMessage()
+    reporter = TurnProgressReporter(originator)
+
+    returned = await reporter.finalize_stream("Фінальна відповідь")
+
+    assert returned == "Фінальна відповідь"
+    assert len(originator.answers) == 1
+    assert "Фінальна" in originator.answers[0][0]

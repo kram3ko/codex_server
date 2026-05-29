@@ -6,13 +6,14 @@ from app.models.enums import (
     ChatSource,
     EventKind,
     MessageRole,
+    NotebookKind,
     TurnStatus,
     UserRole,
 )
 from app.models.event import Event
 from app.models.invite import Invite
 from app.models.message import Message
-from app.models.note import Note
+from app.models.note import Note, Notebook
 from app.models.turn import Turn
 from app.models.upload import Upload
 from app.models.user import User
@@ -27,6 +28,8 @@ __all__ = [
     "Message",
     "MessageRole",
     "Note",
+    "Notebook",
+    "NotebookKind",
     "Turn",
     "TurnStatus",
     "Upload",
