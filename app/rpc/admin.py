@@ -4,6 +4,7 @@
 `invite_service` + `user_service`. Mapper helpers тут (локальні до сервісу).
 """
 
+import asyncio
 from typing import override
 
 from connectrpc.code import Code
@@ -19,6 +20,9 @@ from app.rpc._auth import require_admin
 from app.rpc._mappers import to_ts
 from app.services.auth.default import auth_service
 from app.services.invites.default import invite_service
+from app.services.ssh_vault.default import git_token_service, ssh_vault_service
+from app.services.ssh_vault.service import SshKeyMeta, SshVaultError
+from app.services.ssh_vault.tokens import ApiTokenMeta
 from app.services.users.default import user_service
 
 _email_adapter = TypeAdapter(EmailStr)
@@ -43,6 +47,24 @@ def _invite_to_pb(inv: Invite) -> admin_pb2.Invite:
     if inv.used_at is not None:
         msg.used_at.CopyFrom(to_ts(inv.used_at))
     return msg
+
+
+def _ssh_key_to_pb(meta: SshKeyMeta) -> admin_pb2.SshKey:
+    return admin_pb2.SshKey(
+        name=meta.name,
+        host=meta.host,
+        user=meta.user,
+        created_at=to_ts(meta.created_at),
+    )
+
+
+def _api_token_to_pb(meta: ApiTokenMeta) -> admin_pb2.ApiToken:
+    return admin_pb2.ApiToken(
+        name=meta.name,
+        host=meta.host,
+        user=meta.user,
+        created_at=to_ts(meta.created_at),
+    )
 
 
 def _admin_user_to_pb(u: User) -> admin_pb2.AdminUser:
@@ -151,3 +173,89 @@ class AdminRPC(AdminProtocol):
         async with SessionLocal() as db:
             users = await user_service.list_all(db)
         return admin_pb2.ListUsersResponse(users=[_admin_user_to_pb(u) for u in users])
+
+    @override
+    async def add_ssh_key(
+        self,
+        request: admin_pb2.AddSshKeyRequest,
+        ctx: RequestContext,
+    ) -> admin_pb2.SshKey:
+        await require_admin(ctx)
+        try:
+            meta = await asyncio.to_thread(
+                ssh_vault_service.add,
+                name=request.name,
+                host=request.host,
+                user=request.user,
+                private_key=request.private_key,
+            )
+        except SshVaultError as exc:
+            raise ConnectError(Code.INVALID_ARGUMENT, str(exc)) from exc
+        return _ssh_key_to_pb(meta)
+
+    @override
+    async def list_ssh_keys(
+        self,
+        request: admin_pb2.ListSshKeysRequest,
+        ctx: RequestContext,
+    ) -> admin_pb2.ListSshKeysResponse:
+        del request
+        await require_admin(ctx)
+        keys = await asyncio.to_thread(ssh_vault_service.list)
+        return admin_pb2.ListSshKeysResponse(keys=[_ssh_key_to_pb(k) for k in keys])
+
+    @override
+    async def delete_ssh_key(
+        self,
+        request: admin_pb2.DeleteSshKeyRequest,
+        ctx: RequestContext,
+    ) -> common_pb2.Empty:
+        await require_admin(ctx)
+        try:
+            await asyncio.to_thread(ssh_vault_service.delete, request.name)
+        except SshVaultError as exc:
+            raise ConnectError(Code.NOT_FOUND, str(exc)) from exc
+        return common_pb2.Empty()
+
+    @override
+    async def add_api_token(
+        self,
+        request: admin_pb2.AddApiTokenRequest,
+        ctx: RequestContext,
+    ) -> admin_pb2.ApiToken:
+        await require_admin(ctx)
+        try:
+            meta = await asyncio.to_thread(
+                git_token_service.add,
+                name=request.name,
+                host=request.host,
+                user=request.user,
+                token=request.token,
+            )
+        except SshVaultError as exc:
+            raise ConnectError(Code.INVALID_ARGUMENT, str(exc)) from exc
+        return _api_token_to_pb(meta)
+
+    @override
+    async def list_api_tokens(
+        self,
+        request: admin_pb2.ListApiTokensRequest,
+        ctx: RequestContext,
+    ) -> admin_pb2.ListApiTokensResponse:
+        del request
+        await require_admin(ctx)
+        tokens = await asyncio.to_thread(git_token_service.list)
+        return admin_pb2.ListApiTokensResponse(tokens=[_api_token_to_pb(t) for t in tokens])
+
+    @override
+    async def delete_api_token(
+        self,
+        request: admin_pb2.DeleteApiTokenRequest,
+        ctx: RequestContext,
+    ) -> common_pb2.Empty:
+        await require_admin(ctx)
+        try:
+            await asyncio.to_thread(git_token_service.delete, request.name)
+        except SshVaultError as exc:
+            raise ConnectError(Code.NOT_FOUND, str(exc)) from exc
+        return common_pb2.Empty()

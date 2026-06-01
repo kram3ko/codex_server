@@ -70,6 +70,7 @@ class _Method(StrEnum):
     TURN_STEER = "turn/steer"
     TURN_INTERRUPT = "turn/interrupt"
     ACCOUNT_RATE_LIMITS_READ = "account/rateLimits/read"
+    MCP_ELICITATION_REQUEST = "mcpServer/elicitation/request"
 
 
 type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
@@ -258,8 +259,8 @@ class CodexClient:
             transport = AppServerClient(**transport_kwargs)
         self._transport = transport
         self._transport.register_request_handler(
-            "elicitation/create",
-            self._handle_elicitation_create,
+            _Method.MCP_ELICITATION_REQUEST,
+            self._handle_mcp_elicitation_request,
         )
         self._initialized = False
         self._thread_id: str | None = initial_thread_id
@@ -297,20 +298,26 @@ class CodexClient:
         self._idle_deadline = time.monotonic() + self._idle_s
         return True
 
-    async def _handle_elicitation_create(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Auto-accept MCP elicitation requests (e.g. playwright tool approvals).
+    async def _handle_mcp_elicitation_request(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Auto-accept an MCP elicitation relayed by codex (e.g. playwright approvals).
 
-        Without this, codex-cli waits for a response that never comes and
-        the turn hits hard-cap timeout. MVP: blanket accept with empty content;
-        most MCP elicitations have all-optional schemas. UI dialog може
-        прийти пізніше — тоді треба буде emit'нути chat_event і чекати reply.
+        Codex forwards an MCP server's elicitation as the server→client request
+        ``mcpServer/elicitation/request``; the client must answer with a
+        ``McpServerElicitationRequestResponse``. Leaving it unanswered (or replying
+        with an error) reads on codex's side as a refusal — the tool call then fails
+        with ``user_rejected`` and the turn stalls until its hard-cap timeout.
+
+        Blanket-accept with empty content: in this single-tenant deployment there is
+        no human to consult, and form-mode elicitations carry all-optional schemas.
+        An interactive dialog would emit a chat_event and await the user's reply here.
         """
         log.info(
             "codex_elicitation_auto_accept",
+            server_name=params.get("serverName"),
+            mode=params.get("mode"),
             message=params.get("message"),
-            requested_schema_keys=sorted((params.get("requestedSchema") or {}).keys()),
         )
-        return {"action": "accept", "content": {}}
+        return {"action": "accept", "content": {}, "_meta": None}
 
     async def connect(self) -> None:
         await self._transport.connect()

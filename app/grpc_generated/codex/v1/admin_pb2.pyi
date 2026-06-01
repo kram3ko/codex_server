@@ -105,3 +105,83 @@ class ListUsersResponse(_message.Message):
     USERS_FIELD_NUMBER: _ClassVar[int]
     users: _containers.RepeatedCompositeFieldContainer[AdminUser]
     def __init__(self, users: _Optional[_Iterable[_Union[AdminUser, _Mapping]]] = ...) -> None: ...
+
+class SshKey(_message.Message):
+    __slots__ = ("name", "host", "user", "created_at")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    HOST_FIELD_NUMBER: _ClassVar[int]
+    USER_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    host: str
+    user: str
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, name: _Optional[str] = ..., host: _Optional[str] = ..., user: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class AddSshKeyRequest(_message.Message):
+    __slots__ = ("name", "host", "user", "private_key")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    HOST_FIELD_NUMBER: _ClassVar[int]
+    USER_FIELD_NUMBER: _ClassVar[int]
+    PRIVATE_KEY_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    host: str
+    user: str
+    private_key: str
+    def __init__(self, name: _Optional[str] = ..., host: _Optional[str] = ..., user: _Optional[str] = ..., private_key: _Optional[str] = ...) -> None: ...
+
+class ListSshKeysRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListSshKeysResponse(_message.Message):
+    __slots__ = ("keys",)
+    KEYS_FIELD_NUMBER: _ClassVar[int]
+    keys: _containers.RepeatedCompositeFieldContainer[SshKey]
+    def __init__(self, keys: _Optional[_Iterable[_Union[SshKey, _Mapping]]] = ...) -> None: ...
+
+class DeleteSshKeyRequest(_message.Message):
+    __slots__ = ("name",)
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...
+
+class ApiToken(_message.Message):
+    __slots__ = ("name", "host", "user", "created_at")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    HOST_FIELD_NUMBER: _ClassVar[int]
+    USER_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    host: str
+    user: str
+    created_at: _timestamp_pb2.Timestamp
+    def __init__(self, name: _Optional[str] = ..., host: _Optional[str] = ..., user: _Optional[str] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class AddApiTokenRequest(_message.Message):
+    __slots__ = ("name", "host", "user", "token")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    HOST_FIELD_NUMBER: _ClassVar[int]
+    USER_FIELD_NUMBER: _ClassVar[int]
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    host: str
+    user: str
+    token: str
+    def __init__(self, name: _Optional[str] = ..., host: _Optional[str] = ..., user: _Optional[str] = ..., token: _Optional[str] = ...) -> None: ...
+
+class ListApiTokensRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListApiTokensResponse(_message.Message):
+    __slots__ = ("tokens",)
+    TOKENS_FIELD_NUMBER: _ClassVar[int]
+    tokens: _containers.RepeatedCompositeFieldContainer[ApiToken]
+    def __init__(self, tokens: _Optional[_Iterable[_Union[ApiToken, _Mapping]]] = ...) -> None: ...
+
+class DeleteApiTokenRequest(_message.Message):
+    __slots__ = ("name",)
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    def __init__(self, name: _Optional[str] = ...) -> None: ...

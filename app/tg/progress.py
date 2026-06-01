@@ -164,12 +164,8 @@ class TurnProgressReporter:
         if not chunks:
             return
         rendered = chunks[0]
-        thread_id = self._message.message_thread_id if self._message.is_topic_message else None
         if self._stream_message is None:
-            self._stream_message = await self._message.answer(
-                rendered,
-                message_thread_id=thread_id,
-            )
+            self._stream_message = await self._message.answer(rendered)
             return
         await self._stream_message.edit_text(rendered)
 

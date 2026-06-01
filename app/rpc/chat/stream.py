@@ -113,7 +113,6 @@ async def stream_turn(
         await _persist_segment(state, persisted_chat_id, user_pk)
 
     async def _on_usage_signal() -> None:
-        # Sidecar шле `thread/tokenUsage/updated` → fan-out у pub/sub.
         if sidecar is not None:
             usage_poller.schedule_refresh(sidecar)
 

@@ -90,7 +90,7 @@ class AppServerClient:
         self._explicit_close = False
         self._connect_lock = asyncio.Lock()
         # Server-initiated JSON-RPC requests (id + method) — наприклад
-        # `elicitation/create` від MCP-серверів через codex-cli sidecar.
+        # `mcpServer/elicitation/request` від MCP-серверів через codex-cli sidecar.
         # Без handler'а такі запити висять до hard-cap timeout турну.
         self._request_handlers: dict[str, RequestHandler] = {}
         self._request_tasks: set[asyncio.Task] = set()

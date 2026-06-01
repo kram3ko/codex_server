@@ -1,11 +1,8 @@
-"""Codex rate-limits fan-out через Redis pub/sub. Event-driven: bootstrap
-once на startup (baseline) + `publish_for(sidecar)` після кожного завершеного
-turn-у (момент реальної трати квоти).
-
-Pull-RPC `account/rateLimits/read` між turn-ами — waste; sidecar НЕ пушить
-notification на rate-limit зміни, а змінюється квота тільки коли codex
-закриває turn (`turn/completed`). Тому єдині сенсі моменти для refresh —
-TURN finalization (success/error/cancel — codex рахує що встиг).
+"""Codex rate-limits fan-out через Redis pub/sub. Event-driven, але не push:
+rate-limit вікна (`primary/secondary %`) живуть лише у відповіді
+`account/rateLimits/read` — їх немає у жодній notification. Sidecar шле тільки
+сигнал `thread/tokenUsage/updated`; на нього (і на terminal turn-у) робимо
+fetch+publish. `schedule_refresh` коалесить burst сигналів в один fetch.
 """
 
 import asyncio

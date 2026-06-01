@@ -18,6 +18,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # --- SSH key vault (admin codex agent) ---
+    # codex-server пише сюди; той самий volume змонтований у codex-cli як `~/.ssh`.
+    SSH_VAULT_DIR: str = "/ssh-vault"
+
     # --- Codex sidecar ---
     CODEX_CLI_URL: str = "ws://localhost:4500"
     CODEX_CLI_GUEST_URL: str = "ws://codex-cli-guest:4500"

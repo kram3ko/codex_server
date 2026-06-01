@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file codex/v1/admin.proto.
  */
 export const file_codex_v1_admin: GenFile = /*@__PURE__*/
-  fileDesc("ChRjb2RleC92MS9hZG1pbi5wcm90bxIIY29kZXgudjEijwIKBkludml0ZRIKCgJpZBgBIAEoAxINCgV0b2tlbhgCIAEoCRIaChJjcmVhdGVkX2J5X3VzZXJfaWQYAyABKAMSHAoPdXNlZF9ieV91c2VyX2lkGAQgASgDSACIAQESLgoKZXhwaXJlc19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoHdXNlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAYgBARIuCgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEISChBfdXNlZF9ieV91c2VyX2lkQgoKCF91c2VkX2F0It0BCglBZG1pblVzZXISCgoCaWQYASABKAMSEgoFZW1haWwYAiABKAlIAIgBARIXCgp0Z191c2VyX2lkGAMgASgDSAGIAQESGQoMZGlzcGxheV9uYW1lGAQgASgJSAKIAQESIgoEcm9sZRgFIAEoDjIULmNvZGV4LnYxLlVzZXJSb2xlUGISLgoKY3JlYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCAoGX2VtYWlsQg0KC190Z191c2VyX2lkQg8KDV9kaXNwbGF5X25hbWUiJwoTQ3JlYXRlSW52aXRlUmVxdWVzdBIQCgh0dGxfZGF5cxgBIAEoBSI4ChRDcmVhdGVJbnZpdGVSZXNwb25zZRIgCgZpbnZpdGUYASABKAsyEC5jb2RleC52MS5JbnZpdGUiKgoSTGlzdEludml0ZXNSZXF1ZXN0EhQKDGluY2x1ZGVfdXNlZBgBIAEoCCI4ChNMaXN0SW52aXRlc1Jlc3BvbnNlEiEKB2ludml0ZXMYASADKAsyEC5jb2RleC52MS5JbnZpdGUiKAoTUmV2b2tlSW52aXRlUmVxdWVzdBIRCglpbnZpdGVfaWQYASABKAMibgoRQ3JlYXRlVXNlclJlcXVlc3QSDQoFZW1haWwYASABKAkSEAoIcGFzc3dvcmQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEiIKBHJvbGUYBCABKA4yFC5jb2RleC52MS5Vc2VyUm9sZVBiIhIKEExpc3RVc2Vyc1JlcXVlc3QiNwoRTGlzdFVzZXJzUmVzcG9uc2USIgoFdXNlcnMYASADKAsyEy5jb2RleC52MS5BZG1pblVzZXIqUAoKVXNlclJvbGVQYhIZChVVU0VSX1JPTEVfVU5TUEVDSUZJRUQQABISCg5VU0VSX1JPTEVfVVNFUhABEhMKD1VTRVJfUk9MRV9BRE1JThACMu8CCgxBZG1pblNlcnZpY2USTQoMQ3JlYXRlSW52aXRlEh0uY29kZXgudjEuQ3JlYXRlSW52aXRlUmVxdWVzdBoeLmNvZGV4LnYxLkNyZWF0ZUludml0ZVJlc3BvbnNlEkoKC0xpc3RJbnZpdGVzEhwuY29kZXgudjEuTGlzdEludml0ZXNSZXF1ZXN0Gh0uY29kZXgudjEuTGlzdEludml0ZXNSZXNwb25zZRI+CgxSZXZva2VJbnZpdGUSHS5jb2RleC52MS5SZXZva2VJbnZpdGVSZXF1ZXN0Gg8uY29kZXgudjEuRW1wdHkSPgoKQ3JlYXRlVXNlchIbLmNvZGV4LnYxLkNyZWF0ZVVzZXJSZXF1ZXN0GhMuY29kZXgudjEuQWRtaW5Vc2VyEkQKCUxpc3RVc2VycxIaLmNvZGV4LnYxLkxpc3RVc2Vyc1JlcXVlc3QaGy5jb2RleC52MS5MaXN0VXNlcnNSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_timestamp, file_codex_v1_common]);
+  fileDesc("ChRjb2RleC92MS9hZG1pbi5wcm90bxIIY29kZXgudjEijwIKBkludml0ZRIKCgJpZBgBIAEoAxINCgV0b2tlbhgCIAEoCRIaChJjcmVhdGVkX2J5X3VzZXJfaWQYAyABKAMSHAoPdXNlZF9ieV91c2VyX2lkGAQgASgDSACIAQESLgoKZXhwaXJlc19hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoHdXNlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAYgBARIuCgpjcmVhdGVkX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEISChBfdXNlZF9ieV91c2VyX2lkQgoKCF91c2VkX2F0It0BCglBZG1pblVzZXISCgoCaWQYASABKAMSEgoFZW1haWwYAiABKAlIAIgBARIXCgp0Z191c2VyX2lkGAMgASgDSAGIAQESGQoMZGlzcGxheV9uYW1lGAQgASgJSAKIAQESIgoEcm9sZRgFIAEoDjIULmNvZGV4LnYxLlVzZXJSb2xlUGISLgoKY3JlYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCCAoGX2VtYWlsQg0KC190Z191c2VyX2lkQg8KDV9kaXNwbGF5X25hbWUiJwoTQ3JlYXRlSW52aXRlUmVxdWVzdBIQCgh0dGxfZGF5cxgBIAEoBSI4ChRDcmVhdGVJbnZpdGVSZXNwb25zZRIgCgZpbnZpdGUYASABKAsyEC5jb2RleC52MS5JbnZpdGUiKgoSTGlzdEludml0ZXNSZXF1ZXN0EhQKDGluY2x1ZGVfdXNlZBgBIAEoCCI4ChNMaXN0SW52aXRlc1Jlc3BvbnNlEiEKB2ludml0ZXMYASADKAsyEC5jb2RleC52MS5JbnZpdGUiKAoTUmV2b2tlSW52aXRlUmVxdWVzdBIRCglpbnZpdGVfaWQYASABKAMibgoRQ3JlYXRlVXNlclJlcXVlc3QSDQoFZW1haWwYASABKAkSEAoIcGFzc3dvcmQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJEiIKBHJvbGUYBCABKA4yFC5jb2RleC52MS5Vc2VyUm9sZVBiIhIKEExpc3RVc2Vyc1JlcXVlc3QiNwoRTGlzdFVzZXJzUmVzcG9uc2USIgoFdXNlcnMYASADKAsyEy5jb2RleC52MS5BZG1pblVzZXIiYgoGU3NoS2V5EgwKBG5hbWUYASABKAkSDAoEaG9zdBgCIAEoCRIMCgR1c2VyGAMgASgJEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlEKEEFkZFNzaEtleVJlcXVlc3QSDAoEbmFtZRgBIAEoCRIMCgRob3N0GAIgASgJEgwKBHVzZXIYAyABKAkSEwoLcHJpdmF0ZV9rZXkYBCABKAkiFAoSTGlzdFNzaEtleXNSZXF1ZXN0IjUKE0xpc3RTc2hLZXlzUmVzcG9uc2USHgoEa2V5cxgBIAMoCzIQLmNvZGV4LnYxLlNzaEtleSIjChNEZWxldGVTc2hLZXlSZXF1ZXN0EgwKBG5hbWUYASABKAkiZAoIQXBpVG9rZW4SDAoEbmFtZRgBIAEoCRIMCgRob3N0GAIgASgJEgwKBHVzZXIYAyABKAkSLgoKY3JlYXRlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiTQoSQWRkQXBpVG9rZW5SZXF1ZXN0EgwKBG5hbWUYASABKAkSDAoEaG9zdBgCIAEoCRIMCgR1c2VyGAMgASgJEg0KBXRva2VuGAQgASgJIhYKFExpc3RBcGlUb2tlbnNSZXF1ZXN0IjsKFUxpc3RBcGlUb2tlbnNSZXNwb25zZRIiCgZ0b2tlbnMYASADKAsyEi5jb2RleC52MS5BcGlUb2tlbiIlChVEZWxldGVBcGlUb2tlblJlcXVlc3QSDAoEbmFtZRgBIAEoCSpQCgpVc2VyUm9sZVBiEhkKFVVTRVJfUk9MRV9VTlNQRUNJRklFRBAAEhIKDlVTRVJfUk9MRV9VU0VSEAESEwoPVVNFUl9ST0xFX0FETUlOEAIyjQYKDEFkbWluU2VydmljZRJNCgxDcmVhdGVJbnZpdGUSHS5jb2RleC52MS5DcmVhdGVJbnZpdGVSZXF1ZXN0Gh4uY29kZXgudjEuQ3JlYXRlSW52aXRlUmVzcG9uc2USSgoLTGlzdEludml0ZXMSHC5jb2RleC52MS5MaXN0SW52aXRlc1JlcXVlc3QaHS5jb2RleC52MS5MaXN0SW52aXRlc1Jlc3BvbnNlEj4KDFJldm9rZUludml0ZRIdLmNvZGV4LnYxLlJldm9rZUludml0ZVJlcXVlc3QaDy5jb2RleC52MS5FbXB0eRI+CgpDcmVhdGVVc2VyEhsuY29kZXgudjEuQ3JlYXRlVXNlclJlcXVlc3QaEy5jb2RleC52MS5BZG1pblVzZXISRAoJTGlzdFVzZXJzEhouY29kZXgudjEuTGlzdFVzZXJzUmVxdWVzdBobLmNvZGV4LnYxLkxpc3RVc2Vyc1Jlc3BvbnNlEjkKCUFkZFNzaEtleRIaLmNvZGV4LnYxLkFkZFNzaEtleVJlcXVlc3QaEC5jb2RleC52MS5Tc2hLZXkSSgoLTGlzdFNzaEtleXMSHC5jb2RleC52MS5MaXN0U3NoS2V5c1JlcXVlc3QaHS5jb2RleC52MS5MaXN0U3NoS2V5c1Jlc3BvbnNlEj4KDERlbGV0ZVNzaEtleRIdLmNvZGV4LnYxLkRlbGV0ZVNzaEtleVJlcXVlc3QaDy5jb2RleC52MS5FbXB0eRI/CgtBZGRBcGlUb2tlbhIcLmNvZGV4LnYxLkFkZEFwaVRva2VuUmVxdWVzdBoSLmNvZGV4LnYxLkFwaVRva2VuElAKDUxpc3RBcGlUb2tlbnMSHi5jb2RleC52MS5MaXN0QXBpVG9rZW5zUmVxdWVzdBofLmNvZGV4LnYxLkxpc3RBcGlUb2tlbnNSZXNwb25zZRJCCg5EZWxldGVBcGlUb2tlbhIfLmNvZGV4LnYxLkRlbGV0ZUFwaVRva2VuUmVxdWVzdBoPLmNvZGV4LnYxLkVtcHR5YgZwcm90bzM", [file_google_protobuf_timestamp, file_codex_v1_common]);
 
 /**
  * @generated from message codex.v1.Invite
@@ -266,6 +266,242 @@ export const ListUsersResponseSchema: GenMessage<ListUsersResponse> = /*@__PURE_
   messageDesc(file_codex_v1_admin, 9);
 
 /**
+ * SSH-ключ для codex-агента (admin sidecar). `name` = мітка, ім'я файлу
+ * `id_<name>` і Host-аліас у `~/.ssh/config` — клон через `git@<name>:org/repo`.
+ *
+ * @generated from message codex.v1.SshKey
+ */
+export type SshKey = Message<"codex.v1.SshKey"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * реальний HostName (github.com)
+   *
+   * @generated from field: string host = 2;
+   */
+  host: string;
+
+  /**
+   * ssh-юзер (порожньо → "git")
+   *
+   * @generated from field: string user = 3;
+   */
+  user: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 4;
+   */
+  createdAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message codex.v1.SshKey.
+ * Use `create(SshKeySchema)` to create a new message.
+ */
+export const SshKeySchema: GenMessage<SshKey> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 10);
+
+/**
+ * @generated from message codex.v1.AddSshKeyRequest
+ */
+export type AddSshKeyRequest = Message<"codex.v1.AddSshKeyRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string host = 2;
+   */
+  host: string;
+
+  /**
+   * @generated from field: string user = 3;
+   */
+  user: string;
+
+  /**
+   * OpenSSH/PEM приватний ключ
+   *
+   * @generated from field: string private_key = 4;
+   */
+  privateKey: string;
+};
+
+/**
+ * Describes the message codex.v1.AddSshKeyRequest.
+ * Use `create(AddSshKeyRequestSchema)` to create a new message.
+ */
+export const AddSshKeyRequestSchema: GenMessage<AddSshKeyRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 11);
+
+/**
+ * @generated from message codex.v1.ListSshKeysRequest
+ */
+export type ListSshKeysRequest = Message<"codex.v1.ListSshKeysRequest"> & {
+};
+
+/**
+ * Describes the message codex.v1.ListSshKeysRequest.
+ * Use `create(ListSshKeysRequestSchema)` to create a new message.
+ */
+export const ListSshKeysRequestSchema: GenMessage<ListSshKeysRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 12);
+
+/**
+ * @generated from message codex.v1.ListSshKeysResponse
+ */
+export type ListSshKeysResponse = Message<"codex.v1.ListSshKeysResponse"> & {
+  /**
+   * @generated from field: repeated codex.v1.SshKey keys = 1;
+   */
+  keys: SshKey[];
+};
+
+/**
+ * Describes the message codex.v1.ListSshKeysResponse.
+ * Use `create(ListSshKeysResponseSchema)` to create a new message.
+ */
+export const ListSshKeysResponseSchema: GenMessage<ListSshKeysResponse> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 13);
+
+/**
+ * @generated from message codex.v1.DeleteSshKeyRequest
+ */
+export type DeleteSshKeyRequest = Message<"codex.v1.DeleteSshKeyRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message codex.v1.DeleteSshKeyRequest.
+ * Use `create(DeleteSshKeyRequestSchema)` to create a new message.
+ */
+export const DeleteSshKeyRequestSchema: GenMessage<DeleteSshKeyRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 14);
+
+/**
+ * API-токен для HTTPS git (github/gitlab/будь-який хост) — пишеться у
+ * `git-credentials`, агент клонує `https://<host>/org/repo` по токену.
+ *
+ * @generated from message codex.v1.ApiToken
+ */
+export type ApiToken = Message<"codex.v1.ApiToken"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string host = 2;
+   */
+  host: string;
+
+  /**
+   * username у credentials (порожньо → x-access-token)
+   *
+   * @generated from field: string user = 3;
+   */
+  user: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 4;
+   */
+  createdAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message codex.v1.ApiToken.
+ * Use `create(ApiTokenSchema)` to create a new message.
+ */
+export const ApiTokenSchema: GenMessage<ApiToken> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 15);
+
+/**
+ * @generated from message codex.v1.AddApiTokenRequest
+ */
+export type AddApiTokenRequest = Message<"codex.v1.AddApiTokenRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string host = 2;
+   */
+  host: string;
+
+  /**
+   * @generated from field: string user = 3;
+   */
+  user: string;
+
+  /**
+   * @generated from field: string token = 4;
+   */
+  token: string;
+};
+
+/**
+ * Describes the message codex.v1.AddApiTokenRequest.
+ * Use `create(AddApiTokenRequestSchema)` to create a new message.
+ */
+export const AddApiTokenRequestSchema: GenMessage<AddApiTokenRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 16);
+
+/**
+ * @generated from message codex.v1.ListApiTokensRequest
+ */
+export type ListApiTokensRequest = Message<"codex.v1.ListApiTokensRequest"> & {
+};
+
+/**
+ * Describes the message codex.v1.ListApiTokensRequest.
+ * Use `create(ListApiTokensRequestSchema)` to create a new message.
+ */
+export const ListApiTokensRequestSchema: GenMessage<ListApiTokensRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 17);
+
+/**
+ * @generated from message codex.v1.ListApiTokensResponse
+ */
+export type ListApiTokensResponse = Message<"codex.v1.ListApiTokensResponse"> & {
+  /**
+   * @generated from field: repeated codex.v1.ApiToken tokens = 1;
+   */
+  tokens: ApiToken[];
+};
+
+/**
+ * Describes the message codex.v1.ListApiTokensResponse.
+ * Use `create(ListApiTokensResponseSchema)` to create a new message.
+ */
+export const ListApiTokensResponseSchema: GenMessage<ListApiTokensResponse> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 18);
+
+/**
+ * @generated from message codex.v1.DeleteApiTokenRequest
+ */
+export type DeleteApiTokenRequest = Message<"codex.v1.DeleteApiTokenRequest"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message codex.v1.DeleteApiTokenRequest.
+ * Use `create(DeleteApiTokenRequestSchema)` to create a new message.
+ */
+export const DeleteApiTokenRequestSchema: GenMessage<DeleteApiTokenRequest> = /*@__PURE__*/
+  messageDesc(file_codex_v1_admin, 19);
+
+/**
  * @generated from enum codex.v1.UserRolePb
  */
 export enum UserRolePb {
@@ -334,6 +570,54 @@ export const AdminService: GenService<{
     methodKind: "unary";
     input: typeof ListUsersRequestSchema;
     output: typeof ListUsersResponseSchema;
+  },
+  /**
+   * @generated from rpc codex.v1.AdminService.AddSshKey
+   */
+  addSshKey: {
+    methodKind: "unary";
+    input: typeof AddSshKeyRequestSchema;
+    output: typeof SshKeySchema;
+  },
+  /**
+   * @generated from rpc codex.v1.AdminService.ListSshKeys
+   */
+  listSshKeys: {
+    methodKind: "unary";
+    input: typeof ListSshKeysRequestSchema;
+    output: typeof ListSshKeysResponseSchema;
+  },
+  /**
+   * @generated from rpc codex.v1.AdminService.DeleteSshKey
+   */
+  deleteSshKey: {
+    methodKind: "unary";
+    input: typeof DeleteSshKeyRequestSchema;
+    output: typeof EmptySchema;
+  },
+  /**
+   * @generated from rpc codex.v1.AdminService.AddApiToken
+   */
+  addApiToken: {
+    methodKind: "unary";
+    input: typeof AddApiTokenRequestSchema;
+    output: typeof ApiTokenSchema;
+  },
+  /**
+   * @generated from rpc codex.v1.AdminService.ListApiTokens
+   */
+  listApiTokens: {
+    methodKind: "unary";
+    input: typeof ListApiTokensRequestSchema;
+    output: typeof ListApiTokensResponseSchema;
+  },
+  /**
+   * @generated from rpc codex.v1.AdminService.DeleteApiToken
+   */
+  deleteApiToken: {
+    methodKind: "unary";
+    input: typeof DeleteApiTokenRequestSchema;
+    output: typeof EmptySchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_codex_v1_admin, 0);
