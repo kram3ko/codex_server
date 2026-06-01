@@ -26,15 +26,15 @@ from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__
 from codex.v1 import common_pb2 as codex_dot_v1_dot_common__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14\x63odex/v1/admin.proto\x12\x08\x63odex.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x15\x63odex/v1/common.proto\"\x8f\x02\n\x06Invite\x12\n\n\x02id\x18\x01 \x01(\x03\x12\r\n\x05token\x18\x02 \x01(\t\x12\x1a\n\x12\x63reated_by_user_id\x18\x03 \x01(\x03\x12\x1c\n\x0fused_by_user_id\x18\x04 \x01(\x03H\x00\x88\x01\x01\x12.\n\nexpires_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x30\n\x07used_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x01\x88\x01\x01\x12.\n\ncreated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x12\n\x10_used_by_user_idB\n\n\x08_used_at\"\xdd\x01\n\tAdminUser\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x12\n\x05\x65mail\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x17\n\ntg_user_id\x18\x03 \x01(\x03H\x01\x88\x01\x01\x12\x19\n\x0c\x64isplay_name\x18\x04 \x01(\tH\x02\x88\x01\x01\x12\"\n\x04role\x18\x05 \x01(\x0e\x32\x14.codex.v1.UserRolePb\x12.\n\ncreated_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x08\n\x06_emailB\r\n\x0b_tg_user_idB\x0f\n\r_display_name\"\'\n\x13\x43reateInviteRequest\x12\x10\n\x08ttl_days\x18\x01 \x01(\x05\"8\n\x14\x43reateInviteResponse\x12 \n\x06invite\x18\x01 \x01(\x0b\x32\x10.codex.v1.Invite\"*\n\x12ListInvitesRequest\x12\x14\n\x0cinclude_used\x18\x01 \x01(\x08\"8\n\x13ListInvitesResponse\x12!\n\x07invites\x18\x01 \x03(\x0b\x32\x10.codex.v1.Invite\"(\n\x13RevokeInviteRequest\x12\x11\n\tinvite_id\x18\x01 \x01(\x03\"n\n\x11\x43reateUserRequest\x12\r\n\x05\x65mail\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x03 \x01(\t\x12\"\n\x04role\x18\x04 \x01(\x0e\x32\x14.codex.v1.UserRolePb\"\x12\n\x10ListUsersRequest\"7\n\x11ListUsersResponse\x12\"\n\x05users\x18\x01 \x03(\x0b\x32\x13.codex.v1.AdminUser*P\n\nUserRolePb\x12\x19\n\x15USER_ROLE_UNSPECIFIED\x10\x00\x12\x12\n\x0eUSER_ROLE_USER\x10\x01\x12\x13\n\x0fUSER_ROLE_ADMIN\x10\x02\x32\xef\x02\n\x0c\x41\x64minService\x12M\n\x0c\x43reateInvite\x12\x1d.codex.v1.CreateInviteRequest\x1a\x1e.codex.v1.CreateInviteResponse\x12J\n\x0bListInvites\x12\x1c.codex.v1.ListInvitesRequest\x1a\x1d.codex.v1.ListInvitesResponse\x12>\n\x0cRevokeInvite\x12\x1d.codex.v1.RevokeInviteRequest\x1a\x0f.codex.v1.Empty\x12>\n\nCreateUser\x12\x1b.codex.v1.CreateUserRequest\x1a\x13.codex.v1.AdminUser\x12\x44\n\tListUsers\x12\x1a.codex.v1.ListUsersRequest\x1a\x1b.codex.v1.ListUsersResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14\x63odex/v1/admin.proto\x12\x08\x63odex.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x15\x63odex/v1/common.proto\"\x8f\x02\n\x06Invite\x12\n\n\x02id\x18\x01 \x01(\x03\x12\r\n\x05token\x18\x02 \x01(\t\x12\x1a\n\x12\x63reated_by_user_id\x18\x03 \x01(\x03\x12\x1c\n\x0fused_by_user_id\x18\x04 \x01(\x03H\x00\x88\x01\x01\x12.\n\nexpires_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x30\n\x07used_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x01\x88\x01\x01\x12.\n\ncreated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x12\n\x10_used_by_user_idB\n\n\x08_used_at\"\xdd\x01\n\tAdminUser\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x12\n\x05\x65mail\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x17\n\ntg_user_id\x18\x03 \x01(\x03H\x01\x88\x01\x01\x12\x19\n\x0c\x64isplay_name\x18\x04 \x01(\tH\x02\x88\x01\x01\x12\"\n\x04role\x18\x05 \x01(\x0e\x32\x14.codex.v1.UserRolePb\x12.\n\ncreated_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x08\n\x06_emailB\r\n\x0b_tg_user_idB\x0f\n\r_display_name\"\'\n\x13\x43reateInviteRequest\x12\x10\n\x08ttl_days\x18\x01 \x01(\x05\"8\n\x14\x43reateInviteResponse\x12 \n\x06invite\x18\x01 \x01(\x0b\x32\x10.codex.v1.Invite\"*\n\x12ListInvitesRequest\x12\x14\n\x0cinclude_used\x18\x01 \x01(\x08\"8\n\x13ListInvitesResponse\x12!\n\x07invites\x18\x01 \x03(\x0b\x32\x10.codex.v1.Invite\"(\n\x13RevokeInviteRequest\x12\x11\n\tinvite_id\x18\x01 \x01(\x03\"n\n\x11\x43reateUserRequest\x12\r\n\x05\x65mail\x18\x01 \x01(\t\x12\x10\n\x08password\x18\x02 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x03 \x01(\t\x12\"\n\x04role\x18\x04 \x01(\x0e\x32\x14.codex.v1.UserRolePb\"\x12\n\x10ListUsersRequest\"7\n\x11ListUsersResponse\x12\"\n\x05users\x18\x01 \x03(\x0b\x32\x13.codex.v1.AdminUser\"b\n\x06SshKey\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04host\x18\x02 \x01(\t\x12\x0c\n\x04user\x18\x03 \x01(\t\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"Q\n\x10\x41\x64\x64SshKeyRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04host\x18\x02 \x01(\t\x12\x0c\n\x04user\x18\x03 \x01(\t\x12\x13\n\x0bprivate_key\x18\x04 \x01(\t\"\x14\n\x12ListSshKeysRequest\"5\n\x13ListSshKeysResponse\x12\x1e\n\x04keys\x18\x01 \x03(\x0b\x32\x10.codex.v1.SshKey\"#\n\x13\x44\x65leteSshKeyRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\"d\n\x08\x41piToken\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04host\x18\x02 \x01(\t\x12\x0c\n\x04user\x18\x03 \x01(\t\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"M\n\x12\x41\x64\x64\x41piTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04host\x18\x02 \x01(\t\x12\x0c\n\x04user\x18\x03 \x01(\t\x12\r\n\x05token\x18\x04 \x01(\t\"\x16\n\x14ListApiTokensRequest\";\n\x15ListApiTokensResponse\x12\"\n\x06tokens\x18\x01 \x03(\x0b\x32\x12.codex.v1.ApiToken\"%\n\x15\x44\x65leteApiTokenRequest\x12\x0c\n\x04name\x18\x01 \x01(\t*P\n\nUserRolePb\x12\x19\n\x15USER_ROLE_UNSPECIFIED\x10\x00\x12\x12\n\x0eUSER_ROLE_USER\x10\x01\x12\x13\n\x0fUSER_ROLE_ADMIN\x10\x02\x32\x8d\x06\n\x0c\x41\x64minService\x12M\n\x0c\x43reateInvite\x12\x1d.codex.v1.CreateInviteRequest\x1a\x1e.codex.v1.CreateInviteResponse\x12J\n\x0bListInvites\x12\x1c.codex.v1.ListInvitesRequest\x1a\x1d.codex.v1.ListInvitesResponse\x12>\n\x0cRevokeInvite\x12\x1d.codex.v1.RevokeInviteRequest\x1a\x0f.codex.v1.Empty\x12>\n\nCreateUser\x12\x1b.codex.v1.CreateUserRequest\x1a\x13.codex.v1.AdminUser\x12\x44\n\tListUsers\x12\x1a.codex.v1.ListUsersRequest\x1a\x1b.codex.v1.ListUsersResponse\x12\x39\n\tAddSshKey\x12\x1a.codex.v1.AddSshKeyRequest\x1a\x10.codex.v1.SshKey\x12J\n\x0bListSshKeys\x12\x1c.codex.v1.ListSshKeysRequest\x1a\x1d.codex.v1.ListSshKeysResponse\x12>\n\x0c\x44\x65leteSshKey\x12\x1d.codex.v1.DeleteSshKeyRequest\x1a\x0f.codex.v1.Empty\x12?\n\x0b\x41\x64\x64\x41piToken\x12\x1c.codex.v1.AddApiTokenRequest\x1a\x12.codex.v1.ApiToken\x12P\n\rListApiTokens\x12\x1e.codex.v1.ListApiTokensRequest\x1a\x1f.codex.v1.ListApiTokensResponse\x12\x42\n\x0e\x44\x65leteApiToken\x12\x1f.codex.v1.DeleteApiTokenRequest\x1a\x0f.codex.v1.Emptyb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'codex.v1.admin_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_USERROLEPB']._serialized_start=1020
-  _globals['_USERROLEPB']._serialized_end=1100
+  _globals['_USERROLEPB']._serialized_start=1622
+  _globals['_USERROLEPB']._serialized_end=1702
   _globals['_INVITE']._serialized_start=91
   _globals['_INVITE']._serialized_end=362
   _globals['_ADMINUSER']._serialized_start=365
@@ -55,6 +55,26 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LISTUSERSREQUEST']._serialized_end=961
   _globals['_LISTUSERSRESPONSE']._serialized_start=963
   _globals['_LISTUSERSRESPONSE']._serialized_end=1018
-  _globals['_ADMINSERVICE']._serialized_start=1103
-  _globals['_ADMINSERVICE']._serialized_end=1470
+  _globals['_SSHKEY']._serialized_start=1020
+  _globals['_SSHKEY']._serialized_end=1118
+  _globals['_ADDSSHKEYREQUEST']._serialized_start=1120
+  _globals['_ADDSSHKEYREQUEST']._serialized_end=1201
+  _globals['_LISTSSHKEYSREQUEST']._serialized_start=1203
+  _globals['_LISTSSHKEYSREQUEST']._serialized_end=1223
+  _globals['_LISTSSHKEYSRESPONSE']._serialized_start=1225
+  _globals['_LISTSSHKEYSRESPONSE']._serialized_end=1278
+  _globals['_DELETESSHKEYREQUEST']._serialized_start=1280
+  _globals['_DELETESSHKEYREQUEST']._serialized_end=1315
+  _globals['_APITOKEN']._serialized_start=1317
+  _globals['_APITOKEN']._serialized_end=1417
+  _globals['_ADDAPITOKENREQUEST']._serialized_start=1419
+  _globals['_ADDAPITOKENREQUEST']._serialized_end=1496
+  _globals['_LISTAPITOKENSREQUEST']._serialized_start=1498
+  _globals['_LISTAPITOKENSREQUEST']._serialized_end=1520
+  _globals['_LISTAPITOKENSRESPONSE']._serialized_start=1522
+  _globals['_LISTAPITOKENSRESPONSE']._serialized_end=1581
+  _globals['_DELETEAPITOKENREQUEST']._serialized_start=1583
+  _globals['_DELETEAPITOKENREQUEST']._serialized_end=1620
+  _globals['_ADMINSERVICE']._serialized_start=1705
+  _globals['_ADMINSERVICE']._serialized_end=2486
 # @@protoc_insertion_point(module_scope)

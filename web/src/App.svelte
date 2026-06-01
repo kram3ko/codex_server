@@ -7,10 +7,11 @@
   import Signup from "./features/auth/Signup.svelte";
   import Chat from "./features/chat/Chat.svelte";
   import Notes from "./features/notes/Notes.svelte";
+  import Vault from "./features/vault/Vault.svelte";
   import { userClient } from "./shared/lib/clients";
   import { theme } from "./shared/lib/theme.svelte";
 
-  type Route = "chat" | "notes" | "admin";
+  type Route = "chat" | "notes" | "admin" | "keys";
   type AuthView = "login" | "signup";
 
   // URL `?invite=XYZ` → одразу signup-форма з префілленим токеном.
@@ -157,7 +158,9 @@
     {:else if route === "notes"}
       <Notes />
     {:else if route === "admin" && isAdmin}
-      <AdminPanel />
+      <AdminPanel onopenkeys={() => (route = "keys")} />
+    {:else if route === "keys" && isAdmin}
+      <Vault onback={() => (route = "admin")} />
     {/if}
   </div>
 {/if}

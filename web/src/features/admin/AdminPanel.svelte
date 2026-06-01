@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { Copy, Globe, Plus, Send, Trash2, Users } from "lucide-svelte";
+  import { Copy, Globe, KeyRound, Plus, Send, Trash2, Users } from "lucide-svelte";
   import { onMount } from "svelte";
 
   import { adminClient } from "../../shared/lib/clients";
   import type { AdminUser, Invite } from "../../gen/codex/v1/admin_pb";
   import { UserRolePb } from "../../gen/codex/v1/admin_pb";
+
+  let { onopenkeys }: { onopenkeys: () => void } = $props();
 
   let invites = $state<Invite[]>([]);
   let users = $state<AdminUser[]>([]);
@@ -95,15 +97,25 @@
       <h1 class="text-xl font-semibold tracking-tight">Admin</h1>
       <p class="text-sm text-[var(--color-text-muted)]">Invites + users</p>
     </div>
-    <button
-      class="flex h-9 items-center gap-2 rounded-lg bg-gradient-to-r from-[oklch(72%_0.18_175)] to-[oklch(70%_0.16_230)] px-3 text-sm font-medium text-[var(--color-bg)] shadow-lg shadow-[oklch(72%_0.18_175/0.25)] transition hover:brightness-110 disabled:opacity-50"
-      disabled={busy}
-      onclick={createInvite}
-      type="button"
-    >
-      <Plus size={15} />
-      {busy ? "Creating…" : "New invite"}
-    </button>
+    <div class="flex items-center gap-2">
+      <button
+        class="flex h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm font-medium text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        onclick={onopenkeys}
+        type="button"
+      >
+        <KeyRound size={15} />
+        Keys & API
+      </button>
+      <button
+        class="flex h-9 items-center gap-2 rounded-lg bg-gradient-to-r from-[oklch(72%_0.18_175)] to-[oklch(70%_0.16_230)] px-3 text-sm font-medium text-[var(--color-bg)] shadow-lg shadow-[oklch(72%_0.18_175/0.25)] transition hover:brightness-110 disabled:opacity-50"
+        disabled={busy}
+        onclick={createInvite}
+        type="button"
+      >
+        <Plus size={15} />
+        {busy ? "Creating…" : "New invite"}
+      </button>
+    </div>
   </header>
 
   {#if error}

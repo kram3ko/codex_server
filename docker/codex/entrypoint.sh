@@ -54,6 +54,10 @@ url = "${PLAYWRIGHT_MCP_URL}"
 EOF
 fi
 
+# HTTPS git tokens живуть у vault volume (`~/.ssh/git-credentials`), куди їх
+# пише codex-server у рантаймі. Вмикаємо store-helper саме на цей файл.
+git config --global credential.helper "store --file=$HOME/.ssh/git-credentials"
+
 # Codex 0.131+ refuses non-loopback WS listener без auth. Per-sidecar shared
 # secret (HS256), issuer/audience claims перевіряються на handshake.
 : "${CODEX_WS_SECRET:?required for ws-auth signed-bearer-token}"

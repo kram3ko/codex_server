@@ -34,6 +34,24 @@ class AdminService(Protocol):
     async def list_users(self, request: codex_dot_v1_dot_admin__pb2.ListUsersRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.ListUsersResponse:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
+    async def add_ssh_key(self, request: codex_dot_v1_dot_admin__pb2.AddSshKeyRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.SshKey:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    async def list_ssh_keys(self, request: codex_dot_v1_dot_admin__pb2.ListSshKeysRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.ListSshKeysResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    async def delete_ssh_key(self, request: codex_dot_v1_dot_admin__pb2.DeleteSshKeyRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    async def add_api_token(self, request: codex_dot_v1_dot_admin__pb2.AddApiTokenRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.ApiToken:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    async def list_api_tokens(self, request: codex_dot_v1_dot_admin__pb2.ListApiTokensRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.ListApiTokensResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
+    async def delete_api_token(self, request: codex_dot_v1_dot_admin__pb2.DeleteApiTokenRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+
 
 class AdminServiceASGIApplication(ConnectASGIApplication[AdminService]):
     def __init__(self, service: AdminService | AsyncGenerator[AdminService], *, interceptors: Iterable[Interceptor]=(), read_max_bytes: int | None = None, compressions: Iterable[Compression] | None = None, codecs: Iterable[Codec] | None = None) -> None:
@@ -89,6 +107,66 @@ class AdminServiceASGIApplication(ConnectASGIApplication[AdminService]):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=svc.list_users,
+                ),
+                "/codex.v1.AdminService/AddSshKey": Endpoint.unary(
+                    method=MethodInfo(
+                        name="AddSshKey",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.AddSshKeyRequest,
+                        output=codex_dot_v1_dot_admin__pb2.SshKey,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.add_ssh_key,
+                ),
+                "/codex.v1.AdminService/ListSshKeys": Endpoint.unary(
+                    method=MethodInfo(
+                        name="ListSshKeys",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.ListSshKeysRequest,
+                        output=codex_dot_v1_dot_admin__pb2.ListSshKeysResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.list_ssh_keys,
+                ),
+                "/codex.v1.AdminService/DeleteSshKey": Endpoint.unary(
+                    method=MethodInfo(
+                        name="DeleteSshKey",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.DeleteSshKeyRequest,
+                        output=codex_dot_v1_dot_common__pb2.Empty,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.delete_ssh_key,
+                ),
+                "/codex.v1.AdminService/AddApiToken": Endpoint.unary(
+                    method=MethodInfo(
+                        name="AddApiToken",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.AddApiTokenRequest,
+                        output=codex_dot_v1_dot_admin__pb2.ApiToken,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.add_api_token,
+                ),
+                "/codex.v1.AdminService/ListApiTokens": Endpoint.unary(
+                    method=MethodInfo(
+                        name="ListApiTokens",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.ListApiTokensRequest,
+                        output=codex_dot_v1_dot_admin__pb2.ListApiTokensResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.list_api_tokens,
+                ),
+                "/codex.v1.AdminService/DeleteApiToken": Endpoint.unary(
+                    method=MethodInfo(
+                        name="DeleteApiToken",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.DeleteApiTokenRequest,
+                        output=codex_dot_v1_dot_common__pb2.Empty,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=svc.delete_api_token,
                 ),
             },
             interceptors=interceptors,
@@ -204,6 +282,126 @@ class AdminServiceClient(ConnectClient):
             timeout_ms=timeout_ms,
         )
 
+    async def add_ssh_key(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.AddSshKeyRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_admin__pb2.SshKey:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="AddSshKey",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.AddSshKeyRequest,
+                output=codex_dot_v1_dot_admin__pb2.SshKey,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    async def list_ssh_keys(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.ListSshKeysRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_admin__pb2.ListSshKeysResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="ListSshKeys",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.ListSshKeysRequest,
+                output=codex_dot_v1_dot_admin__pb2.ListSshKeysResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    async def delete_ssh_key(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.DeleteSshKeyRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_common__pb2.Empty:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="DeleteSshKey",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.DeleteSshKeyRequest,
+                output=codex_dot_v1_dot_common__pb2.Empty,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    async def add_api_token(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.AddApiTokenRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_admin__pb2.ApiToken:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="AddApiToken",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.AddApiTokenRequest,
+                output=codex_dot_v1_dot_admin__pb2.ApiToken,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    async def list_api_tokens(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.ListApiTokensRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_admin__pb2.ListApiTokensResponse:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="ListApiTokens",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.ListApiTokensRequest,
+                output=codex_dot_v1_dot_admin__pb2.ListApiTokensResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    async def delete_api_token(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.DeleteApiTokenRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_common__pb2.Empty:
+        return await self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="DeleteApiToken",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.DeleteApiTokenRequest,
+                output=codex_dot_v1_dot_common__pb2.Empty,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
 
 
 
@@ -218,6 +416,18 @@ class AdminServiceSync(Protocol):
     def create_user(self, request: codex_dot_v1_dot_admin__pb2.CreateUserRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.AdminUser:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
     def list_users(self, request: codex_dot_v1_dot_admin__pb2.ListUsersRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.ListUsersResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def add_ssh_key(self, request: codex_dot_v1_dot_admin__pb2.AddSshKeyRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.SshKey:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def list_ssh_keys(self, request: codex_dot_v1_dot_admin__pb2.ListSshKeysRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.ListSshKeysResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def delete_ssh_key(self, request: codex_dot_v1_dot_admin__pb2.DeleteSshKeyRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def add_api_token(self, request: codex_dot_v1_dot_admin__pb2.AddApiTokenRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.ApiToken:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def list_api_tokens(self, request: codex_dot_v1_dot_admin__pb2.ListApiTokensRequest, ctx: RequestContext) -> codex_dot_v1_dot_admin__pb2.ListApiTokensResponse:
+        raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
+    def delete_api_token(self, request: codex_dot_v1_dot_admin__pb2.DeleteApiTokenRequest, ctx: RequestContext) -> codex_dot_v1_dot_common__pb2.Empty:
         raise ConnectError(Code.UNIMPLEMENTED, "Not implemented")
 
 
@@ -274,6 +484,66 @@ class AdminServiceWSGIApplication(ConnectWSGIApplication):
                         idempotency_level=IdempotencyLevel.UNKNOWN,
                     ),
                     function=service.list_users,
+                ),
+                "/codex.v1.AdminService/AddSshKey": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="AddSshKey",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.AddSshKeyRequest,
+                        output=codex_dot_v1_dot_admin__pb2.SshKey,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.add_ssh_key,
+                ),
+                "/codex.v1.AdminService/ListSshKeys": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="ListSshKeys",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.ListSshKeysRequest,
+                        output=codex_dot_v1_dot_admin__pb2.ListSshKeysResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.list_ssh_keys,
+                ),
+                "/codex.v1.AdminService/DeleteSshKey": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="DeleteSshKey",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.DeleteSshKeyRequest,
+                        output=codex_dot_v1_dot_common__pb2.Empty,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.delete_ssh_key,
+                ),
+                "/codex.v1.AdminService/AddApiToken": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="AddApiToken",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.AddApiTokenRequest,
+                        output=codex_dot_v1_dot_admin__pb2.ApiToken,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.add_api_token,
+                ),
+                "/codex.v1.AdminService/ListApiTokens": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="ListApiTokens",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.ListApiTokensRequest,
+                        output=codex_dot_v1_dot_admin__pb2.ListApiTokensResponse,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.list_api_tokens,
+                ),
+                "/codex.v1.AdminService/DeleteApiToken": EndpointSync.unary(
+                    method=MethodInfo(
+                        name="DeleteApiToken",
+                        service_name="codex.v1.AdminService",
+                        input=codex_dot_v1_dot_admin__pb2.DeleteApiTokenRequest,
+                        output=codex_dot_v1_dot_common__pb2.Empty,
+                        idempotency_level=IdempotencyLevel.UNKNOWN,
+                    ),
+                    function=service.delete_api_token,
                 ),
             },
             interceptors=interceptors,
@@ -383,6 +653,126 @@ class AdminServiceClientSync(ConnectClientSync):
                 service_name="codex.v1.AdminService",
                 input=codex_dot_v1_dot_admin__pb2.ListUsersRequest,
                 output=codex_dot_v1_dot_admin__pb2.ListUsersResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def add_ssh_key(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.AddSshKeyRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_admin__pb2.SshKey:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="AddSshKey",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.AddSshKeyRequest,
+                output=codex_dot_v1_dot_admin__pb2.SshKey,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def list_ssh_keys(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.ListSshKeysRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_admin__pb2.ListSshKeysResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="ListSshKeys",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.ListSshKeysRequest,
+                output=codex_dot_v1_dot_admin__pb2.ListSshKeysResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def delete_ssh_key(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.DeleteSshKeyRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_common__pb2.Empty:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="DeleteSshKey",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.DeleteSshKeyRequest,
+                output=codex_dot_v1_dot_common__pb2.Empty,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def add_api_token(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.AddApiTokenRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_admin__pb2.ApiToken:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="AddApiToken",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.AddApiTokenRequest,
+                output=codex_dot_v1_dot_admin__pb2.ApiToken,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def list_api_tokens(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.ListApiTokensRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_admin__pb2.ListApiTokensResponse:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="ListApiTokens",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.ListApiTokensRequest,
+                output=codex_dot_v1_dot_admin__pb2.ListApiTokensResponse,
+                idempotency_level=IdempotencyLevel.UNKNOWN,
+            ),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def delete_api_token(
+        self,
+        request: codex_dot_v1_dot_admin__pb2.DeleteApiTokenRequest,
+        *,
+        headers: Headers | Mapping[str, str] | None = None,
+        timeout_ms: int | None = None,
+    ) -> codex_dot_v1_dot_common__pb2.Empty:
+        return self.execute_unary(
+            request=request,
+            method=MethodInfo(
+                name="DeleteApiToken",
+                service_name="codex.v1.AdminService",
+                input=codex_dot_v1_dot_admin__pb2.DeleteApiTokenRequest,
+                output=codex_dot_v1_dot_common__pb2.Empty,
                 idempotency_level=IdempotencyLevel.UNKNOWN,
             ),
             headers=headers,

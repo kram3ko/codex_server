@@ -26,7 +26,7 @@ services:
       - ../.codex:/home/codex/.codex:rw
       - /var/run/docker.sock:/var/run/docker.sock
       - ..:/home/codex/workspace:rw
-      - ~/.ssh:/home/codex/.ssh:ro
+      - codex_ssh:/home/codex/.ssh
     tmpfs:
       - /codex-feedback:size=250m
     expose:
@@ -95,6 +95,7 @@ services:
     volumes:
       - ..:/home/codex/workspace
       - ../.codex/generated_images:/home/codex/.codex/generated_images:ro
+      - codex_ssh:/ssh-vault
     command: gunicorn app.main:app -c gunicorn.conf.py
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
@@ -355,3 +356,5 @@ volumes:
     name: codex_web_node_modules
   playwright_profile:
     name: codex_playwright_profile
+  codex_ssh:
+    name: codex_ssh

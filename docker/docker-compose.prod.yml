@@ -24,6 +24,7 @@ services:
       - codex_admin_home:/home/codex/.codex
       - codex_generated_images:/home/codex/.codex/generated_images
       - codex_workspace:/home/codex/workspace
+      - codex_ssh:/home/codex/.ssh
     tmpfs:
       - /codex-feedback:size=250m
     expose:
@@ -91,6 +92,7 @@ services:
       GUNICORN_PRELOAD: ${GUNICORN_PRELOAD:-true}
     volumes:
       - codex_generated_images:/home/codex/.codex/generated_images:ro
+      - codex_ssh:/ssh-vault
     command: gunicorn app.main:app -c gunicorn.conf.py
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
@@ -418,5 +420,7 @@ volumes:
     name: codex_generated_images
   codex_workspace:
     name: codex_workspace
+  codex_ssh:
+    name: codex_ssh
   playwright_profile:
     name: codex_playwright_profile

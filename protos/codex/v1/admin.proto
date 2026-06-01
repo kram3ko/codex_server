@@ -69,10 +69,68 @@ message ListUsersResponse {
   repeated AdminUser users = 1;
 }
 
+// SSH-ключ для codex-агента (admin sidecar). `name` = мітка, ім'я файлу
+// `id_<name>` і Host-аліас у `~/.ssh/config` — клон через `git@<name>:org/repo`.
+message SshKey {
+  string name = 1;
+  string host = 2;                          // реальний HostName (github.com)
+  string user = 3;                          // ssh-юзер (порожньо → "git")
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message AddSshKeyRequest {
+  string name = 1;
+  string host = 2;
+  string user = 3;
+  string private_key = 4;                   // OpenSSH/PEM приватний ключ
+}
+
+message ListSshKeysRequest {}
+
+message ListSshKeysResponse {
+  repeated SshKey keys = 1;
+}
+
+message DeleteSshKeyRequest {
+  string name = 1;
+}
+
+// API-токен для HTTPS git (github/gitlab/будь-який хост) — пишеться у
+// `git-credentials`, агент клонує `https://<host>/org/repo` по токену.
+message ApiToken {
+  string name = 1;
+  string host = 2;
+  string user = 3;                          // username у credentials (порожньо → x-access-token)
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message AddApiTokenRequest {
+  string name = 1;
+  string host = 2;
+  string user = 3;
+  string token = 4;
+}
+
+message ListApiTokensRequest {}
+
+message ListApiTokensResponse {
+  repeated ApiToken tokens = 1;
+}
+
+message DeleteApiTokenRequest {
+  string name = 1;
+}
+
 service AdminService {
   rpc CreateInvite(CreateInviteRequest) returns (CreateInviteResponse);
   rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
   rpc RevokeInvite(RevokeInviteRequest) returns (Empty);
   rpc CreateUser(CreateUserRequest) returns (AdminUser);
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc AddSshKey(AddSshKeyRequest) returns (SshKey);
+  rpc ListSshKeys(ListSshKeysRequest) returns (ListSshKeysResponse);
+  rpc DeleteSshKey(DeleteSshKeyRequest) returns (Empty);
+  rpc AddApiToken(AddApiTokenRequest) returns (ApiToken);
+  rpc ListApiTokens(ListApiTokensRequest) returns (ListApiTokensResponse);
+  rpc DeleteApiToken(DeleteApiTokenRequest) returns (Empty);
 }

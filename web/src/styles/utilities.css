@@ -14,6 +14,16 @@
   border: 1px solid oklch(32% 0.018 250 / 0.4);
 }
 
+:root[data-theme="light"] .glass {
+  background: oklch(100% 0 0 / 0.72);
+  border-color: oklch(86% 0.012 100 / 0.7);
+}
+
+:root[data-theme="light"] .glass-soft {
+  background: oklch(100% 0 0 / 0.55);
+  border-color: oklch(86% 0.012 100 / 0.6);
+}
+
 /* Тільки message bubbles — щільніше, текст добре читається на фоні картинки. */
 .glass-bubble {
   background: oklch(22% 0.014 250 / 0.85);
