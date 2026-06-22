@@ -70,10 +70,12 @@ class _Method(StrEnum):
     TURN_STEER = "turn/steer"
     TURN_INTERRUPT = "turn/interrupt"
     ACCOUNT_RATE_LIMITS_READ = "account/rateLimits/read"
+    ACCOUNT_RATE_LIMITS_UPDATED = "account/rateLimits/updated"
     MCP_ELICITATION_REQUEST = "mcpServer/elicitation/request"
 
 
 type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
+type RateLimitsUpdateCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 type _ActiveItem = tuple[str | None, str | None, float | None]
@@ -378,7 +380,7 @@ class CodexClient:
         on_started: Callable[[str, str], Awaitable[None]] | None = None,
         idle_s: float | None = None,
         on_idle: Callable[[], Awaitable[bool | None]] | None = None,
-        on_usage_signal: Callable[[], Awaitable[None]] | None = None,
+        on_rate_limits_update: RateLimitsUpdateCallback | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """Stream ChatEvent'и. `on_started(turn_id, thread_id)` fires як тільки
         sidecar повернув turn/start — caller робить `mark_running` у `turns`.
@@ -387,9 +389,8 @@ class CodexClient:
         ChatEvent). Чужі leftover-и з попереднього turn не мають скидати таймер
         і не мають доходити до translator.
 
-        `on_usage_signal` fires на `thread/tokenUsage/updated` (thread-level,
-        не turn-bound) — sidecar шле це навіть зі stale turn_id, тому НЕ
-        фільтруємо за turn_id."""
+        `on_rate_limits_update` fires на `account/rateLimits/updated` — це
+        account-level notification без прив'язки до turn stream."""
         input_payload = self._build_input(text, attachments)
         result = await self._begin_turn_with_retry(input_payload)
         if isinstance(result, ErrorEvent):
@@ -408,7 +409,11 @@ class CodexClient:
                 await on_started(self._current_turn_id, self._thread_id)
             accumulated = ""
 
-            async for note in self._current_turn_notifications(idle_s, on_idle, on_usage_signal):
+            async for note in self._current_turn_notifications(
+                idle_s,
+                on_idle,
+                on_rate_limits_update,
+            ):
                 self._record_raw_note(note)
                 event = _translate(note, accumulated)
                 if event is not None:
@@ -578,7 +583,7 @@ class CodexClient:
         self,
         idle_s: float | None,
         on_idle: Callable[[], Awaitable[bool | None]] | None,
-        on_usage_signal: Callable[[], Awaitable[None]] | None = None,
+        on_rate_limits_update: RateLimitsUpdateCallback | None = None,
     ) -> AsyncIterator[Notification]:
         notes = self._transport.notifications()
         self._idle_s = idle_s
@@ -589,10 +594,11 @@ class CodexClient:
                     note = await self._next_notification(notes, on_idle)
                 except StopAsyncIteration:
                     return
-                # Перехоплюємо ДО stale-filter: thread/tokenUsage/updated
-                # приходить зі stale turn_id, інакше signal губиться.
-                if on_usage_signal is not None and note.method == "thread/tokenUsage/updated":
-                    await on_usage_signal()
+                if note.method == _Method.ACCOUNT_RATE_LIMITS_UPDATED:
+                    rate_limits = note.params.get("rateLimits")
+                    if on_rate_limits_update is not None and isinstance(rate_limits, dict):
+                        await on_rate_limits_update(rate_limits)
+                    continue
                 if self._is_stale_turn_note(note):
                     self._record_stale_raw_note(note)
                     continue

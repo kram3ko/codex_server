@@ -112,9 +112,9 @@ async def stream_turn(
         state.seen_steer_count = cur
         await _persist_segment(state, persisted_chat_id, user_pk)
 
-    async def _on_usage_signal() -> None:
+    async def _on_rate_limits_update(snapshot: dict[str, Any]) -> None:
         if sidecar is not None:
-            usage_poller.schedule_refresh(sidecar)
+            await usage_poller.publish_rate_limits(sidecar, snapshot)
 
     authz_text = inject_authz(
         text,
@@ -128,7 +128,7 @@ async def stream_turn(
         on_started=_on_started,
         idle_s=settings.WEB_TURN_TIMEOUT_SECONDS,
         on_idle=_on_idle,
-        on_usage_signal=_on_usage_signal,
+        on_rate_limits_update=_on_rate_limits_update,
     )
 
     # Coalesce TokenEvent deltas щоб зменшити кількість HTTP/2 DATA фреймів і

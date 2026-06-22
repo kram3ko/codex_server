@@ -68,7 +68,7 @@ from app.rpc.uploads import UploadsRPC
 from app.rpc.user import UserRPC
 from app.services.auth.default import auth_service
 from app.services.cache.default import cache
-from app.services.codex_usage.poller import bootstrap_usage, drain_bg_tasks
+from app.services.codex_usage.poller import bootstrap_usage
 from app.services.errors.default import bugsink_client
 from app.services.turns.recovery import lease_expired_listener, reconcile_stale_turns
 from app.services.users.default import user_service
@@ -106,7 +106,6 @@ async def lifespan(_app: FastAPI):
                 usage_bootstrap.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await usage_bootstrap
-            await drain_bg_tasks()
             cancelled = await tg_bot_service.interrupt_active_turns()
             if cancelled:
                 log.info("app_shutdown_turns_interrupted", count=cancelled)

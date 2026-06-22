@@ -1,13 +1,13 @@
-"""Codex rate-limits fan-out через Redis pub/sub. Event-driven, але не push:
-rate-limit вікна (`primary/secondary %`) живуть лише у відповіді
-`account/rateLimits/read` — їх немає у жодній notification. Sidecar шле тільки
-сигнал `thread/tokenUsage/updated`; на нього (і на terminal turn-у) робимо
-fetch+publish. `schedule_refresh` коалесить burst сигналів в один fetch.
+"""Codex rate-limits fan-out через Redis pub/sub.
+
+`account/rateLimits/updated` містить готовий snapshot для live updates.
+`account/rateLimits/read` лишається для bootstrap/manual refresh.
 """
 
 import asyncio
 import contextlib
 from datetime import UTC, datetime
+from typing import Any
 
 import orjson
 import structlog
@@ -29,7 +29,7 @@ _SNAPSHOT_KEY_PREFIX = "codex:usage:snapshot:"
 _CHANNEL_PREFIX = "codex:usage:"
 # Bootstrap snapshot живе довго: rate-limit вікно primary 5h, secondary
 # тиждень — навіть 1h stale на open показує адекватний baseline (актуальне
-# значення придет з наступним turn-finalize через pub/sub).
+# значення придет з наступним `account/rateLimits/updated` через pub/sub).
 _SNAPSHOT_TTL_S = 3600
 
 
@@ -92,10 +92,16 @@ async def _publish(sidecar: SidecarName, usage: CodexUsage) -> None:
         log.warning("codex_usage_publish_failed", sidecar=sidecar, error=str(exc))
 
 
+async def publish_rate_limits(sidecar: SidecarName, snapshot: dict[str, Any]) -> None:
+    try:
+        usage = codex_usage_service.from_rate_limits(snapshot)
+    except ValidationError as exc:
+        log.warning("codex_usage_notification_invalid", sidecar=sidecar, error=str(exc))
+        return
+    await _publish(sidecar, usage)
+
+
 async def publish_for(sidecar: SidecarName) -> None:
-    """Fetch + fan-out для одного sidecar-у. Тригериться runner-ом одразу
-    після `finalize_once` — момент коли codex списав tokens. Помилки sidecar/
-    Redis silently logged (caller не повинен на них реагувати)."""
     usage = await _fetch_once(sidecar)
     if usage is None:
         return
@@ -103,65 +109,7 @@ async def publish_for(sidecar: SidecarName) -> None:
     await _publish(sidecar, usage)
 
 
-_bg_tasks: set[asyncio.Task[None]] = set()
-_inflight: set[SidecarName] = set()
-_pending: set[SidecarName] = set()
-
-
-def schedule_refresh(sidecar: SidecarName) -> None:
-    """Coalescing leading+trailing edge: leading запускає fetch одразу;
-    повторні signals while inflight ставлять `_pending`. По завершенні
-    inflight task — якщо pending був set, ще один fetch (trailing). Без
-    trailing edge подія яка прийшла одразу після fetch start губиться до
-    наступного finalize/manual refresh."""
-    if sidecar in _inflight:
-        _pending.add(sidecar)
-        return
-    _spawn(sidecar)
-
-
-def _spawn(sidecar: SidecarName) -> None:
-    _inflight.add(sidecar)
-
-    async def _run() -> None:
-        try:
-            await publish_for(sidecar)
-        finally:
-            _inflight.discard(sidecar)
-            if sidecar in _pending:
-                _pending.discard(sidecar)
-                _spawn(sidecar)
-
-    task = asyncio.create_task(_run(), name=f"codex-usage-refresh:{sidecar}")
-    _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
-
-
-_DRAIN_TIMEOUT_S = 3.0
-
-
-async def drain_bg_tasks() -> None:
-    """Shutdown helper: дочекатися in-flight refresh tasks (інакше вони
-    touch-нуть вже закритий cache/transport). На stuck sidecar — cancel після
-    `_DRAIN_TIMEOUT_S` щоб не блокувати reload до `CODEX_REQUEST_TIMEOUT`."""
-    if not _bg_tasks:
-        return
-    pending = list(_bg_tasks)
-    try:
-        await asyncio.wait_for(
-            asyncio.gather(*pending, return_exceptions=True),
-            timeout=_DRAIN_TIMEOUT_S,
-        )
-    except TimeoutError:
-        for task in pending:
-            if not task.done():
-                task.cancel()
-        log.warning("codex_usage_drain_timeout", pending=len(pending))
-
-
 async def _bootstrap_once() -> None:
-    """Один initial fetch+publish для admin+guest на startup — клієнти що
-    відкрили web до першого turn-у бачать baseline без чекання."""
     for sidecar in SidecarName:
         await publish_for(sidecar)
 

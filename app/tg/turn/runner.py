@@ -20,7 +20,6 @@ from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
 from app.services.codex.sidecar import SidecarName
 from app.services.codex.transport import AppServerError
-from app.services.codex_usage import poller as usage_poller
 from app.services.sessions.store import ChatSession
 from app.services.stt.base import STTBackend
 from app.services.turns import locks as turn_locks
@@ -230,9 +229,6 @@ class TurnRunner:
                             error_detail=terminal_error[1],
                         )
                         await db.commit()
-                    # Event-driven usage refresh — codex списав tokens на
-                    # finalize. Симетрично до `execute_turn_inner` (web path).
-                    usage_poller.schedule_refresh(sidecar)
 
     @staticmethod
     async def _on_timeout(

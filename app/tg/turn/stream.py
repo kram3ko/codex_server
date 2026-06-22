@@ -5,6 +5,8 @@ Termin shape: stream_turn раз і завжди завершується `Codex
 COMPLETED після будь-якого return.
 """
 
+from typing import Any
+
 import structlog
 from aiogram.types import Message
 
@@ -81,8 +83,8 @@ async def stream_turn(
         await interrupt_best_effort(client, reason="tg_idle_timeout")
         return False
 
-    async def _on_usage_signal() -> None:
-        usage_poller.schedule_refresh(sidecar)
+    async def _on_rate_limits_update(snapshot: dict[str, Any]) -> None:
+        await usage_poller.publish_rate_limits(sidecar, snapshot)
 
     authz_text = inject_authz(
         prepared.text,
@@ -96,7 +98,7 @@ async def stream_turn(
         on_started=_on_started,
         idle_s=settings.TG_TURN_TIMEOUT_SECONDS,
         on_idle=_on_idle,
-        on_usage_signal=_on_usage_signal,
+        on_rate_limits_update=_on_rate_limits_update,
     )
 
     try:
