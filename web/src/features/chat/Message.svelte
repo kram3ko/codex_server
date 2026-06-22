@@ -5,7 +5,7 @@
   import HistoricalAudio from "./HistoricalAudio.svelte";
   import HistoricalFile from "./HistoricalFile.svelte";
   import HistoricalImage from "./HistoricalImage.svelte";
-  import { type ToolEvent } from "./ToolCall.svelte";
+  import type { ToolEvent } from "./toolEvent";
   import { renderMarkdown } from "./markdown";
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import { formatTime } from "../../shared/lib/time";

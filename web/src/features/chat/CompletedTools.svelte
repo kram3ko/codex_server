@@ -1,5 +1,6 @@
 <script lang="ts">
-  import ToolCall, { type ToolEvent } from "./ToolCall.svelte";
+  import type { ToolEvent } from "./toolEvent";
+  import ToolCall from "./ToolCall.svelte";
 
   // Shared collapse-блок для пачки tool-events. <details>/<summary> дає
   // accessibility (aria-expanded, keyboard) безкоштовно, без manual $state.

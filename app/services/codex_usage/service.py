@@ -1,9 +1,10 @@
-"""Codex plan usage via app-server `account/rateLimits/read` RPC.
+"""Codex plan usage via app-server rate-limit RPC/notifications.
 
 Fetched on-demand from the sidecar — no filesystem coupling.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -65,6 +66,9 @@ class CodexUsageService:
         snapshot = await client.read_rate_limits()
         if snapshot is None:
             return None
+        return self.from_rate_limits(snapshot)
+
+    def from_rate_limits(self, snapshot: dict[str, Any]) -> CodexUsage:
         return parse_usage(RateLimitSnapshot.model_validate(snapshot))
 
 

@@ -5,9 +5,17 @@
 
   import ChatList from "./ChatList.svelte";
   import Composer from "./Composer.svelte";
+  import {
+    clientIdOf,
+    isEmptyAssistantMessage,
+    suffixAfterPrefix,
+    type LiveDraft,
+    type ScrollIntent,
+    type ScrollTarget
+  } from "./liveTurn";
   import MessageList from "./MessageList.svelte";
+  import type { ToolEvent } from "./toolEvent";
   import { createTypewriter } from "./typewriter.svelte";
-  import type { ToolEvent } from "./ToolCall.svelte";
   import { turnSignal } from "./turnSignal.svelte";
   import { create } from "@bufbuild/protobuf";
   import { TimestampSchema } from "@bufbuild/protobuf/wkt";
@@ -48,6 +56,8 @@
   let lastActivityAt = $state<number | undefined>(undefined);
   let activeTurnId = $state(0);
   let streamedPrefix = "";
+  let scrollIntent = $state<ScrollIntent>({ seq: 0, target: "bottom" });
+  const liveDrafts = new Map<bigint, LiveDraft>();
   // Negative monotonic id для placeholder-рядків (resume/send). DB ids
   // позитивні autoincrement — від'ємні гарантовано не колізують.
   let placeholderSeq = -1n;
@@ -69,15 +79,100 @@
 
   const typer = createTypewriter();
 
-  function clientIdOf(message: ChatMessage): string | undefined {
-    const meta = message.meta as Record<string, unknown> | undefined;
-    const cid = meta?.client_id;
-    return typeof cid === "string" ? cid : undefined;
+  function requestScroll(target: ScrollTarget): void {
+    scrollIntent = { seq: scrollIntent.seq + 1, target };
+  }
+
+  // Per-token checkpoint: stores the live `messages`/`tools`/`attachments`
+  // arrays by reference (вони реассайняться, не мутуються in-place, тож це
+  // стабільний snapshot без копіювання). `displayMessages` накладає
+  // typer.displayed на streaming-рядок, тож текст у draft несе typewriter, а
+  // не запечений у повідомлення snapshot.
+  function saveLiveDraft(
+    chatId: bigint,
+    clientId: string,
+    lastEventId: string,
+    serverTurnId: bigint | null,
+    flush = true
+  ) {
+    if (flush) typer.flush();
+    liveDrafts.set(chatId, {
+      clientId,
+      messages,
+      text: flush ? typer.displayed : typer.fullText,
+      streamedPrefix,
+      lastEventId,
+      serverTurnId,
+      tools,
+      attachments,
+      draftStartedAt,
+      lastActivityAt
+    });
+  }
+
+  function dropLiveDraft(chat: Chat | null) {
+    if (chat) liveDrafts.delete(chat.id);
+  }
+
+  function saveCurrentLiveDraft() {
+    if (!selected || !streamingClientId) return;
+    const existing = liveDrafts.get(selected.id);
+    saveLiveDraft(
+      selected.id,
+      streamingClientId,
+      existing?.lastEventId ?? "",
+      existing?.serverTurnId ?? null
+    );
+  }
+
+  function restoreLiveDraft(draft: LiveDraft) {
+    messages = [...draft.messages];
+    streamingClientId = draft.clientId;
+    streamedPrefix = draft.streamedPrefix;
+    tools = [...draft.tools];
+    attachments = [...draft.attachments];
+    draftStartedAt = draft.draftStartedAt;
+    lastActivityAt = draft.lastActivityAt;
+    busy = true;
+    typer.reset();
+    if (draft.text) {
+      typer.push(draft.text);
+      typer.flush();
+    }
+    requestScroll("stream");
+  }
+
+  // Спільний commit для `done` обох loop-ів (send + resume): swap placeholder
+  // на persisted, видалити placeholder коли фінальний текст порожній, або
+  // append якщо placeholder уже зник.
+  function commitDone(
+    persisted: ChatMessage | undefined,
+    doneText: string,
+    clientId: string
+  ) {
+    if (!persisted) {
+      messages = messages.map((m) =>
+        clientIdOf(m) === clientId ? create(MessageSchema, { ...m, text: doneText }) : m
+      );
+      return;
+    }
+    const rendered = create(MessageSchema, { ...persisted, text: doneText });
+    const hasPlaceholder = messages.some((m) => clientIdOf(m) === clientId);
+    if (hasPlaceholder) {
+      messages = doneText
+        ? messages.map((m) => (clientIdOf(m) === clientId ? rendered : m))
+        : messages.filter((m) => clientIdOf(m) !== clientId);
+    } else if (doneText && !messages.some((m) => m.id === persisted.id)) {
+      messages = [...messages, rendered];
+    }
   }
 
   const displayMessages = $derived.by((): ChatMessage[] => {
-    if (!streamingClientId) return messages;
-    return messages.map((m) =>
+    const visible = messages.filter(
+      (m) => clientIdOf(m) === streamingClientId || !isEmptyAssistantMessage(m)
+    );
+    if (!streamingClientId) return visible;
+    return visible.map((m) =>
       clientIdOf(m) === streamingClientId
         ? create(MessageSchema, { ...m, text: typer.displayed })
         : m
@@ -146,6 +241,15 @@
 
   async function loadChatMessages(chat: Chat) {
     selected = chat;
+    const draft = liveDrafts.get(chat.id);
+    if (draft) {
+      restoreLiveDraft(draft);
+      busyChats.add(chat.id);
+      resumeAbort?.abort();
+      resumeAbort = new AbortController();
+      void resumeActiveTurn(chat, resumeAbort, draft);
+      return;
+    }
     streamingClientId = null;
     const response = await messageClient.listMessages({
       chatId: chat.id,
@@ -153,6 +257,7 @@
     });
     messages = [...response.messages];
     hasMoreOlder = response.messages.length >= PAGE_SIZE;
+    requestScroll("bottom");
     // Resume-on-mount: якщо для цього чату є RUNNING turn (наприклад
     // hard-reset під час стрімінгу), tail-имо його. На terminal frame
     // re-load повідомлень підхопить final. Сервер на нема-active turn
@@ -162,16 +267,18 @@
     void resumeActiveTurn(chat, resumeAbort);
   }
 
-  async function resumeActiveTurn(chat: Chat, ctrl: AbortController) {
+  async function resumeActiveTurn(chat: Chat, ctrl: AbortController, draft?: LiveDraft) {
     // Замало знати "є activeturn чи нема" — потрібний повний live replay
     // через placeholder + typewriter, щоб відновлений стрім виглядав як
     // оригінальний send(). На `done` swap-аємо placeholder на persisted
     // (client_id у persisted інший — від оригінального send-а — тому swap
     // по локальному `resume-`-id який ми присвоїли placeholder-ові).
-    const clientId = `resume-${chat.id}-${Date.now()}`;
-    let placeholderAdded = false;
-    let toolsLocal: ToolEvent[] = [];
-    let attachmentsLocal: ChatAttachment[] = [];
+    const clientId = draft?.clientId ?? `resume-${chat.id}-${Date.now()}`;
+    let placeholderAdded = draft !== undefined;
+    let lastResumeEventId = draft?.lastEventId ?? "";
+    let resumeServerTurnId = draft?.serverTurnId ?? null;
+    let toolsLocal: ToolEvent[] = draft ? [...draft.tools] : [];
+    let attachmentsLocal: ChatAttachment[] = draft ? [...draft.attachments] : [];
 
     function ensurePlaceholder() {
       if (placeholderAdded || ctrl.signal.aborted) return;
@@ -191,19 +298,36 @@
       lastActivityAt = Date.now();
       busy = true;
       busyChats.add(chat.id);
+      requestScroll("stream");
     }
+
+    const checkpoint = () =>
+      saveLiveDraft(chat.id, clientId, lastResumeEventId, resumeServerTurnId, false);
 
     try {
       for await (const event of chatClient.tailTurn(
-        { chatId: chat.id, afterId: "0" },
+        {
+          chatId: chat.id,
+          afterId: lastResumeEventId || "0",
+          ...(resumeServerTurnId !== null
+            ? { turnId: resumeServerTurnId }
+            : {})
+        },
         { signal: ctrl.signal }
       )) {
         if (selected?.id !== chat.id) return;
+        if (event.eventId) lastResumeEventId = event.eventId;
         lastActivityAt = Date.now();
         switch (event.kind.case) {
+          case "turnStarted":
+            ensurePlaceholder();
+            resumeServerTurnId = event.kind.value.turnId;
+            checkpoint();
+            break;
           case "token":
             ensurePlaceholder();
             typer.push(event.kind.value.delta);
+            checkpoint();
             break;
           case "toolCall":
             ensurePlaceholder();
@@ -217,6 +341,7 @@
               },
             ];
             tools = toolsLocal;
+            checkpoint();
             break;
           case "toolResult": {
             ensurePlaceholder();
@@ -250,29 +375,28 @@
             tools = toolsLocal;
             attachmentsLocal = [...attachmentsLocal, ...result.attachments];
             attachments = attachmentsLocal;
+            checkpoint();
             break;
           }
           case "done": {
             await typer.drained();
             const persisted = event.kind.value.message;
+            const doneText = suffixAfterPrefix(
+              streamedPrefix,
+              persisted?.text || event.kind.value.finalText,
+              typer.displayed
+            );
             // Server тепер вкладає persisted message у synthetic terminal
-            // (`_terminal_from_status` у service.py). Один з трьох шляхів:
-            //   placeholder + persisted → swap
-            //   no placeholder + persisted → append (turn finalize-нувся
-            //     між loadChatMessages і tail RPC)
-            //   no persisted → no-op (FAILED/CANCELLED або pre-attach turn)
-            if (persisted && placeholderAdded) {
-              messages = messages.map((m) =>
-                clientIdOf(m) === clientId ? persisted : m
-              );
-            } else if (persisted && !messages.some((m) => m.id === persisted.id)) {
-              messages = [...messages, persisted];
-            }
+            // (`_terminal_from_status` у service.py).
+            commitDone(persisted, doneText, clientId);
+            requestScroll("bottom");
+            liveDrafts.delete(chat.id);
             busyChats.delete(chat.id);
             cleanupResumeState(clientId);
             return;
           }
           case "error":
+            liveDrafts.delete(chat.id);
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
             busyChats.delete(chat.id);
             cleanupResumeState(clientId);
@@ -319,6 +443,7 @@
 
   /** Switch chat without interrupting the previous stream — `tailTurn` resumes on return. */
   async function selectChat(chat: Chat) {
+    saveCurrentLiveDraft();
     activeTurnId += 1;
     busy = false;
     streamingClientId = null;
@@ -332,11 +457,6 @@
   }
 
   async function send(text: string, imageIds: bigint[] = [], audioIds: bigint[] = []) {
-    // Відмінити resume-stream що ще тримається з попереднього mount —
-    // інакше його `ensurePlaceholder()`/cleanup міг би перетерти state
-    // нового send-у (streamingClientId/typer/tools/busy).
-    resumeAbort?.abort();
-    resumeAbort = null;
     const uploadIds = [...imageIds, ...audioIds];
     // Busy + no uploads → пробуємо steer running turn. Reject = turn закінчився
     // між нашим busy=true і RPC; просто відкриваємо новий turn без interrupt.
@@ -358,6 +478,7 @@
         // Split already-visible assistant text before the steered user message.
         // The same Codex turn keeps streaming after steer, but visually it is a
         // new assistant segment responding to the additional user context.
+        typer.flush();
         const partialText = typer.displayed;
         const partialAssistant = partialText.trim()
           ? create(MessageSchema, {
@@ -387,12 +508,18 @@
         } else {
           messages = [...messages, userMessage];
         }
+        saveCurrentLiveDraft();
+        requestScroll("stream");
         return;
       }
       flashInfo("Turn finished — message sent as new turn");
     } else if (busy && selected) {
+      resumeAbort?.abort();
+      resumeAbort = null;
       await chatClient.interruptTurn({ chatId: selected.id }).catch(() => undefined);
     }
+    resumeAbort?.abort();
+    resumeAbort = null;
     const turnId = activeTurnId + 1;
     activeTurnId = turnId;
     busy = true;
@@ -427,8 +554,13 @@
       createdAt: nowTimestamp()
     });
     messages = [...messages, userMessage, streamingPlaceholder];
+    requestScroll("stream");
     let lastEventId = "";
     let serverTurnId: bigint | null = null;
+
+    const checkpoint = () => {
+      if (chatAtSend) saveLiveDraft(chatAtSend.id, clientId, lastEventId, serverTurnId, false);
+    };
 
     async function processStream(stream: AsyncIterable<ChatEvent>): Promise<boolean> {
       let terminalSeen = false;
@@ -441,9 +573,11 @@
         switch (event.kind.case) {
           case "turnStarted":
             serverTurnId = event.kind.value.turnId;
+            checkpoint();
             break;
           case "token":
             typer.push(event.kind.value.delta);
+            checkpoint();
             break;
           case "toolCall":
             tools = [
@@ -455,6 +589,7 @@
                 status: "running"
               }
             ];
+            checkpoint();
             break;
           case "toolResult": {
             const result = event.kind.value;
@@ -483,6 +618,7 @@
               ];
             }
             attachments = [...attachments, ...result.attachments];
+            checkpoint();
             break;
           }
           case "done": {
@@ -493,6 +629,7 @@
             if (done.steeredFallback) {
               // Текст пішов у running turn — наш placeholder зайвий, реальна відповідь прийде там.
               messages = messages.filter((m) => clientIdOf(m) !== clientId);
+              dropLiveDraft(chatAtSend);
               streamingClientId = null;
               draftStartedAt = undefined;
               lastActivityAt = undefined;
@@ -515,23 +652,15 @@
             }
             await typer.drained();
             const persisted = done.message;
-            if (persisted) {
-              // ID swap: streaming placeholder → real DB message by client_id.
-              // Same key (client_id) keeps DOM instance stable, no remount.
-              const renderedPersisted = streamedPrefix
-                ? create(MessageSchema, { ...persisted, text: typer.displayed })
-                : persisted;
-              messages = messages.map((m) =>
-                clientIdOf(m) === clientId ? renderedPersisted : m
-              );
-            } else {
-              messages = messages.map((m) =>
-                clientIdOf(m) === clientId
-                  ? create(MessageSchema, { ...m, text: typer.displayed })
-                  : m
-              );
-            }
+            const doneText = suffixAfterPrefix(
+              streamedPrefix,
+              persisted?.text || done.finalText,
+              typer.displayed
+            );
+            commitDone(persisted, doneText, clientId);
+            requestScroll("bottom");
             streamingClientId = null;
+            dropLiveDraft(chatAtSend);
             draftStartedAt = undefined;
             lastActivityAt = undefined;
             typer.reset();
@@ -560,6 +689,7 @@
             }
             // Drop streaming placeholder on error.
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
+            dropLiveDraft(chatAtSend);
             streamingClientId = null;
             streamedPrefix = "";
             lastActivityAt = undefined;
@@ -578,6 +708,7 @@
     // зависає у "streaming" попри готовий assistant message.
     async function recoverSilentEof() {
       messages = messages.filter((m) => clientIdOf(m) !== clientId);
+      dropLiveDraft(chatAtSend);
       streamingClientId = null;
       streamedPrefix = "";
       lastActivityAt = undefined;
@@ -622,6 +753,7 @@
           if (turnId === activeTurnId) {
             error = tailExc instanceof Error ? tailExc.message : "Stream lost";
             messages = messages.filter((m) => clientIdOf(m) !== clientId);
+            dropLiveDraft(chatAtSend);
             streamingClientId = null;
             streamedPrefix = "";
             lastActivityAt = undefined;
@@ -631,6 +763,7 @@
       } else if (turnId === activeTurnId) {
         error = exc instanceof Error ? exc.message : "Turn failed";
         messages = messages.filter((m) => clientIdOf(m) !== clientId);
+        dropLiveDraft(chatAtSend);
         streamingClientId = null;
         streamedPrefix = "";
         lastActivityAt = undefined;
@@ -727,7 +860,7 @@
         <Spinner />
       </div>
     {:else}
-      <MessageList messages={displayMessages} streamingClientId={streamingClientId} {tools} {attachments} {draftStartedAt} {lastActivityAt} idleTimeoutMs={IDLE_TIMEOUT_MS} {loadingOlder} {hasMoreOlder} onloadolder={loadOlderMessages} />
+      <MessageList chatId={selected?.id ?? null} messages={displayMessages} {scrollIntent} streamingClientId={streamingClientId} {tools} {attachments} {draftStartedAt} {lastActivityAt} idleTimeoutMs={IDLE_TIMEOUT_MS} {loadingOlder} {hasMoreOlder} onloadolder={loadOlderMessages} />
       <Composer {busy} onsend={send} oninterrupt={interrupt} />
     {/if}
   </section>

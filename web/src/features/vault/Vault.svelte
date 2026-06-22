@@ -12,17 +12,40 @@
   let loading = $state(false);
   let error = $state("");
 
-  let sshName = $state("");
-  let sshHost = $state("");
-  let sshUser = $state("");
+  const DEFAULT_HOST = "github.com";
+  const DEFAULT_SSH_NAME = "github";
+  const DEFAULT_SSH_USER = "git";
+  const DEFAULT_TOKEN_NAME = "github";
+  const DEFAULT_TOKEN_USER = "x-access-token";
+
+  let sshName = $state(DEFAULT_SSH_NAME);
+  let sshHost = $state(DEFAULT_HOST);
+  let sshUser = $state(DEFAULT_SSH_USER);
   let sshPrivateKey = $state("");
   let addingSsh = $state(false);
 
-  let tokName = $state("");
-  let tokHost = $state("");
-  let tokUser = $state("");
+  let tokName = $state(DEFAULT_TOKEN_NAME);
+  let tokHost = $state(DEFAULT_HOST);
+  let tokUser = $state(DEFAULT_TOKEN_USER);
   let tokToken = $state("");
   let addingTok = $state(false);
+
+  function entryName(value: string, fallback: string): string {
+    return (value.trim() || fallback).toLowerCase();
+  }
+
+  function entryValue(value: string, fallback: string): string {
+    return value.trim() || fallback;
+  }
+
+  function friendlyError(exc: unknown, fallback: string): string {
+    const message = exc instanceof Error ? exc.message : fallback;
+    if (message.includes("name must")) return "Name must be lowercase: letters, digits, - or _.";
+    if (message.includes("host must")) return "Host must look like github.com or gitlab.com.";
+    if (message.includes("user must")) return "User may contain only letters, digits, dot, dash or underscore.";
+    if (message.includes("private_key")) return "Paste the private key, not the public key.";
+    return message;
+  }
 
   async function refresh() {
     loading = true;
@@ -47,20 +70,20 @@
     error = "";
     try {
       const key = await adminClient.addSshKey({
-        name: sshName.trim(),
-        host: sshHost.trim(),
-        user: sshUser.trim(),
+        name: entryName(sshName, DEFAULT_SSH_NAME),
+        host: entryValue(sshHost, DEFAULT_HOST),
+        user: entryValue(sshUser, DEFAULT_SSH_USER),
         privateKey: sshPrivateKey
       });
       sshKeys = [...sshKeys.filter((k) => k.name !== key.name), key].sort((a, b) =>
         a.name.localeCompare(b.name)
       );
-      sshName = "";
-      sshHost = "";
-      sshUser = "";
+      sshName = DEFAULT_SSH_NAME;
+      sshHost = DEFAULT_HOST;
+      sshUser = DEFAULT_SSH_USER;
       sshPrivateKey = "";
     } catch (exc) {
-      error = exc instanceof Error ? exc.message : "Add SSH key failed";
+      error = friendlyError(exc, "Add SSH key failed");
     } finally {
       addingSsh = false;
     }
@@ -82,20 +105,20 @@
     error = "";
     try {
       const tok = await adminClient.addApiToken({
-        name: tokName.trim(),
-        host: tokHost.trim(),
-        user: tokUser.trim(),
+        name: entryName(tokName, DEFAULT_TOKEN_NAME),
+        host: entryValue(tokHost, DEFAULT_HOST),
+        user: entryValue(tokUser, DEFAULT_TOKEN_USER),
         token: tokToken
       });
       apiTokens = [...apiTokens.filter((t) => t.name !== tok.name), tok].sort((a, b) =>
         a.name.localeCompare(b.name)
       );
-      tokName = "";
-      tokHost = "";
-      tokUser = "";
+      tokName = DEFAULT_TOKEN_NAME;
+      tokHost = DEFAULT_HOST;
+      tokUser = DEFAULT_TOKEN_USER;
       tokToken = "";
     } catch (exc) {
-      error = exc instanceof Error ? exc.message : "Add API token failed";
+      error = friendlyError(exc, "Add API token failed");
     } finally {
       addingTok = false;
     }
@@ -126,7 +149,7 @@
     </button>
     <div>
       <h1 class="text-xl font-semibold tracking-tight">Keys &amp; API</h1>
-      <p class="text-sm text-[var(--color-text-muted)]">SSH keys for the codex agent — added live, no restart</p>
+      <p class="text-sm text-[var(--color-text-muted)]">Git access for the codex agent — added live, no restart</p>
     </div>
   </header>
 
@@ -168,26 +191,7 @@
       </ul>
     {/if}
 
-    <form class="grid gap-2" onsubmit={addSshKey}>
-      <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <input
-          bind:value={sshName}
-          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
-          placeholder="name (github-salesdep)"
-          required
-        />
-        <input
-          bind:value={sshHost}
-          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
-          placeholder="host (github.com)"
-          required
-        />
-        <input
-          bind:value={sshUser}
-          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
-          placeholder="user (git)"
-        />
-      </div>
+    <form class="grid gap-3" onsubmit={addSshKey}>
       <textarea
         bind:value={sshPrivateKey}
         class="resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-xs text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
@@ -195,8 +199,30 @@
         rows={4}
         required
       ></textarea>
+      <details class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+        <summary class="cursor-pointer text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+          Advanced
+        </summary>
+        <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <input
+            bind:value={sshName}
+            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+            placeholder={DEFAULT_SSH_NAME}
+          />
+          <input
+            bind:value={sshHost}
+            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+            placeholder={DEFAULT_HOST}
+          />
+          <input
+            bind:value={sshUser}
+            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+            placeholder={DEFAULT_SSH_USER}
+          />
+        </div>
+      </details>
       <button
-        class="flex h-9 items-center justify-center gap-2 self-start rounded-lg bg-[var(--color-accent-soft)] px-4 text-sm font-medium text-[var(--color-accent)] transition hover:brightness-110 disabled:opacity-50"
+        class="flex h-9 items-center justify-center gap-2 justify-self-start rounded-lg bg-[var(--color-accent-soft)] px-4 text-sm font-medium text-[var(--color-accent)] transition hover:brightness-110 disabled:opacity-50"
         disabled={addingSsh}
         type="submit"
       >
@@ -236,26 +262,7 @@
       </ul>
     {/if}
 
-    <form class="grid gap-2" onsubmit={addApiToken}>
-      <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <input
-          bind:value={tokName}
-          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
-          placeholder="name (gh-main)"
-          required
-        />
-        <input
-          bind:value={tokHost}
-          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
-          placeholder="host (github.com)"
-          required
-        />
-        <input
-          bind:value={tokUser}
-          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
-          placeholder="user (x-access-token / oauth2)"
-        />
-      </div>
+    <form class="grid gap-3" onsubmit={addApiToken}>
       <input
         bind:value={tokToken}
         class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-xs text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
@@ -263,8 +270,30 @@
         type="password"
         required
       />
+      <details class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+        <summary class="cursor-pointer text-xs font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+          Advanced
+        </summary>
+        <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <input
+            bind:value={tokName}
+            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+            placeholder={DEFAULT_TOKEN_NAME}
+          />
+          <input
+            bind:value={tokHost}
+            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+            placeholder={DEFAULT_HOST}
+          />
+          <input
+            bind:value={tokUser}
+            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+            placeholder={DEFAULT_TOKEN_USER}
+          />
+        </div>
+      </details>
       <button
-        class="flex h-9 items-center justify-center gap-2 self-start rounded-lg bg-[var(--color-accent-soft)] px-4 text-sm font-medium text-[var(--color-accent)] transition hover:brightness-110 disabled:opacity-50"
+        class="flex h-9 items-center justify-center gap-2 justify-self-start rounded-lg bg-[var(--color-accent-soft)] px-4 text-sm font-medium text-[var(--color-accent)] transition hover:brightness-110 disabled:opacity-50"
         disabled={addingTok}
         type="submit"
       >

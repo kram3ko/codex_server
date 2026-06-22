@@ -6,11 +6,15 @@
   import type { Message as ChatMessage } from "../../gen/codex/v1/message_pb";
   import Attachment from "./Attachment.svelte";
   import CompletedTools from "./CompletedTools.svelte";
+  import { clientIdOf, type ScrollIntent, type ScrollTarget } from "./liveTurn";
   import Message from "./Message.svelte";
-  import ToolCall, { type ToolEvent } from "./ToolCall.svelte";
+  import type { ToolEvent } from "./toolEvent";
+  import ToolCall from "./ToolCall.svelte";
 
   let {
+    chatId,
     messages,
+    scrollIntent,
     streamingClientId,
     tools,
     attachments,
@@ -21,7 +25,9 @@
     hasMoreOlder = false,
     onloadolder
   }: {
+    chatId: bigint | null;
     messages: ChatMessage[];
+    scrollIntent: ScrollIntent;
     streamingClientId: string | null;
     tools: ToolEvent[];
     attachments: ChatAttachment[];
@@ -32,12 +38,6 @@
     hasMoreOlder?: boolean;
     onloadolder?: () => void;
   } = $props();
-
-  function clientIdOf(message: ChatMessage): string | undefined {
-    const meta = message.meta as Record<string, unknown> | undefined;
-    const cid = meta?.client_id;
-    return typeof cid === "string" ? cid : undefined;
-  }
 
   function messageKey(message: ChatMessage): string {
     return clientIdOf(message) ?? message.id.toString();
@@ -54,6 +54,12 @@
   let lastScrollTop = 0;
   let lastMessagesLen = 0;
   let lastFirstMessageId: bigint | null = null;
+  let lastChatId: bigint | null = null;
+  let lastScrollIntentSeq = 0;
+  // Запит на scroll від батька, що його застосує єдиний layout-ефект нижче
+  // (інакше append-stick і intent планували б два конкурентні tick().then і
+  // другий затирав би перший).
+  let pendingScrollTarget: ScrollTarget | null = null;
   // Snapshot перед load-older — після того як прийшли нові, відновлюємо
   // scrollTop = newScrollHeight - prevScrollHeight + prevScrollTop. Гарантоване
   // збереження viewport на тому ж повідомленні (надійніше browser anchor).
@@ -69,6 +75,42 @@
     }
     lastScrollTop = scrollTop;
   }
+
+  function scrollToBottom() {
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function scrollToStream() {
+    if (!container) return;
+    const streaming = container?.querySelector<HTMLElement>('[data-streaming="true"]');
+    if (streaming) {
+      const containerRect = container.getBoundingClientRect();
+      const streamingRect = streaming.getBoundingClientRect();
+      container.scrollTop += streamingRect.bottom - containerRect.bottom;
+      return;
+    }
+    scrollToBottom();
+  }
+
+  $effect(() => {
+    if (chatId === lastChatId) return;
+    lastChatId = chatId;
+    stickToBottom = true;
+    lastScrollTop = 0;
+    lastMessagesLen = 0;
+    lastFirstMessageId = null;
+    scrollAnchor = null;
+  });
+
+  $effect(() => {
+    const intent = scrollIntent;
+    if (intent.seq === lastScrollIntentSeq) return;
+    lastScrollIntentSeq = intent.seq;
+    stickToBottom = true;
+    scrollAnchor = null;
+    pendingScrollTarget = intent.target;
+  });
 
   // IntersectionObserver на top-sentinel — спрацьовує один раз коли він
   // в'їжджає у viewport, замість шумного `scrollTop<100` на кожен onscroll.
@@ -101,12 +143,14 @@
     lastFirstMessageId = firstId;
   });
 
-  // Після prepend — відновити viewport через delta-correction. Інакше — snap
-  // до низу при `stickToBottom`.
+  // Єдина точка фактичного скролу: load-older → delta-correction; інакше при
+  // stickToBottom — до streaming-рядка (pending intent "stream") або до низу.
+  // Один tick().then гарантує, що intent-target не затреться append-snap-ом.
   $effect(() => {
     void messages;
     void tools;
     void attachments;
+    void scrollIntent;
     if (scrollAnchor && container) {
       const anchor = scrollAnchor;
       scrollAnchor = null;
@@ -117,8 +161,13 @@
       return;
     }
     if (!stickToBottom) return;
+    const target = pendingScrollTarget;
+    pendingScrollTarget = null;
     tick().then(() => {
-      if (container) container.scrollTop = container.scrollHeight;
+      if (!container) return;
+      if (target === "stream") scrollToStream();
+      else scrollToBottom();
+      lastScrollTop = container.scrollTop;
     });
   });
 </script>
@@ -139,7 +188,10 @@
     {#each messages as message (messageKey(message))}
       {@const streaming = clientIdOf(message) === streamingClientId}
       {@const isUser = message.role === 1}
-      <article class="msg-in flex gap-3 {isUser ? 'justify-end' : 'justify-start'}">
+      <article
+        data-streaming={streaming ? "true" : undefined}
+        class="msg-in flex gap-3 {isUser ? 'justify-end' : 'justify-start'}"
+      >
         {#if !isUser}
           <div
             class="mt-1 grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-[oklch(72%_0.18_175)] to-[oklch(64%_0.16_320)] text-[var(--color-bg)] shadow-md shadow-[oklch(72%_0.18_175/0.25)] {streaming ? 'animate-pulse-glow' : ''}"

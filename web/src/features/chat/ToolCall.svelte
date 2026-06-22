@@ -1,16 +1,7 @@
 <script lang="ts">
   import { ChevronDown, ChevronRight, Loader2, Wrench } from "lucide-svelte";
 
-  import type { ToolError } from "../../gen/codex/v1/chat_pb";
-
-  export type ToolEvent = {
-    id: string;
-    name: string;
-    args?: unknown;
-    text?: string;
-    error?: ToolError;
-    status: "running" | "done" | "error";
-  };
+  import type { ToolEvent } from "./toolEvent";
 
   let { event }: { event: ToolEvent } = $props();
   let open = $state(false);

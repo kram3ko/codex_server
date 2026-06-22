@@ -18,7 +18,6 @@ from app.services import rate_limit
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
 from app.services.codex.sidecar import SidecarName
-from app.services.codex_usage import poller as usage_poller
 from app.services.turns import lease, locks
 from app.services.turns.default import turn_service, turn_stream
 from app.services.turns.locks import LockAcquireOutcome
@@ -235,9 +234,6 @@ async def execute_turn_inner(
         if not redelivery_skip:
             await turn_stream.cleanup(turn_id)
             await rate_limit.release_turn(rl_user)
-            # Codex списав tokens саме на terminal — refresh usage stream
-            # event-driven (не periodic). schedule_refresh не блокує runner.
-            usage_poller.schedule_refresh(sidecar)
 
 
 def _build_terminal_event(
