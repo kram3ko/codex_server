@@ -335,6 +335,7 @@ services:
       - "8931"
     ports:
       - "127.0.0.1:6080:6080"
+      - "127.0.0.1:8931:8931"
     healthcheck:
       # MCP returns 400 on plain GET (expects POST з JSON-RPC). Будь-який HTTP
       # response = server alive; failure тільки на transport-level errors.
