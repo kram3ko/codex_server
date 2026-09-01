@@ -25,6 +25,7 @@
   import { MessageSchema } from "../../gen/codex/v1/message_pb";
   import Spinner from "../../shared/components/Spinner.svelte";
   import { chatClient, messageClient } from "../../shared/lib/clients";
+  import { randomUuid } from "../../shared/lib/ids";
 
   function nowTimestamp() {
     const ms = Date.now();
@@ -543,7 +544,7 @@
       meta: Object.keys(userMetaJson).length ? userMetaJson : undefined,
       createdAt: nowTimestamp()
     });
-    const clientId = crypto.randomUUID();
+    const clientId = randomUuid();
     streamingClientId = clientId;
     const streamingPlaceholder = create(MessageSchema, {
       id: placeholderSeq--,
