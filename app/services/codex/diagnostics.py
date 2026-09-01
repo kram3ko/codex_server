@@ -4,7 +4,6 @@ from typing import Any
 from app.services.codex.events import ChatEvent
 from app.services.codex.transport import AppServerClient, Notification
 
-
 type _ActiveItem = tuple[str | None, str | None, float | None]
 
 
