@@ -173,7 +173,9 @@ class TurnRunner:
                     )
                     try:
                         async with open_codex_turn(
-                            session.db_chat_id, is_admin=session.is_admin
+                            session.db_chat_id,
+                            user_id=session.db_user_id,
+                            is_admin=session.is_admin,
                         ) as client:
                             await stream_turn(
                                 client, session, message, prepared, progress, turn.id, sidecar

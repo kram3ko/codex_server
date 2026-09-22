@@ -1,237 +1,34 @@
-"""Високорівневий клієнт до Codex CLI app-server.
+"""High-level Codex app-server client.
 
-Один `CodexClient` = одне з'єднання = **один turn** (per-turn lifecycle).
-Caller робить: `connect()` → `run_turn(...)` → `close()`. Re-use інстансу
-між турнами не передбачений: notifications-черга сидекара shared per WS,
-leftover ноти попереднього turn'а заходили б у наступний (фіксили це раніше
-через TurnRouter — тепер просто не тримаємо довгоживий клієнт).
-
-Thread reuse через WS-кордон робить caller: передає `initial_thread_id` з
-кешу (Postgres `chats.codex_thread_id`), client пробує `thread/resume`;
-fail → відкриває новий thread + повідомляє через `on_thread_change`, щоб
-кеш оновився.
+`CodexClient` is intentionally a thin facade: transport lifecycle stays here,
+thread lifecycle lives in `thread.py`, and turn streaming/control lives in
+`turn.py`.
 """
 
-import asyncio
-import re
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from enum import StrEnum
 from typing import Any
-from urllib.parse import urlparse
 
 import structlog
 
-from app.config import settings
-from app.services.codex.error_codes import CodexErrorCode
-from app.services.codex.events import (
-    ChatEvent,
-    DoneEvent,
-    ErrorEvent,
-    TokenEvent,
+from app.services.codex.events import ChatEvent
+from app.services.codex.shared import (
+    Method,
+    RateLimitsUpdateCallback,
+    StaleSidecarTurnError,
+    StaleTurnStreamError,
+    ThreadChangeCallback,
 )
-from app.services.codex.events import (
-    translate_notification as _translate,
-)
-from app.services.codex.transport import AppServerClient, AppServerError, Notification
+from app.services.codex.thread import CodexThreadSession
+from app.services.codex.transport import AppServerClient
+from app.services.codex.turn import CodexTurnSession
 
 log = structlog.get_logger(__name__)
 
 _CLIENT_INFO = {"name": "codex-api", "version": "0.1.0"}
 
 
-class StaleTurnStreamError(RuntimeError):
-    """Raised when a resumed thread only emits events for an older turn."""
-
-    def __init__(self, diagnostics: dict[str, Any]) -> None:
-        super().__init__("stale turn notification storm")
-        self.diagnostics = diagnostics
-
-
-class StaleSidecarTurnError(RuntimeError):
-    """Codex sidecar reports another turn as active for this thread."""
-
-    def __init__(self, *, expected_turn_id: str, actual_turn_id: str) -> None:
-        super().__init__(
-            f"sidecar active turn mismatch: expected {expected_turn_id}, found {actual_turn_id}"
-        )
-        self.expected_turn_id = expected_turn_id
-        self.actual_turn_id = actual_turn_id
-
-
-class _Method(StrEnum):
-    INITIALIZE = "initialize"
-    INITIALIZED = "initialized"
-    THREAD_START = "thread/start"
-    THREAD_RESUME = "thread/resume"
-    THREAD_READ = "thread/read"
-    THREAD_INJECT_ITEMS = "thread/inject_items"
-    TURN_START = "turn/start"
-    TURN_STEER = "turn/steer"
-    TURN_INTERRUPT = "turn/interrupt"
-    ACCOUNT_RATE_LIMITS_READ = "account/rateLimits/read"
-    ACCOUNT_RATE_LIMITS_UPDATED = "account/rateLimits/updated"
-    MCP_ELICITATION_REQUEST = "mcpServer/elicitation/request"
-
-
-type ThreadChangeCallback = Callable[[str | None], Awaitable[None]]
-type RateLimitsUpdateCallback = Callable[[dict[str, Any]], Awaitable[None]]
-
-
-type _ActiveItem = tuple[str | None, str | None, float | None]
-
-
-class _TurnDiagnostics:
-    """Small in-memory state for explaining idle timeouts after the fact."""
-
-    def __init__(self, *, thread_id: str | None, turn_id: str) -> None:
-        now = time.monotonic()
-        self.thread_id = thread_id
-        self.turn_id = turn_id
-        self.started_at = now
-        self.last_raw_at: float | None = None
-        self.last_chat_event_at: float | None = None
-        self.raw_count = 0
-        self.chat_event_count = 0
-        self.completed_items = 0
-        self.stale_raw_count = 0
-        self.noise_raw_count = 0
-        self.last_raw_method = "none"
-        self.last_raw_turn_id: str | None = None
-        self.last_stale_method = "none"
-        self.last_stale_turn_id: str | None = None
-        self.last_stale_at: float | None = None
-        self.last_stale_item_type: str | None = None
-        self.last_stale_tool: str | None = None
-        self.last_noise_method = "none"
-        self.last_noise_at: float | None = None
-        self.last_item_type: str | None = None
-        self.last_tool: str | None = None
-        self.last_chat_event_type = "none"
-        self.turn_completed_seen = False
-        self._active_items: dict[str, _ActiveItem] = {}
-
-    def absorb_raw(self, note: Notification) -> None:
-        now = time.monotonic()
-        self.raw_count += 1
-        self.last_raw_at = now
-        self.last_raw_method = note.method
-        self.last_raw_turn_id = note.turn_id
-        if note.method == "turn/completed":
-            self.turn_completed_seen = True
-
-        item = note.params.get("item")
-        if not isinstance(item, dict):
-            return
-        item_type = item.get("type")
-        tool = _item_label(item)
-        self.last_item_type = item_type if isinstance(item_type, str) else None
-        self.last_tool = tool
-        if note.method == "item/started":
-            self._active_items[_item_key(item)] = (self.last_item_type, tool, now)
-        elif note.method == "item/completed":
-            self.completed_items += 1
-            self._active_items.pop(_item_key(item), None)
-
-    def absorb_stale_raw(self, note: Notification) -> None:
-        now = time.monotonic()
-        self.stale_raw_count += 1
-        self.last_stale_at = now
-        self.last_stale_method = note.method
-        self.last_stale_turn_id = note.turn_id
-        item = note.params.get("item")
-        if isinstance(item, dict):
-            item_type = item.get("type")
-            self.last_stale_item_type = item_type if isinstance(item_type, str) else None
-            self.last_stale_tool = _item_label(item)
-
-    def absorb_noise_raw(self, note: Notification) -> None:
-        self.noise_raw_count += 1
-        self.last_noise_at = time.monotonic()
-        self.last_noise_method = note.method
-
-    def absorb_chat_event(self, event: ChatEvent) -> None:
-        self.chat_event_count += 1
-        self.last_chat_event_at = time.monotonic()
-        self.last_chat_event_type = type(event).__name__
-
-    def snapshot(self, transport: AppServerClient) -> dict[str, Any]:
-        now = time.monotonic()
-        data: dict[str, Any] = {
-            "thread_id": self.thread_id,
-            "turn_id": self.turn_id,
-            "turn_age_s": round(now - self.started_at, 3),
-            "raw_count": self.raw_count,
-            "chat_event_count": self.chat_event_count,
-            "completed_items": self.completed_items,
-            "stale_raw_count": self.stale_raw_count,
-            "noise_raw_count": self.noise_raw_count,
-            "last_raw_method": self.last_raw_method,
-            "last_raw_turn_id": self.last_raw_turn_id,
-            "last_raw_age_s": _age(now, self.last_raw_at),
-            "last_stale_method": self.last_stale_method,
-            "last_stale_turn_id": self.last_stale_turn_id,
-            "last_stale_age_s": _age(now, self.last_stale_at),
-            "last_stale_item_type": self.last_stale_item_type,
-            "last_stale_tool": self.last_stale_tool,
-            "last_noise_method": self.last_noise_method,
-            "last_noise_age_s": _age(now, self.last_noise_at),
-            "last_item_type": self.last_item_type,
-            "last_tool": self.last_tool,
-            "last_chat_event_type": self.last_chat_event_type,
-            "last_chat_event_age_s": _age(now, self.last_chat_event_at),
-            "turn_completed_seen": self.turn_completed_seen,
-        }
-        active_item_type, active_tool, active_started_at = self._selected_active_item()
-        data.update(
-            {
-                "active_items": len(self._active_items),
-                "active_item_type": active_item_type,
-                "active_tool": active_tool,
-                "active_item_age_s": _age(now, active_started_at),
-            }
-        )
-        data.update(transport.diagnostic_snapshot())
-        return data
-
-    def _selected_active_item(self) -> _ActiveItem:
-        if not self._active_items:
-            return (None, None, None)
-        return max(self._active_items.values(), key=_active_item_rank)
-
-    def has_active_items(self) -> bool:
-        return bool(self._active_items)
-
-
-class IdleDecision(StrEnum):
-    HARD_CAP_EXCEEDED = "hard_cap_exceeded"
-    NEEDS_PROBE = "needs_probe"
-    EXTEND_SILENTLY = "extend_silently"
-
-
-def decide_idle(
-    *,
-    now: float,
-    turn_started_at: float | None,
-    has_active_items: bool,
-    last_idle_probe_at: float | None,
-    hard_cap_s: float,
-    probe_interval_s: float,
-) -> IdleDecision:
-    """Pure idle-action policy. Testable без CodexClient instance."""
-    if turn_started_at is not None and now - turn_started_at >= hard_cap_s:
-        return IdleDecision.HARD_CAP_EXCEEDED
-    if not has_active_items:
-        return IdleDecision.NEEDS_PROBE
-    if last_idle_probe_at is None:
-        return IdleDecision.NEEDS_PROBE
-    if now - last_idle_probe_at >= probe_interval_s:
-        return IdleDecision.NEEDS_PROBE
-    return IdleDecision.EXTEND_SILENTLY
-
-
 class CodexClient:
-    """One CodexClient = one Codex sidecar conversation (one turn)."""
+    """One CodexClient = one Codex sidecar conversation over one WS connection."""
 
     def __init__(
         self,
@@ -242,16 +39,13 @@ class CodexClient:
         request_timeout: float = 60.0,
         initial_thread_id: str | None = None,
         on_thread_change: ThreadChangeCallback | None = None,
+        model: str | None = None,
         reasoning_effort: str | None = None,
         notification_queue_max: int | None = None,
         auth_token: str | None = None,
         transport: AppServerClient | None = None,
     ) -> None:
         self._url = url
-        self._cwd = cwd
-        self._approval_policy = approval_policy
-        self._sandbox = sandbox
-        self._reasoning_effort = reasoning_effort
         if transport is None:
             transport_kwargs: dict[str, Any] = {"url": url, "request_timeout": request_timeout}
             if notification_queue_max is not None:
@@ -261,116 +55,57 @@ class CodexClient:
             transport = AppServerClient(**transport_kwargs)
         self._transport = transport
         self._transport.register_request_handler(
-            _Method.MCP_ELICITATION_REQUEST,
+            Method.MCP_ELICITATION_REQUEST,
             self._handle_mcp_elicitation_request,
         )
         self._initialized = False
-        self._thread_id: str | None = initial_thread_id
-        self._thread_resumed_or_started = False
-        self._current_turn_id: str | None = None
-        self._idle_s: float | None = None
-        self._idle_deadline: float | None = None
-        self._turn_started_at: float | None = None
-        self._last_idle_probe_at: float | None = None
-        self._turn_diagnostics: _TurnDiagnostics | None = None
-        self._on_thread_change = on_thread_change
+        self._threads = CodexThreadSession(
+            transport=self._transport,
+            cwd=cwd,
+            approval_policy=approval_policy,
+            sandbox=sandbox,
+            initial_thread_id=initial_thread_id,
+            on_thread_change=on_thread_change,
+        )
+        self._turns = CodexTurnSession(
+            transport=self._transport,
+            threads=self._threads,
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
 
     @property
     def current_thread_id(self) -> str | None:
-        return self._thread_id
+        return self._threads.current_thread_id
 
     @property
     def current_turn_id(self) -> str | None:
-        return self._current_turn_id
+        return self._turns.current_turn_id
 
     def turn_diagnostics(self) -> dict[str, Any]:
-        if self._turn_diagnostics is None:
-            data: dict[str, Any] = {
-                "thread_id": self._thread_id,
-                "turn_id": self._current_turn_id,
-                "diagnostics": "not_started",
-            }
-            data.update(self._transport.diagnostic_snapshot())
-            return data
-        return self._turn_diagnostics.snapshot(self._transport)
+        return self._turns.diagnostics()
 
     def extend_idle_deadline(self) -> bool:
-        if self._idle_s is None:
-            return False
-        self._idle_deadline = time.monotonic() + self._idle_s
-        return True
-
-    async def _handle_mcp_elicitation_request(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Auto-accept an MCP elicitation relayed by codex (e.g. playwright approvals).
-
-        Codex forwards an MCP server's elicitation as the server→client request
-        ``mcpServer/elicitation/request``; the client must answer with a
-        ``McpServerElicitationRequestResponse``. Leaving it unanswered (or replying
-        with an error) reads on codex's side as a refusal — the tool call then fails
-        with ``user_rejected`` and the turn stalls until its hard-cap timeout.
-
-        Blanket-accept with empty content: in this single-tenant deployment there is
-        no human to consult, and form-mode elicitations carry all-optional schemas.
-        An interactive dialog would emit a chat_event and await the user's reply here.
-        """
-        log.info(
-            "codex_elicitation_auto_accept",
-            server_name=params.get("serverName"),
-            mode=params.get("mode"),
-            message=params.get("message"),
-        )
-        return {"action": "accept", "content": {}, "_meta": None}
+        return self._turns.extend_idle_deadline()
 
     async def connect(self) -> None:
         await self._transport.connect()
         await self._handshake()
 
+    async def close(self) -> None:
+        await self._transport.close()
+
     async def ensure_thread(self) -> str:
-        """Гарантує що sidecar має активний thread_id.
+        return await self._threads.ensure_thread()
 
-        1. Уже opened/resumed у цьому з'єднанні → reuse.
-        2. Стартовий id був переданий → пробуємо `thread/resume`.
-        3. Fail / немає id → `thread/start`.
-        """
-        if self._thread_id is not None and self._thread_resumed_or_started:
-            return self._thread_id
+    async def read_thread(self, thread_id: str | None = None) -> dict[str, Any] | None:
+        return await self._threads.read_thread(thread_id)
 
-        if self._thread_id is not None:
-            stale = self._thread_id
-            if await self._try_resume(stale):
-                self._thread_resumed_or_started = True
-                return stale
-            log.info("codex_thread_resume_failed_opening_new", stale_thread_id=stale)
-            self._thread_id = None
-            await self._emit_thread_change(None)
+    async def list_models(self) -> list[dict[str, Any]]:
+        return await self._turns.list_models()
 
-        return await self._open_new_thread()
-
-    async def _try_resume(self, thread_id: str) -> bool:
-        try:
-            await self._transport.request(_Method.THREAD_RESUME, {"threadId": thread_id})
-        except AppServerError as exc:
-            if _is_thread_not_found(exc) or exc.code == -32601:
-                return False
-            raise
-        log.info("codex_thread_resumed", thread_id=thread_id)
-        return True
-
-    async def _open_new_thread(self) -> str:
-        result = await self._transport.request(
-            _Method.THREAD_START,
-            {
-                "cwd": self._cwd,
-                "approvalPolicy": self._approval_policy,
-                "sandbox": self._sandbox,
-            },
-        )
-        thread_id: str = result["thread"]["id"]
-        self._thread_id = thread_id
-        self._thread_resumed_or_started = True
-        log.info("codex_thread_opened", thread_id=thread_id)
-        await self._emit_thread_change(thread_id)
-        return thread_id
+    async def inject_history(self, items: list[dict[str, Any]]) -> None:
+        await self._threads.inject_history(items)
 
     async def run_turn(
         self,
@@ -382,137 +117,21 @@ class CodexClient:
         on_idle: Callable[[], Awaitable[bool | None]] | None = None,
         on_rate_limits_update: RateLimitsUpdateCallback | None = None,
     ) -> AsyncIterator[ChatEvent]:
-        """Stream ChatEvent'и. `on_started(turn_id, thread_id)` fires як тільки
-        sidecar повернув turn/start — caller робить `mark_running` у `turns`.
+        async for event in self._turns.run_turn(
+            text,
+            attachments,
+            on_started=on_started,
+            idle_s=idle_s,
+            on_idle=on_idle,
+            on_rate_limits_update=on_rate_limits_update,
+        ):
+            yield event
 
-        `idle_s` ставить watchdog на notification-и поточного turn'а (не на
-        ChatEvent). Чужі leftover-и з попереднього turn не мають скидати таймер
-        і не мають доходити до translator.
-
-        `on_rate_limits_update` fires на `account/rateLimits/updated` — це
-        account-level notification без прив'язки до turn stream."""
-        input_payload = self._build_input(text, attachments)
-        result = await self._begin_turn_with_retry(input_payload)
-        if isinstance(result, ErrorEvent):
-            yield result
-            return
-
-        self._current_turn_id = _extract_turn_id(result)
-        self._turn_diagnostics = _TurnDiagnostics(
-            thread_id=self._thread_id,
-            turn_id=self._current_turn_id,
-        )
-        self._turn_started_at = time.monotonic()
-        self._last_idle_probe_at = None
-        try:
-            if on_started is not None and self._thread_id is not None:
-                await on_started(self._current_turn_id, self._thread_id)
-            accumulated = ""
-
-            async for note in self._current_turn_notifications(
-                idle_s,
-                on_idle,
-                on_rate_limits_update,
-            ):
-                self._record_raw_note(note)
-                event = _translate(note, accumulated)
-                if event is not None:
-                    self._turn_diagnostics.absorb_chat_event(event)
-                    if isinstance(event, TokenEvent):
-                        accumulated += event.delta
-                    yield event
-                if event is not None and isinstance(event, DoneEvent):
-                    return
-        finally:
-            self._idle_s = None
-            self._idle_deadline = None
-            self._turn_started_at = None
-            self._last_idle_probe_at = None
-            # Не чистимо _current_turn_id — callers у власному finally читають його для CAS-drop.
-
-    async def read_thread(
-        self,
-        thread_id: str | None = None,
-        *,
-        include_turns: bool = True,
-    ) -> dict[str, Any] | None:
-        """`thread/read` — отримати поточний стан thread-а у sidecar-і. Caller
-        використовує для status probe-у на idle (codex реально вмирає або
-        просто чекає MCP-tool у tool-call-у?). Невідомий метод (`-32601`)
-        мапиться на `None` щоб caller fallback-нув на idle-timeout."""
-        target = thread_id or self._thread_id
-        if not target:
-            return None
-        try:
-            result = await self._transport.request(
-                _Method.THREAD_READ,
-                {"threadId": target, "includeTurns": include_turns},
-            )
-        except AppServerError as exc:
-            if exc.code == -32601:
-                log.info("codex_thread_read_unsupported", thread_id=target)
-                return None
-            log.warning(
-                "codex_thread_read_failed",
-                thread_id=target,
-                code=exc.code,
-                msg=str(exc),
-            )
-            return None
-        if not isinstance(result, dict):
-            return None
-        return result
-
-    async def probe_turn_status(
-        self,
-        thread_id: str,
-        codex_turn_id: str,
-    ) -> str | None:
-        """Витягує `turn.status` raw-літерал для конкретного turn-а через
-        `thread/read(includeTurns=true)`. Returns `None` якщо thread/turn
-        не знайдені або status відсутній — caller (idle probe) трактує
-        як `mismatch/stale` і йде stale_sidecar path."""
-        thread_data = await self.read_thread(thread_id, include_turns=True)
-        if thread_data is None:
-            return None
-        turns = thread_data.get("turns")
-        if not isinstance(turns, list):
-            return None
-        for turn in turns:
-            if not isinstance(turn, dict):
-                continue
-            if turn.get("id") == codex_turn_id:
-                status = turn.get("status")
-                return status if isinstance(status, str) else None
-        return None
+    async def probe_turn_status(self, thread_id: str, codex_turn_id: str) -> str | None:
+        return await self._turns.probe_turn_status(thread_id, codex_turn_id)
 
     async def interrupt(self, *, thread_id: str, turn_id: str) -> bool:
-        """Send turn/interrupt. Caller завжди передає координати — з `turns`
-        row (cross-worker) або з `current_thread_id`/`current_turn_id` (live)."""
-        try:
-            await self._transport.request(
-                _Method.TURN_INTERRUPT,
-                {"threadId": thread_id, "turnId": turn_id},
-            )
-        except AppServerError as exc:
-            stale = _stale_sidecar_turn_error(exc)
-            if stale is not None:
-                raise stale from exc
-            if exc.code == -32601:
-                log.info(
-                    "codex_interrupt_unsupported",
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                )
-            else:
-                log.warning(
-                    "codex_interrupt_failed",
-                    thread_id=thread_id,
-                    turn_id=turn_id,
-                    code=exc.code,
-                )
-            return False
-        return True
+        return await self._turns.interrupt(thread_id=thread_id, turn_id=turn_id)
 
     async def steer(
         self,
@@ -521,283 +140,26 @@ class CodexClient:
         turn_id: str | None = None,
         thread_id: str | None = None,
     ) -> bool:
-        """Append text до running turn. `turn_id`/`thread_id` override —
-        cross-worker steer через Redis-stored координати."""
-        target_thread = thread_id or self._thread_id
-        target_turn = turn_id or self._current_turn_id
-        if not target_thread or not target_turn:
-            return False
-        try:
-            await self._transport.request(
-                _Method.TURN_STEER,
-                {
-                    "threadId": target_thread,
-                    "input": [{"type": "text", "text": text}],
-                    "expectedTurnId": target_turn,
-                },
-            )
-        except AppServerError as exc:
-            stale = _stale_sidecar_turn_error(exc)
-            if stale is not None:
-                raise stale from exc
-            log.warning("codex_steer_failed", turn_id=target_turn, code=exc.code, msg=str(exc))
-            return False
-        self.extend_idle_deadline()
-        log.info("codex_steered", turn_id=target_turn, text_len=len(text))
-        return True
-
-    async def inject_history(self, items: list[dict[str, Any]]) -> None:
-        """Append Responses-API items до history поточного thread'а.
-
-        Юзаємо після відкриття нового thread'у щоб засіяти його recent-history
-        з нашої БД (`thread/resume` зламаний upstream, openai/codex#21360).
-        """
-        thread_id = self._thread_id
-        if not thread_id or not items:
-            return
-        try:
-            await self._transport.request(
-                _Method.THREAD_INJECT_ITEMS,
-                {"threadId": thread_id, "items": items},
-            )
-        except AppServerError as exc:
-            log.warning("codex_inject_history_failed", code=exc.code, msg=str(exc))
-            return
-        log.info("codex_history_injected", thread_id=thread_id, items=len(items))
+        return await self._turns.steer(text, turn_id=turn_id, thread_id=thread_id)
 
     async def read_rate_limits(self) -> dict[str, Any] | None:
-        """Codex plan rate-limit snapshot. None коли sidecar не expose'ить."""
-        try:
-            result = await self._transport.request(_Method.ACCOUNT_RATE_LIMITS_READ)
-        except AppServerError as exc:
-            if exc.code == -32601:
-                return None
-            raise
-        snapshot = result.get("rateLimits")
-        return snapshot if isinstance(snapshot, dict) else None
+        return await self._turns.read_rate_limits()
 
-    async def close(self) -> None:
-        await self._transport.close()
-
-    async def _current_turn_notifications(
-        self,
-        idle_s: float | None,
-        on_idle: Callable[[], Awaitable[bool | None]] | None,
-        on_rate_limits_update: RateLimitsUpdateCallback | None = None,
-    ) -> AsyncIterator[Notification]:
-        notes = self._transport.notifications()
-        self._idle_s = idle_s
-        self._idle_deadline = time.monotonic() + idle_s if idle_s is not None else None
-        try:
-            while True:
-                try:
-                    note = await self._next_notification(notes, on_idle)
-                except StopAsyncIteration:
-                    return
-                if note.method == _Method.ACCOUNT_RATE_LIMITS_UPDATED:
-                    rate_limits = note.params.get("rateLimits")
-                    if on_rate_limits_update is not None and isinstance(rate_limits, dict):
-                        await on_rate_limits_update(rate_limits)
-                    continue
-                if self._is_stale_turn_note(note):
-                    self._record_stale_raw_note(note)
-                    continue
-                if self._is_session_noise_note(note):
-                    self._record_noise_raw_note(note)
-                    continue
-                self.extend_idle_deadline()
-                yield note
-        finally:
-            self._idle_s = None
-            self._idle_deadline = None
-
-    async def _next_notification(
-        self,
-        notes: AsyncIterator[Notification],
-        on_idle: Callable[[], Awaitable[bool | None]] | None,
-    ) -> Notification:
-        while True:
-            deadline = self._idle_deadline
-            if deadline is None:
-                return await anext(notes)
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                if await self._handle_idle(on_idle):
-                    continue
-                raise TimeoutError
-            try:
-                async with asyncio.timeout(remaining):
-                    return await anext(notes)
-            except TimeoutError:
-                if self._idle_deadline is not None and time.monotonic() < self._idle_deadline:
-                    continue
-                if await self._handle_idle(on_idle):
-                    continue
-                raise
-
-    async def _handle_idle(
-        self,
-        on_idle: Callable[[], Awaitable[bool | None]] | None,
-    ) -> bool:
-        """Idle hit — apply `decide_idle` policy.
-
-        Захист від "tool-active = alive" anti-pattern (`openai/codex#4337`):
-        hard cap > rate-limited L2 probe > local fast path.
-        """
-        now = time.monotonic()
-        decision = decide_idle(
-            now=now,
-            turn_started_at=self._turn_started_at,
-            has_active_items=bool(
-                self._turn_diagnostics and self._turn_diagnostics.has_active_items()
-            ),
-            last_idle_probe_at=self._last_idle_probe_at,
-            hard_cap_s=settings.CODEX_TURN_HARD_TIMEOUT_S,
-            probe_interval_s=settings.CODEX_IDLE_PROBE_INTERVAL_S,
+    async def _handle_mcp_elicitation_request(self, params: dict[str, Any]) -> dict[str, Any]:
+        log.info(
+            "codex_elicitation_auto_accept",
+            server_name=params.get("serverName"),
+            mode=params.get("mode"),
+            message=params.get("message"),
         )
-        if decision is IdleDecision.HARD_CAP_EXCEEDED:
-            log.warning(
-                "codex_turn_hard_cap_exceeded",
-                elapsed_s=now - (self._turn_started_at or 0),
-                cap_s=settings.CODEX_TURN_HARD_TIMEOUT_S,
-            )
-            return False
-        if decision is IdleDecision.NEEDS_PROBE:
-            if on_idle is None:
-                return False
-            self._last_idle_probe_at = now
-            return bool(await on_idle())
-        self.extend_idle_deadline()
-        if self._turn_diagnostics is not None:
-            log.debug(
-                "codex_idle_extended_via_local_state",
-                **self._turn_diagnostics.snapshot(self._transport),
-            )
-        return True
-
-    def _is_stale_turn_note(self, note: Notification) -> bool:
-        return (
-            self._current_turn_id is not None
-            and note.turn_id is not None
-            and note.turn_id != self._current_turn_id
-        )
-
-    def _is_session_noise_note(self, note: Notification) -> bool:
-        return (
-            note.turn_id is None
-            and note.method != "turn/completed"
-            and not note.method.startswith("item/")
-        )
-
-    def _record_stale_raw_note(self, note: Notification) -> None:
-        if self._turn_diagnostics is None:
-            return
-        self._turn_diagnostics.absorb_stale_raw(note)
-        diagnostics = self._turn_diagnostics.snapshot(self._transport)
-        log.warning(
-            "codex_stale_turn_notification_ignored",
-            **diagnostics,
-        )
-        if (
-            self._turn_diagnostics.raw_count == 0
-            and self._turn_diagnostics.stale_raw_count >= settings.CODEX_STALE_STORM_THRESHOLD
-        ):
-            log.error("codex_stale_turn_storm", **diagnostics)
-            raise StaleTurnStreamError(diagnostics)
-
-    def _record_noise_raw_note(self, note: Notification) -> None:
-        if self._turn_diagnostics is None:
-            return
-        self._turn_diagnostics.absorb_noise_raw(note)
-        log.debug(
-            "codex_session_notification_ignored",
-            **self._turn_diagnostics.snapshot(self._transport),
-        )
-
-    def _record_raw_note(self, note: Notification) -> None:
-        if self._turn_diagnostics is None:
-            return
-        prev_active = self._turn_diagnostics._selected_active_item()
-        self._turn_diagnostics.absorb_raw(note)
-        match note.method:
-            case "item/started":
-                log.debug(
-                    "codex_item_started",
-                    **self._turn_diagnostics.snapshot(self._transport),
-                )
-            case "item/completed":
-                log.debug(
-                    "codex_item_completed",
-                    **self._turn_diagnostics.snapshot(self._transport),
-                )
-            case "turn/completed":
-                log.debug(
-                    "codex_turn_completed_raw",
-                    **self._turn_diagnostics.snapshot(self._transport),
-                )
-            case _:
-                if prev_active != self._turn_diagnostics._selected_active_item():
-                    log.debug(
-                        "codex_active_item_changed",
-                        **self._turn_diagnostics.snapshot(self._transport),
-                    )
-
-    async def _begin_turn_with_retry(
-        self,
-        input_payload: list[dict[str, Any]],
-    ) -> dict[str, Any] | ErrorEvent:
-        """One turn/start; stale-thread → invalidate + retry once."""
-        thread_id = await self.ensure_thread()
-        try:
-            return await self._transport.request(
-                _Method.TURN_START,
-                self._build_turn_params(thread_id, input_payload),
-            )
-        except AppServerError as exc:
-            if not _is_thread_not_found(exc):
-                return ErrorEvent(code=CodexErrorCode.CODEX_ERROR, detail=str(exc))
-        log.info("codex_thread_stale_retrying", stale_thread_id=thread_id)
-        self._thread_id = None
-        self._thread_resumed_or_started = False
-        await self._emit_thread_change(None)
-        thread_id = await self.ensure_thread()
-        try:
-            return await self._transport.request(
-                _Method.TURN_START,
-                self._build_turn_params(thread_id, input_payload),
-            )
-        except AppServerError as exc:
-            return ErrorEvent(code=CodexErrorCode.CODEX_ERROR, detail=str(exc))
-
-    def _build_turn_params(
-        self,
-        thread_id: str,
-        input_payload: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {"threadId": thread_id, "input": input_payload}
-        if self._reasoning_effort:
-            params["effort"] = self._reasoning_effort
-        return params
-
-    @staticmethod
-    def _build_input(text: str, attachments: tuple[str, ...]) -> list[dict[str, Any]]:
-        payload: list[dict[str, Any]] = [{"type": "text", "text": text}]
-        for attachment in attachments:
-            parsed = urlparse(attachment)
-            # `data:` URIs carry bytes inline (OpenAI Vision accepts them).
-            # http(s) — forward as-is; caller гарантує що URL досяжний з OpenAI.
-            if parsed.scheme in {"http", "https", "data"}:
-                payload.append({"type": "image", "url": attachment})
-            else:
-                payload.append({"type": "localImage", "path": attachment})
-        return payload
+        return {"action": "accept", "content": {}, "_meta": None}
 
     async def _handshake(self) -> None:
         result = await self._transport.request(
-            _Method.INITIALIZE,
+            Method.INITIALIZE,
             {"clientInfo": _CLIENT_INFO, "capabilities": {}},
         )
-        await self._transport.notify(_Method.INITIALIZED, {})
+        await self._transport.notify(Method.INITIALIZED, {})
         self._initialized = True
         log.info(
             "codex_handshake_done",
@@ -805,99 +167,9 @@ class CodexClient:
             codex_home=(result or {}).get("codexHome"),
         )
 
-    async def _emit_thread_change(self, new_thread_id: str | None) -> None:
-        if self._on_thread_change is None:
-            return
-        try:
-            await self._on_thread_change(new_thread_id)
-        except Exception as exc:
-            log.warning(
-                "codex_on_thread_change_failed",
-                new=new_thread_id,
-                error=str(exc),
-            )
 
-
-def _is_thread_not_found(exc: AppServerError) -> bool:
-    """Sidecar restarted → stored thread_id stale, retry with fresh thread."""
-    return exc.code == -32600 and "thread not found" in str(exc).lower()
-
-
-_STALE_ACTIVE_TURN_RE = re.compile(
-    r"expected active turn id `(?P<expected>[^`]+)` but found `(?P<actual>[^`]+)`"
-)
-
-
-def _stale_sidecar_turn_error(exc: AppServerError) -> StaleSidecarTurnError | None:
-    if exc.code != -32600:
-        return None
-    match = _STALE_ACTIVE_TURN_RE.search(str(exc))
-    if match is None:
-        return None
-    return StaleSidecarTurnError(
-        expected_turn_id=match.group("expected"),
-        actual_turn_id=match.group("actual"),
-    )
-
-
-def _extract_turn_id(result: dict[str, Any]) -> str:
-    return result["turn"]["id"]
-
-
-def _age(now: float, at: float | None) -> float | None:
-    return None if at is None else round(now - at, 3)
-
-
-def _item_key(item: dict[str, Any]) -> str:
-    for key in ("id", "callId", "toolCallId"):
-        value = item.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return f"{item.get('type')}:{_item_label(item)}"
-
-
-def _active_item_rank(item: _ActiveItem) -> tuple[int, float]:
-    item_type, tool, started_at = item
-    return (_active_item_priority(item_type, tool), -(started_at or 0.0))
-
-
-def _active_item_priority(item_type: str | None, tool: str | None) -> int:
-    if item_type in {
-        "commandExecution",
-        "mcpToolCall",
-        "dynamicToolCall",
-        "webSearch",
-        "imageGeneration",
-        "fileChange",
-    }:
-        return 30
-    if tool not in {None, "reasoning", "agentMessage", "userMessage"}:
-        return 20
-    if item_type == "agentMessage":
-        return 10
-    if item_type == "reasoning":
-        return 5
-    return 0
-
-
-def _item_label(item: dict[str, Any]) -> str | None:
-    for key in ("toolName", "tool", "name"):
-        value = item.get(key)
-        if isinstance(value, str) and value:
-            return value
-    item_type = item.get("type")
-    if isinstance(item_type, str):
-        match item_type:
-            case "commandExecution":
-                return "shell"
-            case "fileChange":
-                return "file_change"
-            case "webSearch":
-                return "web_search"
-            case "imageGeneration":
-                return "image_generation"
-            case "imageView":
-                return "image_view"
-            case _:
-                return item_type
-    return None
+__all__ = [
+    "CodexClient",
+    "StaleSidecarTurnError",
+    "StaleTurnStreamError",
+]

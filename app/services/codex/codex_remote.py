@@ -100,7 +100,7 @@ async def send_interrupt_turn_id(
     if thread_id is None:
         log.info("codex_remote_interrupt_skipped_no_thread", turn_id=turn_id)
         return False
-    async with _one_shot_client(is_admin) as client:
+    async with one_shot_client(is_admin) as client:
         return await client.interrupt(thread_id=thread_id, turn_id=turn_id)
 
 
@@ -118,7 +118,7 @@ async def send_steer_by_ids(
     persist steered USER message, і chronology у БД ламається (assistant
     partial id < user steer id). Caller сам викликає `bump_steer_count`
     ПІСЛЯ persist-у USER row — це робить race неможливим."""
-    async with _one_shot_client(is_admin) as client:
+    async with one_shot_client(is_admin) as client:
         accepted = await client.steer(text, turn_id=codex_turn_id, thread_id=thread_id)
     if accepted:
         await note_steer(chat_id, codex_turn_id)
@@ -126,7 +126,7 @@ async def send_steer_by_ids(
 
 
 @contextlib.asynccontextmanager
-async def _one_shot_client(is_admin: bool):
+async def one_shot_client(is_admin: bool):
     sidecar = SidecarName.ADMIN if is_admin else SidecarName.GUEST
     client = CodexClient(
         url=settings.CODEX_CLI_URL if is_admin else settings.CODEX_CLI_GUEST_URL,

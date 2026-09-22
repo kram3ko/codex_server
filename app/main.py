@@ -48,6 +48,7 @@ from app.db.base import SessionLocal, engine
 from app.grpc_generated.codex.v1.admin_connect import AdminServiceASGIApplication
 from app.grpc_generated.codex.v1.auth_connect import AuthServiceASGIApplication
 from app.grpc_generated.codex.v1.chat_connect import ChatServiceASGIApplication
+from app.grpc_generated.codex.v1.codex_connect import CodexServiceASGIApplication
 from app.grpc_generated.codex.v1.common_connect import HealthServiceASGIApplication
 from app.grpc_generated.codex.v1.event_connect import EventServiceASGIApplication
 from app.grpc_generated.codex.v1.message_connect import MessageServiceASGIApplication
@@ -59,6 +60,7 @@ from app.models import UserRole
 from app.rpc.admin import AdminRPC
 from app.rpc.auth import AuthRPC
 from app.rpc.chat import ChatRPC
+from app.rpc.codex import CodexRPC
 from app.rpc.event import EventRPC
 from app.rpc.health import HealthRPC
 from app.rpc.message import MessageRPC
@@ -164,6 +166,7 @@ connect_router = ConnectRouter(
         HealthServiceASGIApplication(HealthRPC()),
         UserServiceASGIApplication(UserRPC()),
         ChatServiceASGIApplication(ChatRPC()),
+        CodexServiceASGIApplication(CodexRPC()),
         MessageServiceASGIApplication(MessageRPC()),
         EventServiceASGIApplication(EventRPC()),
         NotesServiceASGIApplication(NotesRPC()),

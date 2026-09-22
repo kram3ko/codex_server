@@ -4,6 +4,7 @@
 
   import type { CodexUsage, UsageWindow } from "../../gen/codex/v1/chat_pb";
   import { chatClient } from "../../shared/lib/clients";
+  import ModelPicker from "./ModelPicker.svelte";
 
   let usage = $state<CodexUsage | null>(null);
   let loading = $state(false);
@@ -108,6 +109,9 @@
 </script>
 
 <div class="usage-panel relative overflow-hidden px-3.5 py-3">
+  <div class="mb-3 border-b border-[color-mix(in_oklch,var(--color-border)_50%,transparent)] pb-3">
+    <ModelPicker />
+  </div>
   <div class="mb-2.5 flex items-center justify-between">
     <div class="flex items-center gap-1.5">
       <Sparkles size={12} class="text-[var(--color-accent)]" />

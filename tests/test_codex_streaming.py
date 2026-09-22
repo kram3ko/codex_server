@@ -6,18 +6,20 @@ import pytest
 
 from app.services.codex.client import (
     CodexClient,
-    IdleDecision,
     StaleTurnStreamError,
-    _TurnDiagnostics,
-    decide_idle,
 )
+from app.services.codex.diagnostics import TurnDiagnostics
+from app.services.codex.idle import IdleDecision, decide_idle
 from app.services.codex.events import (
     CodexItem,
     CodexNotif,
     TokenEvent,
     iterate_with_idle_timeout,
 )
+from app.services.codex.shared import Method
+from app.services.codex.thread import CodexThreadSession
 from app.services.codex.transport import AppServerClient, Notification
+from app.services.codex.turn import CodexTurnSession
 
 
 class _FakeTransport(AppServerClient):
@@ -31,14 +33,16 @@ class _FakeTransport(AppServerClient):
     def __init__(
         self,
         notes_factory: Callable[[], AsyncIterator[Notification]] | None = None,
+        responses: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(url="ws://test")
         self._notes_factory = notes_factory
+        self._responses = responses or {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     async def request(self, method: str, params: dict[str, Any] | None = None) -> Any:
         self.calls.append((method, params or {}))
-        return {}
+        return self._responses.get(method, {})
 
     async def notifications(self) -> AsyncIterator[Notification]:
         if self._notes_factory is None:
@@ -48,6 +52,18 @@ class _FakeTransport(AppServerClient):
 
     def diagnostic_snapshot(self) -> dict[str, Any]:
         return {}
+
+
+def _turn_session(transport: _FakeTransport) -> CodexTurnSession:
+    threads = CodexThreadSession(
+        transport=transport,
+        cwd="/tmp",
+        approval_policy="never",
+        sandbox="danger-full-access",
+        initial_thread_id=None,
+        on_thread_change=None,
+    )
+    return CodexTurnSession(transport=transport, threads=threads, reasoning_effort=None)
 
 
 async def _events():
@@ -119,15 +135,9 @@ async def test_current_turn_idle_ignores_stale_turn_notifications() -> None:
             )
         await asyncio.Event().wait()
 
-    client = CodexClient(
-        url="ws://unused",
-        cwd="/tmp",
-        approval_policy="never",
-        sandbox="danger-full-access",
-        transport=_FakeTransport(notes_factory=stale_notes),
-    )
-    client._current_turn_id = "new-turn"
-    client._turn_diagnostics = _TurnDiagnostics(thread_id="thread", turn_id="new-turn")
+    session = _turn_session(_FakeTransport(notes_factory=stale_notes))
+    session._current_turn_id = "new-turn"
+    session._turn_diagnostics = TurnDiagnostics(thread_id="thread", turn_id="new-turn")
 
     called = False
 
@@ -136,10 +146,10 @@ async def test_current_turn_idle_ignores_stale_turn_notifications() -> None:
         called = True
 
     with pytest.raises(TimeoutError):
-        async for _ in client._current_turn_notifications(0.1, on_idle):
+        async for _ in session.current_turn_notifications(0.1, on_idle):
             pass
 
-    diagnostics = client.turn_diagnostics()
+    diagnostics = session.diagnostics()
     assert called is True
     assert diagnostics["raw_count"] == 0
     assert diagnostics["stale_raw_count"] == 5
@@ -159,26 +169,88 @@ async def test_stale_turn_storm_resets_before_idle_timeout() -> None:
                 turn_id="old-turn",
             )
 
-    client = CodexClient(
-        url="ws://unused",
-        cwd="/tmp",
-        approval_policy="never",
-        sandbox="danger-full-access",
-        transport=_FakeTransport(notes_factory=stale_notes),
-    )
-    client._current_turn_id = "new-turn"
-    client._turn_diagnostics = _TurnDiagnostics(thread_id="thread", turn_id="new-turn")
+    session = _turn_session(_FakeTransport(notes_factory=stale_notes))
+    session._current_turn_id = "new-turn"
+    session._turn_diagnostics = TurnDiagnostics(thread_id="thread", turn_id="new-turn")
 
     with pytest.raises(StaleTurnStreamError) as raised:
-        async for _ in client._current_turn_notifications(999, None):
+        async for _ in session.current_turn_notifications(999, None):
             pass
 
     assert raised.value.diagnostics["raw_count"] == 0
     assert raised.value.diagnostics["stale_raw_count"] == threshold
 
 
+@pytest.mark.asyncio
+async def test_account_rate_limits_update_is_consumed_without_yielding() -> None:
+    async def notes() -> AsyncIterator[Notification]:
+        yield Notification(
+            method=Method.ACCOUNT_RATE_LIMITS_UPDATED,
+            params={"rateLimits": {"plan": "plus"}},
+        )
+        yield Notification(
+            method=CodexNotif.TURN_COMPLETED,
+            params={"finalText": "done"},
+            turn_id="turn",
+        )
+
+    session = _turn_session(_FakeTransport(notes_factory=notes))
+    session._current_turn_id = "turn"
+    updates: list[dict[str, Any]] = []
+
+    async def on_rate_limits_update(rate_limits: dict[str, Any]) -> None:
+        updates.append(rate_limits)
+
+    yielded = [
+        note
+        async for note in session.current_turn_notifications(
+            999,
+            None,
+            on_rate_limits_update,
+        )
+    ]
+
+    assert updates == [{"plan": "plus"}]
+    assert [note.method for note in yielded] == [CodexNotif.TURN_COMPLETED]
+
+
+@pytest.mark.asyncio
+async def test_thread_token_usage_update_refreshes_rate_limits() -> None:
+    async def notes() -> AsyncIterator[Notification]:
+        yield Notification(method=Method.THREAD_TOKEN_USAGE_UPDATED, params={})
+        yield Notification(
+            method=CodexNotif.TURN_COMPLETED,
+            params={"finalText": "done"},
+            turn_id="turn",
+        )
+
+    transport = _FakeTransport(
+        notes_factory=notes,
+        responses={Method.ACCOUNT_RATE_LIMITS_READ: {"rateLimits": {"remaining": 42}}},
+    )
+    session = _turn_session(transport)
+    session._current_turn_id = "turn"
+    updates: list[dict[str, Any]] = []
+
+    async def on_rate_limits_update(rate_limits: dict[str, Any]) -> None:
+        updates.append(rate_limits)
+
+    yielded = [
+        note
+        async for note in session.current_turn_notifications(
+            999,
+            None,
+            on_rate_limits_update,
+        )
+    ]
+
+    assert updates == [{"remaining": 42}]
+    assert transport.calls == [(Method.ACCOUNT_RATE_LIMITS_READ, {})]
+    assert [note.method for note in yielded] == [CodexNotif.TURN_COMPLETED]
+
+
 def test_turn_diagnostics_keeps_shell_active_under_reasoning() -> None:
-    diagnostics = _TurnDiagnostics(thread_id="thread", turn_id="turn")
+    diagnostics = TurnDiagnostics(thread_id="thread", turn_id="turn")
     diagnostics.absorb_raw(
         Notification(
             method=CodexNotif.ITEM_STARTED,

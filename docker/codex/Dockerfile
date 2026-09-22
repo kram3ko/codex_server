@@ -1,9 +1,6 @@
-FROM alpine:3.20
-
-ARG TARGETARCH
+FROM alpine:3.24
 
 RUN set -eux \
- && echo "@edge https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories \
  && apk add --no-cache \
         ca-certificates \
         tzdata \
@@ -19,21 +16,14 @@ RUN set -eux \
         grep \
         ripgrep \
         jq \
-        bubblewrap \
         libgcc \
         python3 \
         py3-pip \
-        glab@edge \
- && case "${TARGETARCH:-arm64}" in \
-        arm64) CODEX_ARCH=aarch64-unknown-linux-musl ;; \
-        amd64) CODEX_ARCH=x86_64-unknown-linux-musl ;; \
-        *) echo "Unsupported arch: ${TARGETARCH}"; exit 1 ;; \
-    esac \
- && curl -fsSL "https://github.com/openai/codex/releases/latest/download/codex-${CODEX_ARCH}.tar.gz" -o /tmp/codex.tar.gz \
- && tar -xzf /tmp/codex.tar.gz -C /tmp \
- && mv "/tmp/codex-${CODEX_ARCH}" /usr/local/bin/codex \
- && chmod +x /usr/local/bin/codex \
- && rm -f /tmp/codex.tar.gz
+        glab \
+ && curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/codex-install.sh \
+ && CODEX_HOME=/opt/codex CODEX_INSTALL_DIR=/usr/local/bin CODEX_NON_INTERACTIVE=1 sh /tmp/codex-install.sh \
+ && ln -sf /opt/codex/packages/standalone/current/bin/codex-code-mode-host /usr/local/bin/codex-code-mode-host \
+ && rm -f /tmp/codex-install.sh
 
 COPY docker/codex/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

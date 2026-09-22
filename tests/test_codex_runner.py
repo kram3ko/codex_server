@@ -7,6 +7,7 @@
 import pytest
 
 from app.services.codex import runner
+from app.services.codex_prefs.schemas import TurnOptions
 
 
 class _FakeChat:
@@ -48,7 +49,11 @@ def patch_runner(monkeypatch: pytest.MonkeyPatch):
     async def _fake_load(chat_id: int) -> str | None:
         return _FakeChat("stored-tid").codex_thread_id
 
+    async def _fake_options(user_id: int, sidecar: object) -> TurnOptions:
+        return TurnOptions()
+
     monkeypatch.setattr(runner, "_load_stored_thread_id", _fake_load)
+    monkeypatch.setattr(runner, "_load_turn_options", _fake_options)
     monkeypatch.setattr(runner, "CodexClient", _RecordingClient)
     monkeypatch.setattr(runner.settings, "CODEX_THREAD_REUSE_ENABLED", True)
 
@@ -59,7 +64,7 @@ async def test_open_codex_turn_passes_stored_thread_id(
 ) -> None:
     monkeypatch.setattr(runner, "cache", _RecordingCache(quarantined=set()))
 
-    async with runner.open_codex_turn(1, is_admin=True, seed_history=False):
+    async with runner.open_codex_turn(1, user_id=1, is_admin=True, seed_history=False):
         pass
 
     assert _RecordingClient.last_kwargs is not None
@@ -72,7 +77,7 @@ async def test_open_codex_turn_skips_quarantined_thread(
 ) -> None:
     monkeypatch.setattr(runner, "cache", _RecordingCache(quarantined={"stored-tid"}))
 
-    async with runner.open_codex_turn(1, is_admin=True, seed_history=False):
+    async with runner.open_codex_turn(1, user_id=1, is_admin=True, seed_history=False):
         pass
 
     assert _RecordingClient.last_kwargs is not None
@@ -86,7 +91,7 @@ async def test_open_codex_turn_skips_thread_when_reuse_disabled(
     monkeypatch.setattr(runner.settings, "CODEX_THREAD_REUSE_ENABLED", False)
     monkeypatch.setattr(runner, "cache", _RecordingCache(quarantined=set()))
 
-    async with runner.open_codex_turn(1, is_admin=True, seed_history=False):
+    async with runner.open_codex_turn(1, user_id=1, is_admin=True, seed_history=False):
         pass
 
     assert _RecordingClient.last_kwargs is not None

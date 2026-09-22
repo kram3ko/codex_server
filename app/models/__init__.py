@@ -1,6 +1,7 @@
 """Реекспорт усіх моделей, щоб Alembic міг знайти їх через Base.metadata."""
 
 from app.models.chat import Chat
+from app.models.codex_preference import CodexPreference
 from app.models.enums import (
     TURN_TERMINAL_STATUSES,
     ChatSource,
@@ -22,6 +23,7 @@ __all__ = [
     "TURN_TERMINAL_STATUSES",
     "Chat",
     "ChatSource",
+    "CodexPreference",
     "Event",
     "EventKind",
     "Invite",

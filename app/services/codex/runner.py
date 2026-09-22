@@ -27,6 +27,8 @@ from app.services.codex.client import CodexClient
 from app.services.codex.history import messages_to_history_items
 from app.services.codex.jwt import make_ws_token
 from app.services.codex.sidecar import SidecarName
+from app.services.codex_prefs.default import codex_prefs_service
+from app.services.codex_prefs.schemas import TurnOptions
 from app.services.messages.default import message_service
 
 log = structlog.get_logger(__name__)
@@ -43,6 +45,7 @@ def quarantine_key(thread_id: str) -> str:
 async def open_codex_turn(
     db_chat_id: int,
     *,
+    user_id: int,
     is_admin: bool,
     seed_history: bool = True,
 ) -> AsyncIterator[CodexClient]:
@@ -63,6 +66,7 @@ async def open_codex_turn(
         initial = None
 
     sidecar = SidecarName.ADMIN if is_admin else SidecarName.GUEST
+    turn_options = await _load_turn_options(user_id, sidecar)
     client = CodexClient(
         url=settings.CODEX_CLI_URL if is_admin else settings.CODEX_CLI_GUEST_URL,
         cwd=settings.CODEX_CWD,
@@ -71,7 +75,8 @@ async def open_codex_turn(
         request_timeout=settings.CODEX_REQUEST_TIMEOUT_SECONDS,
         initial_thread_id=initial,
         on_thread_change=_thread_change_callback(db_chat_id),
-        reasoning_effort=settings.CODEX_REASONING_EFFORT,
+        model=turn_options.model,
+        reasoning_effort=turn_options.reasoning_effort,
         notification_queue_max=(
             settings.CODEX_NOTIFICATION_QUEUE_MAX_ADMIN
             if is_admin
@@ -98,6 +103,11 @@ async def quarantine_thread(thread_id: str | None) -> None:
         await cache.set(quarantine_key(thread_id), "broken", ex=86400)
     except RedisError as exc:
         log.warning("codex_quarantine_failed", thread_id=thread_id, error=str(exc))
+
+
+async def _load_turn_options(user_id: int, sidecar: SidecarName) -> TurnOptions:
+    async with SessionLocal() as db:
+        return await codex_prefs_service.resolve_turn_options(db, user_id, sidecar)
 
 
 async def _load_stored_thread_id(db_chat_id: int) -> str | None:

@@ -6,7 +6,7 @@
 - events — типізовані ChatEvent для translator'а
 """
 
-from app.services.codex.client import CodexClient
+from app.services.codex.client import CodexClient, StaleSidecarTurnError, StaleTurnStreamError
 from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events import (
     ChatEvent,
@@ -28,6 +28,8 @@ __all__ = [
     "DoneEvent",
     "ErrorEvent",
     "Notification",
+    "StaleSidecarTurnError",
+    "StaleTurnStreamError",
     "TokenEvent",
     "ToolCallEvent",
     "ToolResultEvent",
