@@ -140,7 +140,7 @@ async def execute_turn_inner(
                 name=f"turn-heartbeat:{turn_id}",
             )
 
-            async with open_codex_turn(chat_id, is_admin=is_admin) as client:
+            async with open_codex_turn(chat_id, user_id=turn.user_id, is_admin=is_admin) as client:
                 # `mark_running` тепер відбувається у `stream._on_started`
                 # callback одразу на `turn/start` — раніше ніж перший yielded
                 # event. Тут нічого не робимо у hot loop.

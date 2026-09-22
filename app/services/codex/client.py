@@ -39,6 +39,7 @@ class CodexClient:
         request_timeout: float = 60.0,
         initial_thread_id: str | None = None,
         on_thread_change: ThreadChangeCallback | None = None,
+        model: str | None = None,
         reasoning_effort: str | None = None,
         notification_queue_max: int | None = None,
         auth_token: str | None = None,
@@ -69,6 +70,7 @@ class CodexClient:
         self._turns = CodexTurnSession(
             transport=self._transport,
             threads=self._threads,
+            model=model,
             reasoning_effort=reasoning_effort,
         )
 
@@ -96,13 +98,11 @@ class CodexClient:
     async def ensure_thread(self) -> str:
         return await self._threads.ensure_thread()
 
-    async def read_thread(
-        self,
-        thread_id: str | None = None,
-        *,
-        include_turns: bool = True,
-    ) -> dict[str, Any] | None:
-        return await self._threads.read_thread(thread_id, include_turns=include_turns)
+    async def read_thread(self, thread_id: str | None = None) -> dict[str, Any] | None:
+        return await self._threads.read_thread(thread_id)
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        return await self._turns.list_models()
 
     async def inject_history(self, items: list[dict[str, Any]]) -> None:
         await self._threads.inject_history(items)

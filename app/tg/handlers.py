@@ -98,7 +98,10 @@ class TGHandlers:
             display_name=message.from_user.full_name,
         )
         async with open_codex_turn(
-            session.db_chat_id, is_admin=session.is_admin, seed_history=False
+            session.db_chat_id,
+            user_id=session.db_user_id,
+            is_admin=session.is_admin,
+            seed_history=False,
         ) as client:
             usage = await codex_usage_service.latest(client)
         if usage is None:

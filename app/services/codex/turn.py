@@ -24,6 +24,10 @@ from app.services.codex.transport import AppServerClient, AppServerError, Notifi
 
 log = structlog.get_logger(__name__)
 
+_TURN_PROBE_PAGE_SIZE = 20
+_TURN_PROBE_MAX_PAGES = 5
+_MODEL_LIST_PAGE_SIZE = 100
+
 
 class CodexTurnSession:
     def __init__(
@@ -31,10 +35,12 @@ class CodexTurnSession:
         *,
         transport: AppServerClient,
         threads: CodexThreadSession,
-        reasoning_effort: str | None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self._transport = transport
         self._threads = threads
+        self._model = model
         self._reasoning_effort = reasoning_effort
         self._current_turn_id: str | None = None
         self._idle_s: float | None = None
@@ -114,19 +120,43 @@ class CodexTurnSession:
             self._last_idle_probe_at = None
 
     async def probe_turn_status(self, thread_id: str, codex_turn_id: str) -> str | None:
-        thread_data = await self._threads.read_thread(thread_id, include_turns=True)
-        if thread_data is None:
-            return None
-        turns = thread_data.get("turns")
-        if not isinstance(turns, list):
-            return None
-        for turn in turns:
-            if not isinstance(turn, dict):
-                continue
-            if turn.get("id") == codex_turn_id:
-                status = turn.get("status")
-                return status if isinstance(status, str) else None
+        cursor: str | None = None
+        for _ in range(_TURN_PROBE_MAX_PAGES):
+            params: dict[str, Any] = {
+                "threadId": thread_id,
+                "limit": _TURN_PROBE_PAGE_SIZE,
+                "itemsView": "notLoaded",
+                "sortDirection": "desc",
+            }
+            if cursor is not None:
+                params["cursor"] = cursor
+            page = await self._transport.request(Method.THREAD_TURNS_LIST, params)
+            turns = page.get("data")
+            if not isinstance(turns, list):
+                return None
+            for turn in turns:
+                if isinstance(turn, dict) and turn.get("id") == codex_turn_id:
+                    status = turn.get("status")
+                    return status if isinstance(status, str) else None
+            cursor = page.get("nextCursor")
+            if not isinstance(cursor, str):
+                return None
         return None
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        models: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {"limit": _MODEL_LIST_PAGE_SIZE}
+            if cursor is not None:
+                params["cursor"] = cursor
+            page = await self._transport.request(Method.MODEL_LIST, params)
+            data = page.get("data")
+            if isinstance(data, list):
+                models.extend(item for item in data if isinstance(item, dict))
+            cursor = page.get("nextCursor")
+            if not isinstance(cursor, str):
+                return models
 
     async def interrupt(self, *, thread_id: str, turn_id: str) -> bool:
         try:
@@ -249,6 +279,8 @@ class CodexTurnSession:
         input_payload: list[dict[str, Any]],
     ) -> dict[str, Any]:
         params: dict[str, Any] = {"threadId": thread_id, "input": input_payload}
+        if self._model:
+            params["model"] = self._model
         if self._reasoning_effort:
             params["effort"] = self._reasoning_effort
         return params

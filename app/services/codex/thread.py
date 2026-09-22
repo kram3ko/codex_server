@@ -50,20 +50,12 @@ class CodexThreadSession:
         self._thread_resumed_or_started = False
         await self._emit_thread_change(None)
 
-    async def read_thread(
-        self,
-        thread_id: str | None = None,
-        *,
-        include_turns: bool = True,
-    ) -> dict[str, Any] | None:
+    async def read_thread(self, thread_id: str | None = None) -> dict[str, Any] | None:
         target = thread_id or self._thread_id
         if not target:
             return None
         try:
-            result = await self._transport.request(
-                Method.THREAD_READ,
-                {"threadId": target, "includeTurns": include_turns},
-            )
+            result = await self._transport.request(Method.THREAD_READ, {"threadId": target})
         except AppServerError as exc:
             if exc.code == -32601:
                 log.info("codex_thread_read_unsupported", thread_id=target)

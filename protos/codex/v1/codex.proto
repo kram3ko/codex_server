@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package codex.v1;
+
+// Codex runtime preferences: which model / reasoning effort the sidecar
+// uses for the current user's turns. Unset field = sidecar default.
+
+message ReasoningEffortOption {
+  string value = 1;
+  string description = 2;
+}
+
+message CodexModel {
+  string id = 1;
+  string display_name = 2;
+  string description = 3;
+  bool is_default = 4;
+  string default_reasoning_effort = 5;
+  repeated ReasoningEffortOption supported_reasoning_efforts = 6;
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated CodexModel models = 1;
+  // Server-wide effort applied when the user keeps "default"; empty → the
+  // model's own default_reasoning_effort.
+  string fallback_reasoning_effort = 2;
+}
+
+message CodexPreferences {
+  optional string model = 1;
+  optional string reasoning_effort = 2;
+}
+
+message GetPreferencesRequest {}
+
+message UpdatePreferencesRequest {
+  optional string model = 1;
+  optional string reasoning_effort = 2;
+}
+
+service CodexService {
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  rpc GetPreferences(GetPreferencesRequest) returns (CodexPreferences);
+  rpc UpdatePreferences(UpdatePreferencesRequest) returns (CodexPreferences);
+}

@@ -32,6 +32,17 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_index(op.f('ix_users_tg_user_id'), 'users', ['tg_user_id'], unique=True)
+    op.create_table('codex_preferences',
+    sa.Column('user_id', sa.BigInteger(), nullable=False),
+    sa.Column('model', sa.String(length=128), nullable=True),
+    sa.Column('reasoning_effort', sa.String(length=32), nullable=True),
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('user_id', name='uq_codex_preferences_user_id')
+    )
     op.create_table('chats',
     sa.Column('user_id', sa.BigInteger(), nullable=False),
     sa.Column('source', sa.Enum('WEB', 'TELEGRAM', name='chat_source'), nullable=False),
@@ -195,6 +206,7 @@ def downgrade() -> None:
     op.drop_index('uq_chats_tg_chat_thread', table_name='chats', postgresql_where=sa.text("source = 'TELEGRAM'"), postgresql_nulls_not_distinct=True)
     op.drop_index(op.f('ix_chats_user_id'), table_name='chats')
     op.drop_table('chats')
+    op.drop_table('codex_preferences')
     op.drop_index(op.f('ix_users_tg_user_id'), table_name='users')
     op.drop_index(op.f('ix_users_email'), table_name='users')
     op.drop_table('users')
