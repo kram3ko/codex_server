@@ -2,12 +2,13 @@
 
 from typing import cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import User, UserRole
+from app.models import Turn, User, UserRole
+from app.services.users.schemas import UserProfile
 
 
 class UserService:
@@ -17,6 +18,22 @@ class UserService:
     async def list_all(self, session: AsyncSession) -> list[User]:
         rows = await session.execute(select(User).order_by(User.id))
         return list(rows.scalars())
+
+    async def list_profiles(self, session: AsyncSession) -> list[UserProfile]:
+        last_turn = (
+            select(Turn.user_id, func.max(Turn.created_at).label("last_active_at"))
+            .group_by(Turn.user_id)
+            .subquery()
+        )
+        rows = await session.execute(
+            select(User.id, User.tg_username, last_turn.c.last_active_at)
+            .outerjoin(last_turn, last_turn.c.user_id == User.id)
+            .order_by(User.id)
+        )
+        return [
+            UserProfile(id=str(user_id), tg_username=tg_username, last_active_at=last_active_at)
+            for user_id, tg_username, last_active_at in rows
+        ]
 
     async def get_or_create_by_tg(
         self,
@@ -70,19 +87,24 @@ class UserService:
         user.password_hash = password_hash
         await session.flush()
 
-    async def ensure_admin_roles(self, session: AsyncSession) -> int:
-        """Idempotent UPDATE: для кожного `tg_user_id` з env що уже є у БД як
-        USER → promote до ADMIN. Викликати на startup. Returns кількість
-        promoted рядків (для логування)."""
-        admins = settings.TG_ADMIN_USER_IDS
-        if not admins:
-            return 0
-        result = await session.execute(
-            update(User)
-            .where(
-                User.tg_user_id.in_(admins),
-                User.role == UserRole.USER,
+    async def sync_admin_roles(self, session: AsyncSession, admin_ids: set[int]) -> tuple[int, int]:
+        """Idempotent: TG-юзери зі списку → ADMIN, TG-only ADMIN поза списком →
+        USER. Web-акаунти (з email) не чіпаємо — їхня роль живе окремо.
+        Returns (promoted, demoted)."""
+        promoted = 0
+        if admin_ids:
+            result = await session.execute(
+                update(User)
+                .where(User.tg_user_id.in_(admin_ids), User.role == UserRole.USER)
+                .values(role=UserRole.ADMIN),
             )
-            .values(role=UserRole.ADMIN),
+            promoted = cast(CursorResult, result).rowcount or 0
+        demote = update(User).where(
+            User.tg_user_id.is_not(None),
+            User.email.is_(None),
+            User.role == UserRole.ADMIN,
         )
-        return cast(CursorResult, result).rowcount or 0
+        if admin_ids:
+            demote = demote.where(User.tg_user_id.not_in(admin_ids))
+        result = await session.execute(demote.values(role=UserRole.USER))
+        return promoted, cast(CursorResult, result).rowcount or 0

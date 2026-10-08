@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # --- SSH key vault (admin codex agent) ---
     # codex-server пише сюди; той самий volume змонтований у codex-cli як `~/.ssh`.
     SSH_VAULT_DIR: str = "/ssh-vault"
+    INTEGRATIONS_KEY_FILE: str = "/integration-key/master.key"
+    INTEGRATIONS_REFRESH_SECONDS: float = 3.0
 
     # --- Codex sidecar ---
     CODEX_CLI_URL: str = "ws://localhost:4500"
@@ -42,6 +44,8 @@ class Settings(BaseSettings):
     CODEX_TURN_HARD_TIMEOUT_S: float = 600.0
     # Rate-limit forced L2 probe (`thread/read`) under active items.
     CODEX_IDLE_PROBE_INTERVAL_S: float = 30.0
+    # In-process cache of admin-managed limits (runtime_settings table).
+    RUNTIME_SETTINGS_TTL_S: float = 10.0
 
     # --- Codex WS auth (CLI 0.131+ signed-bearer-token) ---
     CODEX_WS_SECRET_ADMIN: str = ""

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LogOut, MessageSquareText, Monitor, Moon, NotebookTabs, ShieldUser, Sparkles, Sun } from "lucide-svelte";
+  import { LogOut, MessageSquareText, Monitor, Moon, NotebookTabs, Settings, Sparkles, Sun } from "lucide-svelte";
 
   import AdminPanel from "./features/admin/AdminPanel.svelte";
   import { auth } from "./features/auth/auth";
@@ -7,11 +7,10 @@
   import Signup from "./features/auth/Signup.svelte";
   import Chat from "./features/chat/Chat.svelte";
   import Notes from "./features/notes/Notes.svelte";
-  import Vault from "./features/vault/Vault.svelte";
   import { userClient } from "./shared/lib/clients";
   import { theme } from "./shared/lib/theme.svelte";
 
-  type Route = "chat" | "notes" | "admin" | "keys";
+  type Route = "chat" | "notes" | "admin";
   type AuthView = "login" | "signup";
 
   // URL `?invite=XYZ` → одразу signup-форма з префілленим токеном.
@@ -21,6 +20,13 @@
   let route = $state<Route>("chat");
   let authView = $state<AuthView>(inviteFromUrl ? "signup" : "login");
   let isAdmin = $state(false);
+  let notesView: Notes | undefined = $state();
+
+  function navigate(next: Route) {
+    if (route === "notes" && !notesView?.canNavigate()) return false;
+    route = next;
+    return true;
+  }
 
   async function refreshRole() {
     try {
@@ -62,6 +68,7 @@
   }
 
   function logout() {
+    if (route === "notes" && !notesView?.canNavigate()) return;
     void auth.logout();
     signedIn = false;
     isAdmin = false;
@@ -83,49 +90,24 @@
     />
   {/if}
 {:else}
-  <div class="min-h-screen text-[var(--color-text)]">
-    <header class="glass sticky top-0 z-20 flex h-14 items-center justify-between px-4">
-      <div class="flex items-center gap-2.5">
+  <div class="app-shell min-h-screen text-[var(--color-text)]">
+    {#snippet navigation(compact = false)}
+    <div class="console-navigation sidebar" class:compact>
+    <nav class="app-nav" aria-label="Main navigation">
+      <button title="Chat" aria-label="Chat" class:current={route === "chat"} onclick={() => navigate("chat")}><MessageSquareText size={16} /><span>Chat</span></button>
+      <button title="Notes" aria-label="Notes" class:current={route === "notes"} onclick={() => navigate("notes")}><NotebookTabs size={16} /><span>Notes</span></button>
+      {#if isAdmin}<button class:current={route === "admin"} title="Settings" aria-label="Settings" onclick={() => navigate("admin")}><Settings size={16} /><span>Settings</span></button>{/if}
+    </nav>
+    <header class="console-brandbar flex items-center justify-between gap-2">
+      <div class="console-brand flex items-center gap-2.5">
         <div class="grid size-9 place-items-center rounded-lg bg-gradient-to-br from-[oklch(72%_0.18_175)] to-[oklch(64%_0.16_320)] text-sm font-semibold text-[var(--color-bg)] shadow-lg shadow-[oklch(72%_0.18_175/0.25)]">
           <Sparkles size={16} strokeWidth={2.5} />
         </div>
-        <div>
+        <div class="brand-label">
           <div class="text-sm font-semibold leading-none tracking-tight">Codex</div>
           <div class="text-[11px] text-[var(--color-text-muted)]">personal console</div>
         </div>
       </div>
-
-      <nav class="glass-soft flex items-center gap-1 rounded-lg p-1">
-        <button
-          class="flex h-8 items-center gap-2 rounded-md px-3 text-sm transition-colors {route === 'chat' ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-text-muted)] hover:bg-[oklch(96%_0.01_100/0.06)] hover:text-[var(--color-text)]'}"
-          type="button"
-          title="Chat"
-          onclick={() => (route = "chat")}
-        >
-          <MessageSquareText size={15} />
-          Chat
-        </button>
-        <button
-          class="flex h-8 items-center gap-2 rounded-md px-3 text-sm transition-colors {route === 'notes' ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-text-muted)] hover:bg-[oklch(96%_0.01_100/0.06)] hover:text-[var(--color-text)]'}"
-          type="button"
-          title="Notes"
-          onclick={() => (route = "notes")}
-        >
-          <NotebookTabs size={15} />
-          Notes
-        </button>
-        {#if isAdmin}
-          <button
-            class="flex h-8 items-center gap-2 rounded-md px-3 text-sm transition-colors {route === 'admin' ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-text-muted)] hover:bg-[oklch(96%_0.01_100/0.06)] hover:text-[var(--color-text)]'}"
-            type="button"
-            title="Admin"
-            onclick={() => (route = "admin")}
-          >
-            <ShieldUser size={15} />
-            Admin
-          </button>
-        {/if}
-      </nav>
 
       <div class="flex items-center gap-2">
         <button
@@ -152,15 +134,31 @@
         </button>
       </div>
     </header>
+    </div>
+    {/snippet}
 
-    {#if route === "chat"}
-      <Chat />
-    {:else if route === "notes"}
-      <Notes />
+    {#snippet workspaceContent()}
+    {#if route === "notes"}
+      <Notes bind:this={notesView} />
     {:else if route === "admin" && isAdmin}
-      <AdminPanel onopenkeys={() => (route = "keys")} />
-    {:else if route === "keys" && isAdmin}
-      <Vault onback={() => (route = "admin")} />
+      <AdminPanel />
     {/if}
+    {/snippet}
+    <Chat {navigation} content={route === "chat" ? undefined : workspaceContent} onopenchat={() => navigate("chat")} />
   </div>
 {/if}
+
+<style>
+  .console-navigation { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; height:100%; border-bottom:1px solid var(--color-border); background:var(--color-surface); }
+  .console-brandbar { order:-1; flex:1; }
+  .app-nav { display:flex; gap:4px; }
+  .app-nav button { display:flex; align-items:center; justify-content:center; gap:5px; height:32px; padding:0 8px; border-radius:6px; color:var(--color-text-muted); font-size:12px; }
+  .app-nav button:hover,.app-nav button.current { color:var(--color-accent); background:var(--color-accent-soft); }
+  .sidebar { flex-direction:column; align-items:stretch; height:auto; gap:8px; }
+  .sidebar .app-nav button { flex:1; }
+  .compact { padding:8px 4px; }
+  .compact .console-brandbar,.compact .console-brandbar > div:last-child,.compact .app-nav { flex-direction:column; }
+  .compact .brand-label,.compact .app-nav :global(span) { display:none; }
+  .compact .app-nav button { flex:none; }
+  @media(max-width:700px) { .console-navigation { gap:6px; padding:8px; } .compact { padding:8px 4px; } }
+</style>

@@ -12,9 +12,11 @@ from app.models.enums import (
     UserRole,
 )
 from app.models.event import Event
+from app.models.integration import Integration, TelegramChat
 from app.models.invite import Invite
 from app.models.message import Message
 from app.models.note import Note, Notebook
+from app.models.runtime_setting import RuntimeSetting
 from app.models.turn import Turn
 from app.models.upload import Upload
 from app.models.user import User
@@ -26,12 +28,15 @@ __all__ = [
     "CodexPreference",
     "Event",
     "EventKind",
+    "Integration",
     "Invite",
     "Message",
     "MessageRole",
     "Note",
     "Notebook",
     "NotebookKind",
+    "RuntimeSetting",
+    "TelegramChat",
     "Turn",
     "TurnStatus",
     "Upload",

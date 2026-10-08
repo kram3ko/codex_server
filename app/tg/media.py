@@ -28,6 +28,13 @@ from app.services.uploads.default import upload_service, workspace_uploads
 log = structlog.get_logger(__name__)
 
 
+class UploadTooLarge(Exception):
+    def __init__(self, size: int, limit: int) -> None:
+        super().__init__(f"attachment {size} bytes exceeds {limit}")
+        self.size = size
+        self.limit = limit
+
+
 class PreparedTurn(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -47,9 +54,11 @@ async def prepare_turn(
     *,
     db_user_id: int,
     db_chat_id: int,
+    max_upload_bytes: int | None = None,
 ) -> PreparedTurn:
     if message.chat is None:
         return PreparedTurn(text="", attachments=(), upload_ids=())
+    _ensure_size(message, max_upload_bytes)
 
     text = (message.caption or message.text or "").strip()
     attachments: list[str] = []
@@ -221,6 +230,23 @@ async def _prepare_document(
         buf, chat_id=chat_id, upload_id=upload_id, filename=filename
     )
     return "", None, upload_id, workspace_path
+
+
+def _ensure_size(message: Message, limit: int | None) -> None:
+    """Перевірка до download: TG віддає `file_size` у метаданих вкладення."""
+    if limit is None:
+        return
+    media_items = (
+        message.photo[-1] if message.photo else None,
+        message.document,
+        message.voice,
+        message.video_note,
+        message.audio,
+    )
+    for media in media_items:
+        size = getattr(media, "file_size", None)
+        if size is not None and size > limit:
+            raise UploadTooLarge(size, limit)
 
 
 async def _download_to_buf(message: Message, media: Any) -> BytesIO:

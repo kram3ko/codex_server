@@ -47,6 +47,7 @@ COPY alembic.ini ./
 COPY gunicorn.conf.py ./
 COPY migrations/ ./migrations/
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 COPY docker/server/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 

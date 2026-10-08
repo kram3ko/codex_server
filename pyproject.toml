@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Personal Codex server: FastAPI + Telegram bot + web chat"
 requires-python = ">=3.14"
 dependencies = [
+    "cryptography>=46.0.0",
     "fastapi>=0.136.1",
     "uvicorn>=0.47.0",
     "gunicorn>=26.0.0",

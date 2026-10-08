@@ -20,6 +20,8 @@ from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.runner import open_codex_turn
 from app.services.codex.sidecar import SidecarName
 from app.services.codex.transport import AppServerError
+from app.services.runtime_settings.default import runtime_settings_service
+from app.services.runtime_settings.schemas import MB, user_kind
 from app.services.sessions.store import ChatSession
 from app.services.stt.base import STTBackend
 from app.services.turns import locks as turn_locks
@@ -31,7 +33,7 @@ from app.services.turns.runner import heartbeat_loop
 from app.services.turns.schemas import TurnCreate, TurnRow
 from app.services.users.default import user_service
 from app.tg.markdown import tg_markdown
-from app.tg.media import PreparedTurn, prepare_turn
+from app.tg.media import PreparedTurn, UploadTooLarge, prepare_turn
 from app.tg.progress import TurnProgressReporter
 from app.tg.sessions import ChatSessionStore
 from app.tg.turn.control import auto_reset_thread, emit_failure
@@ -66,12 +68,18 @@ class TurnRunner:
             db_chat_id = chat.id
             await db.commit()
 
-        prepared = await prepare_turn(
-            message,
-            self._transcriber,
-            db_user_id=db_user_id,
-            db_chat_id=db_chat_id,
-        )
+        limits = await runtime_settings_service.get()
+        try:
+            prepared = await prepare_turn(
+                message,
+                self._transcriber,
+                db_user_id=db_user_id,
+                db_chat_id=db_chat_id,
+                max_upload_bytes=limits.max_upload_bytes(user_kind(user)),
+            )
+        except UploadTooLarge as exc:
+            await message.answer(f"📎 Файл завеликий: ліміт {exc.limit // MB} MB.")
+            return
         log.info(
             "tg_prepared_turn",
             chat_id=message.chat.id,

@@ -8,6 +8,15 @@ from redis.exceptions import RedisError
 from app.models import User, UserRole
 from app.services import rate_limit as rl
 from app.services.rate_limit import service as rl_service
+from app.services.runtime_settings.schemas import RuntimeSettings, TurnLimits
+
+
+class _StubSettings:
+    def __init__(self, value: RuntimeSettings) -> None:
+        self.value = value
+
+    async def get(self) -> RuntimeSettings:
+        return self.value
 
 
 class _FakeCache:
@@ -40,28 +49,33 @@ class _FakeCache:
         window_start = float(args[3])
         hourly_limit = int(args[4])
         active_limit = int(args[5])
-        # ZREMRANGEBYSCORE
-        items = self.zsets.get(hourly_key, [])
-        self.zsets[hourly_key] = [(s, m) for (s, m) in items if s > window_start]
-        # ZCARD check
-        count = len(self.zsets[hourly_key])
-        if count >= hourly_limit:
-            return [b"hourly", count]
-        # INCR + active check
+        if hourly_limit > 0:
+            items = self.zsets.get(hourly_key, [])
+            self.zsets[hourly_key] = [(s, m) for (s, m) in items if s > window_start]
+            count = len(self.zsets[hourly_key])
+            if count >= hourly_limit:
+                return [b"hourly", count]
         self.ints[active_key] = self.ints.get(active_key, 0) + 1
         active = self.ints[active_key]
-        if active > active_limit:
+        if active_limit > 0 and active > active_limit:
             self.ints[active_key] = active - 1
             return [b"active", active - 1]
-        # ZADD
-        self.zsets[hourly_key].append((now, str(now)))
+        if hourly_limit > 0:
+            self.zsets[hourly_key].append((now, str(now)))
         return [b"ok", 0]
+
+
+@pytest.fixture
+def hourly_ten(monkeypatch: pytest.MonkeyPatch, fake_cache: _FakeCache) -> None:
+    stub = _StubSettings(RuntimeSettings(tg_guest=TurnLimits(active=3, hourly=10)))
+    monkeypatch.setattr(rl_service, "runtime_settings_service", stub)
 
 
 @pytest.fixture
 def fake_cache(monkeypatch: pytest.MonkeyPatch) -> _FakeCache:
     cache = _FakeCache()
     monkeypatch.setattr(rl_service, "cache", cache)
+    monkeypatch.setattr(rl_service, "runtime_settings_service", _StubSettings(RuntimeSettings()))
     return cache
 
 
@@ -117,8 +131,44 @@ async def test_release_zero_deletes_key(fake_cache: _FakeCache) -> None:
     assert f"ratelimit:active:{user.id}" not in fake_cache.ints
 
 
+async def test_tg_guest_hourly_off_by_default(fake_cache: _FakeCache) -> None:
+    user = _tg_guest()
+    for _ in range(50):
+        await rl.reserve_turn(user)
+        await rl.release_turn(user)
+    assert fake_cache.zsets == {}
+    assert fake_cache.ints == {}
+
+
+async def test_enabling_active_limit_mid_turn_keeps_counter_consistent(
+    fake_cache: _FakeCache, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Turn, що стартував при active=0, після увімкнення ліміту release-иться без
+    дрейфу: counter рахує живі турни, а не ті, що резервувались під лімітом."""
+    user = _tg_guest()
+    monkeypatch.setattr(
+        rl_service,
+        "runtime_settings_service",
+        _StubSettings(RuntimeSettings(tg_guest=TurnLimits(active=0, hourly=0))),
+    )
+    await rl.reserve_turn(user)  # T1 — без ліміту
+    monkeypatch.setattr(
+        rl_service,
+        "runtime_settings_service",
+        _StubSettings(RuntimeSettings(tg_guest=TurnLimits(active=2, hourly=0))),
+    )
+    await rl.reserve_turn(user)  # T2
+    with pytest.raises(rl.RateLimited):
+        await rl.reserve_turn(user)  # T3 — T1 теж рахується
+    await rl.release_turn(user)  # T1 done
+    assert fake_cache.ints[f"ratelimit:active:{user.id}"] == 1
+    await rl.reserve_turn(user)  # T3 тепер проходить
+    assert fake_cache.ints[f"ratelimit:active:{user.id}"] == 2
+
+
+@pytest.mark.usefixtures("hourly_ten")
 async def test_tg_guest_hourly_limit(fake_cache: _FakeCache) -> None:
-    """tg_guest: 10 turns / hour. 11-й кидає RateLimited(hourly)."""
+    """hourly=10: 11-й reserve кидає RateLimited(hourly)."""
     user = _tg_guest()
     for _ in range(10):
         await rl.reserve_turn(user)
@@ -129,6 +179,7 @@ async def test_tg_guest_hourly_limit(fake_cache: _FakeCache) -> None:
     assert exc.value.limit == 10
 
 
+@pytest.mark.usefixtures("hourly_ten")
 async def test_hourly_window_trims_old_entries(fake_cache: _FakeCache) -> None:
     """ZREMRANGEBYSCORE 0 (now-3600) — старші > 1h entries не рахуються."""
     user = _tg_guest()
@@ -141,7 +192,7 @@ async def test_hourly_window_trims_old_entries(fake_cache: _FakeCache) -> None:
 
 
 async def test_redis_error_propagates_not_swallowed(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fake_cache: _FakeCache
 ) -> None:
     """Fail-loud: RedisError підіймається у caller, не глушиться у no-op."""
 

@@ -32,7 +32,7 @@
 {:else if attachment.kind === "audio"}
   <audio class="w-full" controls src={url}></audio>
 {:else}
-  <a class="inline-flex items-center gap-2 rounded-md border border-[#d9d3c8] bg-white px-3 py-2 text-sm hover:bg-[#f1eee8]" href={url} download>
+  <a class="inline-flex items-center gap-2 rounded-md border border-[#d9d3c8] bg-white px-3 py-2 text-sm hover:bg-[#f1eee8]" href={url} target="_blank" rel="noopener noreferrer" download>
     <FileDown size={15} />
     {attachment.caption || "Download"}
   </a>

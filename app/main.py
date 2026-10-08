@@ -21,6 +21,7 @@ from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from app.api.health import router as health_router
+from app.api.settings import router as settings_router
 from app.api.tg_webhook import router as tg_webhook_router
 from app.config import settings
 from app.services.errors.scrub import scrub_event
@@ -72,6 +73,7 @@ from app.services.auth.default import auth_service
 from app.services.cache.default import cache
 from app.services.codex_usage.poller import bootstrap_usage
 from app.services.errors.default import bugsink_client
+from app.services.integrations.default import integration_service
 from app.services.turns.recovery import lease_expired_listener, reconcile_stale_turns
 from app.services.users.default import user_service
 from app.tg.service import tg_bot_service
@@ -118,13 +120,13 @@ async def lifespan(_app: FastAPI):
 
 
 async def _bootstrap_users() -> None:
-    # Sync admin role + переписати hash якщо .env ADMIN_PASSWORD змінився.
+    # Переписати hash якщо .env ADMIN_PASSWORD змінився. TG-ролі синхронізує
+    # tg_bot_service при (ре)старті бота — там живе список admin_ids.
     async with SessionLocal() as db:
-        promoted = await user_service.ensure_admin_roles(db)
         await _sync_admin_account(db)
         await db.commit()
-        if promoted:
-            log.info("user_roles_admin_promoted", count=promoted)
+        if not await integration_service.list(db):
+            await asyncio.to_thread(integration_service.cipher.ensure_key)
 
 
 async def _sync_admin_account(db) -> None:
@@ -173,6 +175,7 @@ connect_router = ConnectRouter(
         UploadsServiceASGIApplication(UploadsRPC()),
     ]
 )
+app.include_router(settings_router)
 app.mount("/api", connect_router)
 
 # Codex image_generation outputs — read-only mount від sidecar'а; web

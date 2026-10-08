@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AlertTriangle } from "lucide-svelte";
   import { onDestroy, onMount, tick } from "svelte";
+  import type { Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
 
   import ChatList from "./ChatList.svelte";
@@ -26,6 +27,8 @@
   import Spinner from "../../shared/components/Spinner.svelte";
   import { chatClient, messageClient } from "../../shared/lib/clients";
   import { randomUuid } from "../../shared/lib/ids";
+
+  let { navigation, content, onopenchat }: { navigation: Snippet<[boolean?]>; content?: Snippet; onopenchat: () => boolean } = $props();
 
   function nowTimestamp() {
     const ms = Date.now();
@@ -840,10 +843,13 @@
   });
 </script>
 
-<main class="flex h-[calc(100vh-3.5rem)] min-h-0">
-  <ChatList chats={chats} selectedId={selected?.id ?? null} loading={loading} busyChats={busyChats} onrefresh={loadChats} onselect={selectChat} oncreate={createChat} onrename={renameChat} ondelete={deleteChat} />
+<main class="flex h-dvh min-h-0">
+  <ChatList {navigation} chats={chats} selectedId={selected?.id ?? null} loading={loading} busyChats={busyChats} onrefresh={loadChats} onselect={(chat) => { if (onopenchat()) void selectChat(chat); }} oncreate={(title) => { if (onopenchat()) void createChat(title); }} onrename={renameChat} ondelete={deleteChat} />
 
-  <section class="flex min-w-0 flex-1 flex-col">
+  <section class="flex min-w-0 flex-1 flex-col overflow-auto">
+    {#if content}
+      {@render content()}
+    {:else}
     {#if error}
       <div class="flex items-center gap-2 border-b border-[#e7c9c1] bg-[#fff5f2] px-4 py-2 text-sm text-[#a33a2b]">
         <AlertTriangle size={16} />
@@ -863,6 +869,7 @@
     {:else}
       <MessageList chatId={selected?.id ?? null} messages={displayMessages} {scrollIntent} streamingClientId={streamingClientId} {tools} {attachments} {draftStartedAt} {lastActivityAt} idleTimeoutMs={IDLE_TIMEOUT_MS} {loadingOlder} {hasMoreOlder} onloadolder={loadOlderMessages} />
       <Composer {busy} onsend={send} oninterrupt={interrupt} />
+    {/if}
     {/if}
   </section>
 </main>
