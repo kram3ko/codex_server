@@ -1,4 +1,4 @@
-"""UserService — admin role seed на create + idempotent ensure_admin_roles."""
+"""UserService — admin role seed на create + idempotent sync_admin_roles."""
 
 from typing import Any
 
@@ -95,39 +95,38 @@ async def test_get_or_create_by_tg_does_not_demote_existing_admin(
     assert session.added == []  # nothing was inserted
 
 
-async def test_ensure_admin_roles_no_op_when_env_empty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from app.services.users import service as service_module
-
-    monkeypatch.setattr(service_module.settings, "TG_ADMIN_USER_IDS", set())
-    session = _Session(update_rowcount=42)  # rowcount ignored, бо ми exit'имо раніше
-
-    promoted = await UserService().ensure_admin_roles(session)
-
-    assert promoted == 0
-    assert session.statements == []  # SQL не виконується коли admin set пустий
-
-
-async def test_ensure_admin_roles_promotes_only_unpromoted_listed_users(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from app.services.users import service as service_module
-
-    monkeypatch.setattr(service_module.settings, "TG_ADMIN_USER_IDS", {12345, 67890})
-    session = _Session(update_rowcount=2)
-
-    promoted = await UserService().ensure_admin_roles(session)
-
-    assert promoted == 2
-    assert len(session.statements) == 1
-    sql = str(
-        session.statements[0].compile(
+def _compiled(statement: Any) -> str:
+    return str(
+        statement.compile(
             dialect=postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         ),
     )
-    assert "UPDATE users SET role" in sql
-    # WHERE filter: only USER role + tg_user_id у admin set
-    assert "users.tg_user_id IN" in sql
-    assert "users.role = 'USER'" in sql
+
+
+async def test_sync_admin_roles_empty_list_only_demotes() -> None:
+    """Порожній список: promote не виконується, TG-only ADMIN-и демотяться."""
+    session = _Session(update_rowcount=3)
+
+    promoted, demoted = await UserService().sync_admin_roles(session, set())
+
+    assert (promoted, demoted) == (0, 3)
+    assert len(session.statements) == 1
+    sql = _compiled(session.statements[0])
+    assert "SET role='USER'" in sql
+    assert "users.email IS NULL" in sql
+
+
+async def test_sync_admin_roles_promotes_listed_and_demotes_unlisted() -> None:
+    session = _Session(update_rowcount=2)
+
+    promoted, demoted = await UserService().sync_admin_roles(session, {12345, 67890})
+
+    assert (promoted, demoted) == (2, 2)
+    assert len(session.statements) == 2
+    promote_sql, demote_sql = (_compiled(st) for st in session.statements)
+    assert "SET role='ADMIN'" in promote_sql
+    assert "users.role = 'USER'" in promote_sql
+    assert "SET role='USER'" in demote_sql
+    assert "NOT IN" in demote_sql
+    assert "users.email IS NULL" in demote_sql

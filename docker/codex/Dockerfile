@@ -26,6 +26,10 @@ RUN set -eux \
  && rm -f /tmp/codex-install.sh
 
 COPY docker/codex/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/codex/provider-cli.py /usr/local/bin/provider-cli.py
+RUN chmod +x /usr/local/bin/provider-cli.py \
+ && ln -s /usr/local/bin/provider-cli.py /usr/local/bin/gh \
+ && ln -s /usr/local/bin/provider-cli.py /usr/local/bin/glab
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 RUN adduser -D -u 1000 -h /home/codex codex \

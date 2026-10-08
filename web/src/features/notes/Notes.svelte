@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { Plus, Save, Search, Trash2 } from "lucide-svelte";
+  import { ArrowLeft, Eye, Pencil, Plus, Save, Search, Trash2, X } from "lucide-svelte";
   import { onMount } from "svelte";
+  import NoteEditor from "./NoteEditor.svelte";
 
   import type { Note } from "../../gen/codex/v1/notes_pb";
   import { notesClient } from "../../shared/lib/clients";
   import { formatTime } from "../../shared/lib/time";
+  import { renderMarkdown } from "../chat/markdown";
 
   let notes = $state<Note[]>([]);
   let selected = $state<Note | null>(null);
@@ -14,8 +16,32 @@
   let tags = $state("");
   let error = $state("");
   let busy = $state(false);
+  let editing = $state(false);
+  let showingNote = $state(false);
+  let tagInput = $state("");
+  let loadVersion = 0;
+  const tagList = $derived(tags.split(",").map((tag) => tag.trim()).filter(Boolean));
+  const dirty = $derived(title !== (selected?.title ?? "") || body !== (selected?.body ?? "") || tags !== (selected?.tags.join(", ") ?? "") || !!tagInput.trim());
+
+  function canLeave() {
+    return !busy && (!dirty || confirm("Discard unsaved changes?"));
+  }
+
+  export function canNavigate() { return canLeave(); }
+
+  function addTag() {
+    const next = tagInput.trim().replaceAll(",", "");
+    if (next) tags = [...new Set([...tagList, next])].join(", ");
+    tagInput = "";
+  }
+
+
+  function beforeUnload(event: BeforeUnloadEvent) {
+    if (dirty) event.preventDefault();
+  }
 
   async function load() {
+    const version = ++loadVersion;
     busy = true;
     error = "";
     try {
@@ -24,39 +50,50 @@
           query: query.trim(),
           pagination: { limit: 100 }
         });
-        notes = response.hits.map((hit) => hit.note).filter(Boolean) as Note[];
+        if (version === loadVersion) notes = response.hits.flatMap((hit) => hit.note ? [hit.note] : []);
       } else {
         const response = await notesClient.listNotes({ pagination: { limit: 100 } });
-        notes = [...response.notes];
+        if (version === loadVersion) notes = [...response.notes];
       }
     } catch (exc) {
-      error = exc instanceof Error ? exc.message : "Failed to load notes";
+      if (version === loadVersion) error = exc instanceof Error ? exc.message : "Failed to load notes";
     } finally {
-      busy = false;
+      if (version === loadVersion) busy = false;
     }
   }
 
   function edit(note: Note) {
+    if (!canLeave()) return;
     selected = note;
     title = note.title;
     body = note.body;
     tags = note.tags.join(", ");
+    editing = false;
+    showingNote = true;
+    tagInput = "";
   }
 
   function fresh() {
+    if (!canLeave()) return;
     selected = null;
     title = "";
     body = "";
     tags = "";
+    tagInput = "";
+    editing = true;
+    showingNote = true;
   }
 
   async function save() {
+    if (busy) return;
     if (!title.trim() && !body.trim()) {
       return;
     }
     busy = true;
+    error = "";
     try {
-      await notesClient.saveNote({
+      addTag();
+      const saved = await notesClient.saveNote({
         id: selected?.id,
         title: title.trim() || "Untitled",
         body,
@@ -65,7 +102,11 @@
           .map((tag) => tag.trim())
           .filter(Boolean)
       });
-      fresh();
+      selected = saved;
+      title = saved.title;
+      body = saved.body;
+      tags = saved.tags.join(", ");
+      editing = false;
       await load();
     } catch (exc) {
       error = exc instanceof Error ? exc.message : "Save failed";
@@ -75,13 +116,17 @@
   }
 
   async function remove() {
-    if (!selected) {
+    if (!selected || busy || !confirm(`Delete "${selected.title}"?`)) {
       return;
     }
     busy = true;
     try {
       await notesClient.deleteNote({ id: selected.id });
-      fresh();
+      selected = null;
+      title = "";
+      body = "";
+      tags = "";
+      showingNote = false;
       await load();
     } catch (exc) {
       error = exc instanceof Error ? exc.message : "Delete failed";
@@ -95,7 +140,8 @@
   });
 </script>
 
-<main class="notes-shell grid h-[calc(100vh-3.5rem)] min-h-0 grid-cols-[320px_1fr]">
+<svelte:window onbeforeunload={beforeUnload} />
+<main class="notes-shell grid h-full min-h-0 grid-cols-[240px_minmax(0,1fr)]" class:showing-note={showingNote}>
   <aside class="notes-sidebar min-h-0">
     <div class="notes-toolbar flex h-12 items-center gap-2 px-3">
       <div class="relative flex-1">
@@ -103,6 +149,8 @@
         <input
           class="notes-input h-9 w-full rounded-md pl-8 pr-2 text-sm outline-none"
           bind:value={query}
+          aria-label="Search notes"
+          placeholder="Search notes"
           onkeydown={(event) => event.key === "Enter" && load()}
         />
       </div>
@@ -115,7 +163,8 @@
       <div class="notes-error px-3 py-2 text-sm">{error}</div>
     {/if}
 
-    <div class="min-h-0 overflow-y-auto p-2">
+    <div class="min-h-0 flex-1 overflow-y-auto p-2">
+      {#if !notes.length}<p class="p-3 text-sm text-[var(--notes-muted)]">{busy ? "Loading..." : "No notes found"}</p>{/if}
       {#each notes as note (note.id.toString())}
         <button
           class="note-row mb-1 w-full rounded-md px-3 py-2 text-left transition"
@@ -124,6 +173,7 @@
           onclick={() => edit(note)}
         >
           <div class="truncate text-sm font-medium text-[var(--notes-text)]">{note.title}</div>
+          <div class="mt-1 line-clamp-2 break-words text-xs text-[var(--notes-muted)]">{note.body.slice(0, 180)}</div>
           <div class="mt-1 text-xs text-[var(--notes-muted)]">{formatTime(note.updatedAt)}</div>
         </button>
       {/each}
@@ -132,37 +182,58 @@
 
   <section class="notes-editor flex min-h-0 flex-col">
     <div class="notes-toolbar flex h-12 items-center justify-between px-4">
-      <h2 class="text-sm font-semibold">{selected ? "Edit note" : "New note"}</h2>
-      <div class="flex gap-2">
+      <div class="flex min-w-0 items-center gap-2">
+        <button class="notes-back" title="Back to notes" onclick={() => { if (canLeave()) { showingNote = false; title = selected?.title ?? ""; body = selected?.body ?? ""; tags = selected?.tags.join(", ") ?? ""; } }}><ArrowLeft size={16} /></button>
+        <div class="min-w-0">
+          <h2 class="truncate text-sm font-semibold">{showingNote ? title || "Untitled note" : "Notes"}</h2>
+          {#if showingNote}<p class="truncate text-xs text-[var(--notes-muted)]" title={dirty ? "Unsaved changes" : selected ? "All changes saved" : "New note"}>{dirty ? "Unsaved changes" : selected ? "Saved" : "New note"}</p>{/if}
+        </div>
+      </div>
+      <div class="flex shrink-0 gap-2">
+        {#if showingNote}
+          <button class="notes-icon-button grid size-9 place-items-center rounded-md" title={editing ? "Preview" : "Edit"} onclick={() => editing = !editing}>
+            {#if editing}<Eye size={16} />{:else}<Pencil size={16} />{/if}
+          </button>
+        {/if}
         {#if selected}
           <button class="notes-delete grid size-9 place-items-center rounded-md transition" type="button" title="Delete" onclick={remove}>
             <Trash2 size={16} />
           </button>
         {/if}
-        <button class="notes-save flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition disabled:opacity-50" disabled={busy} type="button" onclick={save}>
+        <button class="notes-save flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition disabled:opacity-50" disabled={busy || !dirty} type="button" onclick={save}>
           <Save size={15} />
           Save
         </button>
       </div>
     </div>
 
-    <div class="grid min-h-0 flex-1 grid-rows-[auto_auto_1fr] gap-3 p-4">
+    {#if error}<p role="alert" class="notes-error px-4 py-2">{error}</p>{/if}
+    {#if !showingNote}
+      <div class="grid flex-1 place-items-center text-sm text-[var(--notes-muted)]">Select a note</div>
+    {:else if !editing}
+      <article class="min-h-0 flex-1 overflow-auto p-6">
+        <div class="mx-auto max-w-3xl">
+          <h1 class="mb-3 break-words text-2xl font-semibold">{title || "Untitled"}</h1>
+          <div class="mb-6 flex flex-wrap gap-2">{#each tagList as tag}<span class="note-tag">{tag}</span>{/each}</div>
+          <div class="markdown note-document break-words">{@html renderMarkdown(body)}</div>
+        </div>
+      </article>
+    {:else}
+    <div class="flex min-h-0 flex-1 flex-col gap-3 p-4">
       <input
         class="notes-field h-11 rounded-md px-3 text-lg font-semibold outline-none"
         bind:value={title}
+        disabled={busy}
+        aria-label="Title"
         placeholder="Title"
       />
-      <input
-        class="notes-field h-10 rounded-md px-3 text-sm outline-none"
-        bind:value={tags}
-        placeholder="tags, comma-separated"
-      />
-      <textarea
-        class="notes-field min-h-0 resize-none rounded-md p-3 leading-7 outline-none"
-        bind:value={body}
-        placeholder="Note body"
-      ></textarea>
+      <div class="flex flex-wrap items-center gap-2">
+        {#each tagList as tag}<span class="note-tag">{tag}<button title={`Remove ${tag}`} onclick={() => tags = tagList.filter((value) => value !== tag).join(", ")}><X size={12} /></button></span>{/each}
+        <input class="notes-field h-8 min-w-0 rounded-md px-2 text-sm" aria-label="New tag" placeholder="Add tag" bind:value={tagInput} onblur={addTag} onkeydown={(event) => { if (event.key === "Enter") { event.preventDefault(); addTag(); } }} />
+      </div>
+      {#key selected?.id}<NoteEditor value={body} disabled={busy} onchange={(value) => body = value} />{/key}
     </div>
+    {/if}
   </section>
 </main>
 
@@ -202,15 +273,18 @@
   }
 
   .notes-sidebar {
+    display: flex;
+    flex-direction: column;
     background: var(--notes-panel-bg);
     border-right: 1px solid var(--notes-border);
   }
 
   .notes-editor {
-    background: var(--notes-editor-bg);
+    background: var(--color-surface);
   }
 
   .notes-toolbar {
+    flex-shrink: 0;
     background: var(--notes-toolbar-bg);
     border-bottom: 1px solid var(--notes-border);
   }
@@ -275,5 +349,15 @@
   }
   .notes-save:hover {
     filter: brightness(1.08);
+  }
+  .notes-toolbar { flex-shrink: 0; }
+  .notes-back { display: none; }
+  .note-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 4px; background: var(--color-accent-soft); font-size: 12px; }
+  @media (max-width: 700px) {
+    .notes-shell { grid-template-columns: minmax(0, 1fr); }
+    .notes-editor { display: none; }
+    .showing-note .notes-sidebar { display: none; }
+    .showing-note .notes-editor { display: flex; }
+    .notes-back { display: grid; place-items: center; width: 32px; height: 32px; }
   }
 </style>

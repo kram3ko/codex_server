@@ -24,7 +24,8 @@ server-streaming (HTTP/2) поверх Connect-RPC.
    {chat_id}` == `str(turn_id)` → silent skip).
 3. **Telegram bot** — `aiogram` v3 polling всередині FastAPI lifespan.
    Доступний усім TG-юзерам; admin-роль (shell + file_change tools,
-   `/restart`) видається через `TG_ADMIN_USER_IDS`. Markdown від Codex
+   `/restart`) видається списком `admin_ids` у Settings → Integrations →
+   Telegram (sync ролей при кожному (ре)старті бота). Markdown від Codex
    рендериться у TG-HTML (bold, italic, code, blockquote, lists, links,
    fences з syntax-highlight). Voice in → STT (Speechmatics) → Codex → TTS
    (Google Cloud) → `bot.send_voice`. Multi-bubble streaming з throttle,
@@ -170,30 +171,24 @@ turns з протухлим `heartbeat_at`. Event-driven recovery під час 
 set `TURN_TERMINAL_STATUSES`. `finalize_once` робить CAS UPDATE з гардом
 `WHERE status IN ('STARTING','RUNNING')` → exactly-once.
 
-**Alembic chain (поточний head — `e1f7a2b3c4d5`):**
+**Alembic chain (поточний head — `a1f3c9d2b7e4`):**
 
 ```
-4c560fef8dcd  init_schema
+d229700c948e  init_schema            (users/chats/messages/events/uploads/
+                                      notes/notebooks/invites/turns/codex_preferences)
        ↓
-8a3e1c5d4f02  add_user_role          (ENUM user_role + User.role)
+b7d1e5f2a9c3  integrations_settings  (integrations + telegram_chats +
+                                      users.tg_username)
        ↓
-b1f2c3d4e5a6  add_user_password_hash (User.password_hash + display_name)
-       ↓
-c7d4e8a9b2f1  uploads_user_id        (Upload.user_id FK + index)
-       ↓
-d8e5f3a4b6c2  multi_user_web         (Note.user_id FK + invites table)
-       ↓
-e1f7a2b3c4d5  turns_lifecycle        (turns table + ENUM turn_status +
-                                      turns_active_per_chat partial unique)  ← head
+a1f3c9d2b7e4  runtime_settings       (singleton-таблиця лімітів, seed id=1)  ← head
 ```
 
 ## Запуск
 
 ```bash
-cp .env.example .env             # заповнити: TG_BOT_TOKEN, TG_ADMIN_USER_IDS,
-                                 # REDIS_PASSWORD, SPEECHMATICS_API_KEY,
+cp .env.example .env             # заповнити: REDIS_PASSWORD, SPEECHMATICS_API_KEY,
                                  # GOOGLE_TTS_API_KEY, MCP_CALLBACK_TOKEN,
-                                 # GH_TOKEN, SENTRY_DSN (опціонально),
+                                 # ADMIN_EMAIL/ADMIN_PASSWORD, SENTRY_DSN (опціонально),
                                  # BUGSINK_AUTH_TOKEN,
                                  # CODEX_WS_SECRET_ADMIN, CODEX_WS_SECRET_GUEST
                                  #   (`python -c "import secrets; print(secrets.token_urlsafe(48))"`)
@@ -235,13 +230,14 @@ uv sync && uvicorn app.main:app --port 8088
 
 1. Створити bot token через `@BotFather`.
 2. Дізнатися Telegram user id (`@userinfobot`).
-3. У `.env`:
-   ```bash
-   TG_BOT_TOKEN=...
-   TG_ADMIN_USER_IDS=123456789,987654321   # comma-separated; promote → ADMIN
-   ```
+3. Web UI → Settings → Integrations → Add → Telegram: токен + `admin_ids`
+   (+ опційно webhook URL; без нього — polling). Бот стартує одразу після
+   збереження, без рестарту. Токен зберігається зашифрованим (Fernet, master
+   key у volume `codex_integration_key`). Старі значення з `.env`
+   (`TG_BOT_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`) можна одноразово імпортувати:
+   `python -m scripts.prepare_settings` у контейнері codex-server.
 
-Юзери поза `TG_ADMIN_USER_IDS` отримують `UserRole.USER` і ходять у
+Юзери поза `admin_ids` отримують `UserRole.USER` і ходять у
 **окремий гостьовий Codex-контейнер** (без host-repo mount, без
 `docker.sock`, окремий ChatGPT login → ізольований token-budget). Admin
 користується основним sidecar'ом з повним доступом.
@@ -288,9 +284,18 @@ Google озвучує без зірочок/backtick'ів.
   контейнер як `/home/codex/workspace/AGENTS.md:ro`); мінімальна persona без
   repo/git/code-style.
 - **Міграції:** `alembic upgrade head` (auto'ом на entrypoint'і, з
-  `timeout 30` щоб asyncpg-teardown не вішав boot). Head: `e1f7a2b3c4d5`
-  (`turns_lifecycle` — `turns` table + `turn_status` ENUM + partial unique
-  index на active turns).
+  `timeout 30` щоб asyncpg-teardown не вішав boot). Head: `a1f3c9d2b7e4`
+  (`runtime_settings`). Committed-міграції не редагуємо — нова ревізія.
+- **Integrations (Settings):** GitHub / GitLab / SSH / Telegram креденшали у
+  таблиці `integrations` (Fernet-sealed; master key — volume
+  `codex_integration_key`, без нього записи нечитабельні — бекапити). Runtime
+  vault (`~/.ssh/config`, `git-credentials`, `cli-tokens.json`) материалізується
+  у tmpfs `codex_integration_runtime` при старті/зміні і монтується лише у
+  admin sidecar; `gh`/`glab` там — wrapper `provider-cli.py`, що бере токен з
+  vault. Гостьовий sidecar кредів не бачить. Telegram-бот живе з того ж
+  джерела: збереження/вимкнення інтеграції перезапускає polling/webhook.
+  Вкладка Integrations також показує відомі TG-чати (`telegram_chats`) з
+  перемикачем відповідей у групах. Admin-only REST `/api/settings/*`.
 - **Web auth (multi-user):** реєстрація email+password через
   `AuthService.Register(invite_token=...)`. Admin (визначається env
   `ADMIN_EMAIL`) при signup'і автоматично отримує `role=ADMIN` і обходить
@@ -298,12 +303,15 @@ Google озвучує без зірочок/backtick'ів.
   юзерів — тільки за invite-токеном, який admin генерує через
   `AdminService.CreateInvite()` → `https://.../signup?invite=XYZ`. Endpoints
   під `/api/codex.v1.AdminService/*` захищені `require_admin`.
-- **Rate-limit (RunTurn):** sliding-window у Redis, per-user. admin: none,
-  web USER: 2 active / 30 per hour, TG guest: 1 active / 10 per hour. Reject
-  з `ChatEvent.error{code='rate_limited'}` для web, текстова відповідь для TG.
+- **Rate-limit (RunTurn):** sliding-window у Redis, per-user. Ліміти — у
+  singleton-таблиці `runtime_settings`, редагуються в адмінці (вкладка Limits),
+  читаються через in-process кеш (`RUNTIME_SETTINGS_TTL_S`) без рестарту.
+  Дефолти: admin без лімітів, web USER 2 active, TG guest 3 active, hourly off
+  (0 = вимкнено), TG guest attachment ≤ 20 MB. Reject з
+  `ChatEvent.error{code='rate_limited'}` для web, текстова відповідь для TG.
 - **Self-restart:** `/restart` у боті → `DockerControlService.restart_container`
   через `/var/run/docker.sock` (без `docker` CLI в образі). Admin-only.
-- **Тести:** `uv run --group test pytest -q` (~95 у 15 файлах).
+- **Тести:** `uv run --group test pytest -q` (147 у 19 файлах).
 
 ### Turn-as-a-Job lifecycle
 
@@ -389,6 +397,9 @@ codex_server/
 │   ├── api/                    HTTP endpoints
 │   │   ├── health.py           GET /health (для docker healthcheck)
 │   │   ├── tg_webhook.py       (опціональний webhook вхід; default polling)
+│   │   ├── settings/           admin-only REST: integrations CRUD + check,
+│   │   │                       telegram chats/status, users profiles
+│   │   │                       (tg_username + last activity), limits GET/PUT
 │   │   └── docs/               OpenAPI helper docs
 │   ├── mcp/                    MCP sub-app (/mcp/streamable, bearer auth)
 │   │   ├── core.py             FastAPI sub-app + auth middleware
@@ -418,7 +429,9 @@ codex_server/
 │   │   ├── _mappers.py         ORM ↔ pb conversions (single source of truth)
 │   │   └── router.py           ConnectRouter ASGI mount
 │   ├── tg/                     aiogram polling
-│   │   ├── service.py          bot lifecycle
+│   │   ├── service.py          bot lifecycle (config з integrations table,
+│   │   │                       restart на зміну ревізії, sync admin ролей)
+│   │   ├── registry.py         middleware: telegram_chats upsert + membership
 │   │   ├── handlers.py         /new /stop /reset /restart + callbacks
 │   │   ├── sessions.py         per-chat CodexClient store + admin/guest routing
 │   │   ├── turn/               package — split kitchen-sink:
@@ -431,10 +444,11 @@ codex_server/
 │   │   ├── output.py           send_text / send_voice_reply / send_attachment
 │   │   ├── media.py            STT + attachment pipeline для inbound
 │   │   └── markdown.py         TelegramMarkdown (singleton tg_markdown)
-│   ├── models/                 SQLAlchemy ORM (User з UserRole+password_hash,
-│   │                           Chat, Message, Event, Upload з user_id FK,
-│   │                           Note з user_id FK, Invite (single-use signup);
-│   │                           StrEnum kinds)
+│   ├── models/                 SQLAlchemy ORM (User з UserRole+password_hash+
+│   │                           tg_username, Chat, Message, Event, Upload,
+│   │                           Note/Notebook, Invite, Turn, CodexPreference,
+│   │                           Integration + TelegramChat, RuntimeSetting
+│   │                           (singleton лімітів); StrEnum kinds)
 │   ├── services/               <resource>/{service.py, default.py, __init__.py}
 │   │   ├── auth/               JWT issue/verify + password hashing (argon2)
 │   │   ├── codex/              Codex CLI app-server клієнт (низький рівень):
@@ -491,7 +505,13 @@ codex_server/
 │   │   ├── sessions/           Generic ChatSessionStore (TG/web — subclass'и)
 │   │   ├── errors/             Sentry scrub_event + error classifier
 │   │   ├── invites/            Single-use signup invite tokens (create/redeem)
-│   │   ├── rate_limit/         Per-user RunTurn quota (active + sliding window)
+│   │   ├── rate_limit/         Per-user RunTurn quota (active + sliding window),
+│   │   │                       ліміти з runtime_settings
+│   │   ├── runtime_settings/   Admin-керовані ліміти: DTO ↔ singleton row,
+│   │   │                       in-process TTL cache (без рестарту)
+│   │   ├── integrations/       Fernet SecretCipher + IntegrationService (CRUD,
+│   │   │                       validate/check provider) + runtime.materialize
+│   │   │                       (ssh config / git-credentials / cli-tokens у tmpfs)
 │   │   ├── chats/, users/, messages/, events/, uploads/, notes/
 │   │   ├── bus/                Redis pub/sub fan-out для ChatEvent (legacy
 │   │   │                       broadcast канал `chat:{id}:events`)
@@ -509,11 +529,13 @@ codex_server/
 │   │   ├── main.ts
 │   │   ├── features/
 │   │   │   ├── auth/           Login.svelte + Signup.svelte + auth.ts (HttpOnly cookie)
+│   │   │   ├── admin/          AdminPanel (tabs) / Integrations / Limits /
+│   │   │   │                   settingsApi (REST client з X-Settings-Request)
 │   │   │   ├── chat/           Chat / ChatList / MessageList / Message /
 │   │   │   │                   Composer / Attachment / ToolCall /
-│   │   │   │                   CompletedTools / Usage / typewriter /
-│   │   │   │                   turnSignal / markdown
-│   │   │   └── notes/          Notes.svelte
+│   │   │   │                   CompletedTools / Usage / ModelPicker /
+│   │   │   │                   typewriter / turnSignal / markdown
+│   │   │   └── notes/          Notes.svelte + NoteEditor (tiptap)
 │   │   ├── shared/
 │   │   │   ├── components/     Spinner
 │   │   │   └── lib/            transport / clients / theme / time / token
@@ -525,17 +547,19 @@ codex_server/
 │                               user, notes, uploads) — single source of truth
 │                               для server stubs + client stubs
 ├── migrations/versions/        alembic chain:
-│                                 4c560fef8dcd → 8a3e1c5d4f02 →
-│                                 b1f2c3d4e5a6 → c7d4e8a9b2f1 →
-│                                 d8e5f3a4b6c2 → e1f7a2b3c4d5 (head)
-├── tests/                      pytest (~95 у 15 файлах):
+│                                 d229700c948e → b7d1e5f2a9c3 →
+│                                 a1f3c9d2b7e4 (head)
+├── tests/                      pytest (147 у 19 файлах):
 │                               admin_rpc, auth_rpc/service, chat_rpc,
-│                               codex_collector/runner/streaming/translate,
-│                               messages_service, rate_limit,
+│                               codex_collector/prefs/runner/streaming/
+│                               translate/turn_session, integrations,
+│                               mcp_authz, messages_service, rate_limit,
+│                               runtime_settings, settings_database,
 │                               tg_markdown/progress/turn, turn_service,
 │                               user_service
 ├── docker/
-│   ├── codex/                  Dockerfile + entrypoint + AGENTS-guest.md
+│   ├── codex/                  Dockerfile + entrypoint + AGENTS-guest.md +
+│   │                           provider-cli.py (gh/glab wrapper над vault)
 │   ├── server/                 Dockerfile (multi-stage, free-threaded 3.14t)
 │   │                           + entrypoint.sh (alembic upgrade head + start)
 │   ├── web/                    Dockerfile (Vite build → nginx static) + nginx.conf
@@ -546,8 +570,12 @@ codex_server/
 │   └── INTEGRATION.md          phase-by-phase status + TODO
 ├── docs/
 │   ├── schema.svg              ER diagram (картинка для README, hand-written)
-│   └── schema.mmd              Mermaid source (правити тут → regen .svg)
-├── scripts/gen-proto.sh        Python pb2 + connect stubs
+│   ├── schema.mmd              Mermaid source (правити тут → regen .svg)
+│   ├── settings-rollout.md     як integrations/ключі їдуть на існуючу БД
+│   └── guest-limits-plan.md    план runtime-лімітів (що зроблено / що далі)
+├── scripts/
+│   ├── gen-proto.sh            Python pb2 + connect stubs
+│   └── prepare_settings.py     one-shot імпорт env-токенів у integrations
 ├── gunicorn.conf.py            workers, reload, signal handling
 ├── pyproject.toml              Python 3.14 + deps (uv-managed)
 ├── alembic.ini

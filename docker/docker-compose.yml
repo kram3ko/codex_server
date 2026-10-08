@@ -13,8 +13,6 @@ services:
     environment:
       TZ: ${TZ:-Europe/Kyiv}
       MCP_CALLBACK_TOKEN: ${MCP_CALLBACK_TOKEN}
-      GH_TOKEN: ${GH_TOKEN:-}
-      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
       GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-Codex Agent}
       GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-codex@local}
       GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-Codex Agent}
@@ -26,7 +24,7 @@ services:
       - ../.codex:/home/codex/.codex:rw
       - /var/run/docker.sock:/var/run/docker.sock
       - ..:/home/codex/workspace:rw
-      - codex_ssh:/home/codex/.ssh
+      - integration_runtime:/home/codex/.ssh
     tmpfs:
       - /codex-feedback:size=250m
     expose:
@@ -95,7 +93,8 @@ services:
     volumes:
       - ..:/home/codex/workspace
       - ../.codex/generated_images:/home/codex/.codex/generated_images:ro
-      - codex_ssh:/ssh-vault
+      - integration_runtime:/ssh-vault
+      - integration_key:/integration-key
     command: gunicorn app.main:app -c gunicorn.conf.py
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
@@ -349,6 +348,14 @@ services:
 # compose з іншим project (cwd folder name, custom -p), volume той самий →
 # дані не "зникають" як артефакт docker compose naming.
 volumes:
+  integration_key:
+    name: codex_integration_key
+  integration_runtime:
+    name: codex_integration_runtime
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=16m,mode=0700
   postgres_data:
     name: codex_postgres_data
   minio_data:
@@ -357,5 +364,3 @@ volumes:
     name: codex_web_node_modules
   playwright_profile:
     name: codex_playwright_profile
-  codex_ssh:
-    name: codex_ssh

@@ -160,9 +160,7 @@ async def test_finalize_once_emits_conditional_update(monkeypatch) -> None:
     # Publish moved to an after_commit hook; FakeSession has no commit lifecycle,
     # so we only assert the SQL contract here. The hook itself is exercised via
     # integration paths in the live runner.
-    monkeypatch.setattr(
-        "app.services.turns.service._publish_after_commit", lambda *_a, **_kw: None
-    )
+    monkeypatch.setattr("app.services.turns.service._publish_after_commit", lambda *_a, **_kw: None)
     session = _FakeSession(rowcount=1, first_row=(99, 42))
     service = TurnService()
 

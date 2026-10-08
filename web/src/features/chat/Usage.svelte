@@ -108,8 +108,8 @@
   }
 </script>
 
-<div class="usage-panel relative overflow-hidden px-3.5 py-3">
-  <div class="mb-3 border-b border-[color-mix(in_oklch,var(--color-border)_50%,transparent)] pb-3">
+<div class="usage-panel relative overflow-hidden px-3.5 py-2">
+  <div class="mb-2 border-b border-[color-mix(in_oklch,var(--color-border)_50%,transparent)] pb-2">
     <ModelPicker />
   </div>
   <div class="mb-2.5 flex items-center justify-between">

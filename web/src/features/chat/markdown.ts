@@ -11,7 +11,14 @@ const marked = new Marked({
 marked.use({
   hooks: {
     postprocess(html) {
-      return DOMPurify.sanitize(html);
+      const fragment = DOMPurify.sanitize(html, { RETURN_DOM_FRAGMENT: true });
+      for (const link of fragment.querySelectorAll("a[href]")) {
+        link.setAttribute("target", "_blank");
+        link.setAttribute("rel", "noopener noreferrer");
+      }
+      const container = document.createElement("div");
+      container.append(fragment);
+      return container.innerHTML;
     }
   },
   renderer: {

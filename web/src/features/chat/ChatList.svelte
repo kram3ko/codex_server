@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import type { Snippet } from "svelte";
   import { ChevronsLeft, ChevronsRight, Loader2, MessagesSquare, Pencil, Plus, RefreshCw, Trash2 } from "lucide-svelte";
 
   import type { Chat } from "../../gen/codex/v1/chat_pb";
@@ -7,6 +8,7 @@
   import Usage from "./Usage.svelte";
 
   let {
+    navigation,
     chats,
     selectedId,
     loading,
@@ -17,6 +19,7 @@
     onrename,
     ondelete
   }: {
+    navigation: Snippet<[boolean?]>;
     chats: Chat[];
     selectedId: bigint | null;
     loading: boolean;
@@ -111,7 +114,8 @@
   }
 </script>
 
-<aside class="chat-sidebar flex min-h-0 flex-col transition-[width] duration-200 {collapsed ? 'w-14' : 'w-72'}">
+<aside class="chat-sidebar flex min-h-0 shrink-0 flex-col transition-[width] duration-200 {collapsed ? 'w-14' : 'w-72'}">
+  {@render navigation(collapsed)}
   {#if collapsed}
     <div class="flex min-h-0 flex-1 flex-col items-center gap-2 px-2 py-3">
       <button

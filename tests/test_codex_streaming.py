@@ -9,13 +9,13 @@ from app.services.codex.client import (
     StaleTurnStreamError,
 )
 from app.services.codex.diagnostics import TurnDiagnostics
-from app.services.codex.idle import IdleDecision, decide_idle
 from app.services.codex.events import (
     CodexItem,
     CodexNotif,
     TokenEvent,
     iterate_with_idle_timeout,
 )
+from app.services.codex.idle import IdleDecision, decide_idle
 from app.services.codex.shared import Method
 from app.services.codex.thread import CodexThreadSession
 from app.services.codex.transport import AppServerClient, Notification
