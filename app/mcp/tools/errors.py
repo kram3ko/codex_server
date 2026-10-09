@@ -2,8 +2,9 @@
 
 Wraps `BugsinkClient` (HTTP до Bugsink REST API). Two-layer auth:
 - MCP endpoint guarded by `MCP_CALLBACK_TOKEN` (sidecar-only network);
-- per-thread identity з заголовка `X-Codex-Authz` (`require_claims`);
-  Bugsink бачить лише admin — guest-thread отримує ToolError.
+- per-thread identity з заголовка `X-Codex-Authz` (`require_identity`,
+  роль з БД на кожен виклик); Bugsink бачить лише admin — guest-thread
+  отримує ToolError.
 Empty `BUGSINK_AUTH_TOKEN` → tool кидає зрозумілу ToolError замість 401.
 """
 
@@ -13,15 +14,15 @@ import httpx
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from app.mcp.authz import require_claims
+from app.mcp.authz import require_identity
 from app.mcp.core import mcp
 from app.mcp.schemas.errors import EventDetail, IssueSummary
 from app.services.errors.default import bugsink_client
 from app.services.mcp_authz.schemas import McpAuthzRole
 
 
-def _require_admin() -> None:
-    if require_claims().role is not McpAuthzRole.ADMIN:
+async def _require_admin() -> None:
+    if (await require_identity()).role is not McpAuthzRole.ADMIN:
         raise ToolError("error tools are available to the administrator only")
 
 
@@ -41,7 +42,7 @@ async def list_errors(
     Use when user asks about crashes, exceptions, recent errors, or before
     suggesting a fix.
     """
-    _require_admin()
+    await _require_admin()
     project_id = await _resolve_project_id(project_slug)
     try:
         body = await bugsink_client.list_issues(project=project_id, sort="last_seen", order="desc")
@@ -62,7 +63,7 @@ async def get_error(
     logger, environment, release, transaction, tags}. Use after list_errors
     when drilling into a specific issue.
     """
-    _require_admin()
+    await _require_admin()
     try:
         events = await bugsink_client.list_events(issue=issue_id, order="desc")
     except httpx.HTTPError as exc:

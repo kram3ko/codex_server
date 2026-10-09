@@ -11,7 +11,7 @@ from typing import Annotated
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from app.mcp.authz import require_claims
+from app.mcp.authz import require_identity
 from app.mcp.core import mcp
 from app.mcp.schemas.show_image import ImageDelivery
 from app.utils.paths import resolve_trusted_local_path
@@ -43,7 +43,7 @@ async def show_image(
     saves tokens, gives the exact image. Never paste markdown ![](...) or
     raw paths in reply text.
     """
-    require_claims()
+    await require_identity()
     local_path = resolve_trusted_local_path(path)
     if local_path is None:
         raise ToolError(f"file_not_found_or_untrusted: {path}")

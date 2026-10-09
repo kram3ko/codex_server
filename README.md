@@ -289,10 +289,14 @@ Google озвучує без зірочок/backtick'ів.
 - **MCP identity (per-thread):** sidecar ходить у наш MCP із connection-level
   bearer (`MCP_CALLBACK_TOKEN`), а особа юзера їде заголовком `X-Codex-Authz`:
   при `thread/start`/`thread/resume` сервер кладе у `config`
-  `mcp_servers.codex_app.http_headers` підписаний JWT (user_id, chat_id, role,
+  `mcp_servers.codex_app.http_headers` підписаний JWT (user_id, chat_id,
   sidecar; без exp — заголовок фіксується на весь час життя завантаженого
-  thread). Тули читають claims через `require_claims()`; модель токена не
-  бачить, у промпті нічого немає. Bugsink-тули — admin-only. Поведінка
+  thread). Токен лише ідентифікує thread: роль резолвиться з БД на кожен
+  виклик (`require_identity()`), тож зняття прав/видалення юзера діє одразу;
+  admin = роль ADMIN у БД **і** admin-sidecar. Модель токена не бачить, у
+  промпті нічого немає. Bugsink-тули — admin-only. Після деплою сервера
+  перезапускаємо і sidecar'и (`codex-cli`, `codex-cli-guest`): thread'и,
+  завантажені до того, заголовка не мають. Поведінка
   `config` у thread/start недокументована OpenAI, але є у схемі протоколу
   (`app/services/mcp_authz/`).
 - **Integrations (Settings):** GitHub / GitLab / SSH / Telegram креденшали у
@@ -411,7 +415,7 @@ codex_server/
 │   │   │                       (tg_username + last activity), limits GET/PUT
 │   │   └── docs/               OpenAPI helper docs
 │   ├── mcp/                    MCP sub-app (/mcp/streamable, bearer auth)
-│   │   ├── authz.py            require_claims(): identity з `X-Codex-Authz`
+│   │   ├── authz.py            require_identity(): identity з `X-Codex-Authz` + роль з БД
 │   │   ├── core.py             FastAPI sub-app + auth middleware
 │   │   ├── errors.py
 │   │   └── tools/              show_image (re-deliver image without regen)

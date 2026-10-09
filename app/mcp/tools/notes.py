@@ -12,7 +12,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from app.db.base import SessionLocal
-from app.mcp.authz import require_claims
+from app.mcp.authz import require_identity
 from app.mcp.core import mcp
 from app.mcp.schemas.notes import NoteHit, NoteRef
 from app.services.notes.default import note_service
@@ -50,7 +50,7 @@ async def note_save(
     preference worth persisting. Before updating an existing fact —
     `note_search` to get its id, then pass via `note_id`.
     """
-    claims = require_claims()
+    claims = await require_identity()
     final_tags: list[str] = sorted({*(tags or []), _CODEX_TAG})
     async with SessionLocal() as db:
         try:
@@ -93,7 +93,7 @@ async def note_search(
     preference you might have saved earlier. Results include `id` — pass it
     into `note_save(note_id=...)` to update.
     """
-    claims = require_claims()
+    claims = await require_identity()
     async with SessionLocal() as db:
         results = await note_service.search(
             db,
@@ -129,7 +129,7 @@ async def note_list(
     Use without query when you want a snapshot of preferences
     (`tags=["codex:auto"]`) or full user-notes dump.
     """
-    claims = require_claims()
+    claims = await require_identity()
     async with SessionLocal() as db:
         notes = await note_service.list(
             db,
