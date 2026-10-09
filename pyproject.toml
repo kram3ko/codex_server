@@ -107,6 +107,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = ["integration: needs real Redis/Postgres (TEST_REDIS_URL / TEST_DATABASE_URL)"]
 
 [tool.pyright]
 include = ["app"]

@@ -72,6 +72,19 @@ def _cookie_ctx(token: str) -> _Ctx:
     return _Ctx({"cookie": f"{JWT_COOKIE_NAME}={token}"})
 
 
+def _used_invite(active: Invite) -> Invite:
+    return Invite(
+        id=active.id + 1,
+        token="used-token",
+        created_by_user_id=active.created_by_user_id,
+        expires_at=active.expires_at,
+        used_by_user_id=active.created_by_user_id,
+        used_at=datetime.now(UTC),
+        created_at=active.created_at,
+        updated_at=active.updated_at,
+    )
+
+
 @contextlib.contextmanager
 def _wire(
     monkeypatch: pytest.MonkeyPatch,
@@ -126,7 +139,7 @@ def _wire(
             return [invite] if invite else []
 
         async def list_all(self, _session: Any) -> list[Invite]:
-            return [invite] if invite else []
+            return [invite, _used_invite(invite)] if invite else []
 
         async def revoke(self, _session: Any, invite_id: int) -> bool:
             return invite is not None and invite.id == invite_id
@@ -194,12 +207,16 @@ async def test_list_invites_active_only(monkeypatch: pytest.MonkeyPatch) -> None
     )
     with _wire(monkeypatch, user=admin, invite=invite) as svc:
         token, _ = svc.issue_token(admin.email)
-        response = await admin_rpc.AdminRPC().list_invites(
+        active_only = await admin_rpc.AdminRPC().list_invites(
             admin_pb2.ListInvitesRequest(include_used=False),
             _cookie_ctx(token),
         )
-    assert len(response.invites) == 1
-    assert response.invites[0].id == 5
+        with_used = await admin_rpc.AdminRPC().list_invites(
+            admin_pb2.ListInvitesRequest(include_used=True),
+            _cookie_ctx(token),
+        )
+    assert [i.id for i in active_only.invites] == [5]
+    assert [i.id for i in with_used.invites] == [5, 6]
 
 
 # --- create_user validation ---

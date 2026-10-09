@@ -1,14 +1,18 @@
-"""rate_limit — per-user reserve/release без реального Redis (in-memory fake)."""
+"""rate_limit — reserve/release against a real Redis: the Lua script itself is
+under test, so the fake-cache shortcut is not an option here."""
 
 from typing import Any
 
 import pytest
+from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.models import User, UserRole
 from app.services import rate_limit as rl
 from app.services.rate_limit import service as rl_service
 from app.services.runtime_settings.schemas import RuntimeSettings, TurnLimits
+
+pytestmark = pytest.mark.integration
 
 
 class _StubSettings:
@@ -19,64 +23,17 @@ class _StubSettings:
         return self.value
 
 
-class _FakeCache:
-    """Async Redis stub: decr/delete + eval (replicates Lua reserve script)."""
-
-    def __init__(self) -> None:
-        self.ints: dict[str, int] = {}
-        self.zsets: dict[str, list[tuple[float, str]]] = {}
-
-    async def decr(self, key: str) -> int:
-        self.ints[key] = self.ints.get(key, 0) - 1
-        return self.ints[key]
-
-    async def delete(self, *keys: str) -> int:
-        deleted = 0
-        for k in keys:
-            if k in self.ints:
-                del self.ints[k]
-                deleted += 1
-            if k in self.zsets:
-                del self.zsets[k]
-                deleted += 1
-        return deleted
-
-    async def eval(self, _script: str, _numkeys: int, *args: str) -> list:
-        # Replicates _RESERVE_LUA atomically (single-threaded loop у Redis →
-        # тут просто послідовно).
-        hourly_key, active_key = args[0], args[1]
-        now = float(args[2])
-        window_start = float(args[3])
-        hourly_limit = int(args[4])
-        active_limit = int(args[5])
-        if hourly_limit > 0:
-            items = self.zsets.get(hourly_key, [])
-            self.zsets[hourly_key] = [(s, m) for (s, m) in items if s > window_start]
-            count = len(self.zsets[hourly_key])
-            if count >= hourly_limit:
-                return [b"hourly", count]
-        self.ints[active_key] = self.ints.get(active_key, 0) + 1
-        active = self.ints[active_key]
-        if active_limit > 0 and active > active_limit:
-            self.ints[active_key] = active - 1
-            return [b"active", active - 1]
-        if hourly_limit > 0:
-            self.zsets[hourly_key].append((now, str(now)))
-        return [b"ok", 0]
+@pytest.fixture
+def redis_cache(monkeypatch: pytest.MonkeyPatch, redis_client: Redis) -> Redis:
+    monkeypatch.setattr(rl_service, "cache", redis_client)
+    monkeypatch.setattr(rl_service, "runtime_settings_service", _StubSettings(RuntimeSettings()))
+    return redis_client
 
 
 @pytest.fixture
-def hourly_ten(monkeypatch: pytest.MonkeyPatch, fake_cache: _FakeCache) -> None:
+def hourly_ten(monkeypatch: pytest.MonkeyPatch, redis_cache: Redis) -> None:
     stub = _StubSettings(RuntimeSettings(tg_guest=TurnLimits(active=3, hourly=10)))
     monkeypatch.setattr(rl_service, "runtime_settings_service", stub)
-
-
-@pytest.fixture
-def fake_cache(monkeypatch: pytest.MonkeyPatch) -> _FakeCache:
-    cache = _FakeCache()
-    monkeypatch.setattr(rl_service, "cache", cache)
-    monkeypatch.setattr(rl_service, "runtime_settings_service", _StubSettings(RuntimeSettings()))
-    return cache
 
 
 def _web_user(uid: int = 1) -> User:
@@ -91,57 +48,66 @@ def _admin(uid: int = 3) -> User:
     return User(id=uid, email="admin@example.com", role=UserRole.ADMIN)
 
 
-async def test_admin_unlimited_skips_cache(fake_cache: _FakeCache) -> None:
-    """Admin bypass'ить ліміти — жодних touchpoint'ів у Redis."""
+def _active_key(user: User) -> str:
+    return f"ratelimit:active:{user.id}"
+
+
+def _hourly_key(user: User) -> str:
+    return f"ratelimit:hourly:{user.id}"
+
+
+async def test_admin_unlimited_skips_cache(redis_cache: Redis) -> None:
     user = _admin()
-    for _ in range(100):
+    for _ in range(20):
         await rl.reserve_turn(user)
         await rl.release_turn(user)
-    assert fake_cache.ints == {}
-    assert fake_cache.zsets == {}
+    assert await redis_cache.keys("ratelimit:*") == []
 
 
-async def test_web_user_active_limit_blocks_third_concurrent(fake_cache: _FakeCache) -> None:
-    """web_user: 2 active. Третій concurrent reserve кидає RateLimited(active)."""
+async def test_web_user_active_limit_blocks_third_concurrent(redis_cache: Redis) -> None:
     user = _web_user()
     await rl.reserve_turn(user)
     await rl.reserve_turn(user)
     with pytest.raises(rl.RateLimited) as exc:
         await rl.reserve_turn(user)
-    assert exc.value.scope == "active"
-    assert exc.value.limit == 2
-    # Rollback own incr — counter лишається на 2, не 3.
-    assert fake_cache.ints[f"ratelimit:active:{user.id}"] == 2
+    assert (exc.value.scope, exc.value.limit) == ("active", 2)
+    assert await redis_cache.get(_active_key(user)) == "2"
 
 
-async def test_release_decrements_active(fake_cache: _FakeCache) -> None:
+async def test_active_key_gets_ttl(redis_cache: Redis) -> None:
+    user = _web_user()
+    await rl.reserve_turn(user)
+    ttl = await redis_cache.ttl(_active_key(user))
+    assert 0 < ttl <= rl_service._ACTIVE_TTL_S
+
+
+async def test_release_decrements_active(redis_cache: Redis) -> None:
     user = _web_user()
     await rl.reserve_turn(user)
     await rl.reserve_turn(user)
     await rl.release_turn(user)
-    # Один турн зайнятий — третій тепер пройде.
     await rl.reserve_turn(user)
-    assert fake_cache.ints[f"ratelimit:active:{user.id}"] == 2
+    assert await redis_cache.get(_active_key(user)) == "2"
 
 
-async def test_release_zero_deletes_key(fake_cache: _FakeCache) -> None:
+async def test_release_zero_deletes_key(redis_cache: Redis) -> None:
     user = _web_user()
     await rl.reserve_turn(user)
     await rl.release_turn(user)
-    assert f"ratelimit:active:{user.id}" not in fake_cache.ints
+    assert await redis_cache.exists(_active_key(user)) == 0
 
 
-async def test_tg_guest_hourly_off_by_default(fake_cache: _FakeCache) -> None:
+async def test_tg_guest_hourly_off_by_default(redis_cache: Redis) -> None:
     user = _tg_guest()
-    for _ in range(50):
+    for _ in range(20):
         await rl.reserve_turn(user)
         await rl.release_turn(user)
-    assert fake_cache.zsets == {}
-    assert fake_cache.ints == {}
+    assert await redis_cache.exists(_hourly_key(user)) == 0
+    assert await redis_cache.exists(_active_key(user)) == 0
 
 
 async def test_enabling_active_limit_mid_turn_keeps_counter_consistent(
-    fake_cache: _FakeCache, monkeypatch: pytest.MonkeyPatch
+    redis_cache: Redis, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Turn, що стартував при active=0, після увімкнення ліміту release-иться без
     дрейфу: counter рахує живі турни, а не ті, що резервувались під лімітом."""
@@ -151,51 +117,57 @@ async def test_enabling_active_limit_mid_turn_keeps_counter_consistent(
         "runtime_settings_service",
         _StubSettings(RuntimeSettings(tg_guest=TurnLimits(active=0, hourly=0))),
     )
-    await rl.reserve_turn(user)  # T1 — без ліміту
+    await rl.reserve_turn(user)
     monkeypatch.setattr(
         rl_service,
         "runtime_settings_service",
         _StubSettings(RuntimeSettings(tg_guest=TurnLimits(active=2, hourly=0))),
     )
-    await rl.reserve_turn(user)  # T2
+    await rl.reserve_turn(user)
     with pytest.raises(rl.RateLimited):
-        await rl.reserve_turn(user)  # T3 — T1 теж рахується
-    await rl.release_turn(user)  # T1 done
-    assert fake_cache.ints[f"ratelimit:active:{user.id}"] == 1
-    await rl.reserve_turn(user)  # T3 тепер проходить
-    assert fake_cache.ints[f"ratelimit:active:{user.id}"] == 2
+        await rl.reserve_turn(user)
+    await rl.release_turn(user)
+    assert await redis_cache.get(_active_key(user)) == "1"
+    await rl.reserve_turn(user)
+    assert await redis_cache.get(_active_key(user)) == "2"
 
 
 @pytest.mark.usefixtures("hourly_ten")
-async def test_tg_guest_hourly_limit(fake_cache: _FakeCache) -> None:
-    """hourly=10: 11-й reserve кидає RateLimited(hourly)."""
+async def test_tg_guest_hourly_limit(redis_cache: Redis) -> None:
     user = _tg_guest()
     for _ in range(10):
         await rl.reserve_turn(user)
         await rl.release_turn(user)
     with pytest.raises(rl.RateLimited) as exc:
         await rl.reserve_turn(user)
-    assert exc.value.scope == "hourly"
-    assert exc.value.limit == 10
+    assert (exc.value.scope, exc.value.limit) == ("hourly", 10)
+    assert await redis_cache.zcard(_hourly_key(user)) == 10
+    assert await redis_cache.ttl(_hourly_key(user)) > 0
 
 
 @pytest.mark.usefixtures("hourly_ten")
-async def test_hourly_window_trims_old_entries(fake_cache: _FakeCache) -> None:
-    """ZREMRANGEBYSCORE 0 (now-3600) — старші > 1h entries не рахуються."""
+async def test_hourly_rejection_does_not_leak_active_slot(redis_cache: Redis) -> None:
     user = _tg_guest()
-    key = f"ratelimit:hourly:{user.id}"
-    # Старі entries за межами вікна (negative score = -1 → завжди < now-3600).
-    fake_cache.zsets[key] = [(-1.0, "old1"), (-1.0, "old2"), (-1.0, "old3")]
+    for _ in range(10):
+        await rl.reserve_turn(user)
+        await rl.release_turn(user)
+    with pytest.raises(rl.RateLimited):
+        await rl.reserve_turn(user)
+    assert await redis_cache.exists(_active_key(user)) == 0
+
+
+@pytest.mark.usefixtures("hourly_ten")
+async def test_hourly_window_trims_old_entries(redis_cache: Redis) -> None:
+    user = _tg_guest()
+    stale = {"old1": 1.0, "old2": 2.0, "old3": 3.0}
+    await redis_cache.zadd(_hourly_key(user), stale)
     await rl.reserve_turn(user)
-    # Старі мають вилетіти; лишається 1 свіжий.
-    assert len(fake_cache.zsets[key]) == 1
+    assert await redis_cache.zcard(_hourly_key(user)) == 1
 
 
 async def test_redis_error_propagates_not_swallowed(
-    monkeypatch: pytest.MonkeyPatch, fake_cache: _FakeCache
+    monkeypatch: pytest.MonkeyPatch, redis_cache: Redis
 ) -> None:
-    """Fail-loud: RedisError підіймається у caller, не глушиться у no-op."""
-
     class _BrokenCache:
         async def eval(self, *_: Any, **__: Any) -> list:
             raise RedisError("connection refused")

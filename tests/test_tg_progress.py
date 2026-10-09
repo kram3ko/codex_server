@@ -74,15 +74,6 @@ async def test_stop_deletes_status_message() -> None:
     assert status.deleted is True
 
 
-@pytest.mark.asyncio
-async def test_stop_deletes_status_regardless_of_outcome() -> None:
-    reporter, _originator, status = await _setup_reporter_with_status()
-
-    await reporter.stop()
-
-    assert status.deleted is True
-
-
 def test_status_text_thinking_when_no_active_tool() -> None:
     reporter = TurnProgressReporter(_OriginatorMessage())
 
