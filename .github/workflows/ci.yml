@@ -65,6 +65,11 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql+asyncpg://codex:codex@localhost:5432/codex_test
       TEST_REDIS_URL: redis://localhost:6379/0
+      # Settings валідує довжину секретів при імпорті; у CI .env немає.
+      JWT_SECRET: ci-only-jwt-secret-0123456789abcdef
+      CODEX_WS_SECRET_ADMIN: ci-only-ws-admin-0123456789abcdef
+      CODEX_WS_SECRET_GUEST: ci-only-ws-guest-0123456789abcdef
+      MCP_AUTHZ_SECRET: ci-only-mcp-authz-0123456789abcdef
     steps:
       - uses: actions/checkout@v4
 
