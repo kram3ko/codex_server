@@ -86,7 +86,7 @@ async def stream_turn(
         await usage_poller.publish_rate_limits(sidecar, snapshot)
 
     stream = client.run_turn(
-        prepared.text,
+        prepared.prompt,
         attachments=prepared.attachments,
         on_started=_on_started,
         idle_s=settings.TG_TURN_TIMEOUT_SECONDS,

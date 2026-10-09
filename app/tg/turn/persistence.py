@@ -20,14 +20,20 @@ from app.tg.media import PreparedTurn
 
 async def persist_user_turn(session: ChatSession, prepared: PreparedTurn) -> int:
     """Returns USER message id — caller передає у `turn_service.create_starting`."""
-    meta = {"upload_ids": list(prepared.upload_ids)} if prepared.upload_ids else None
+    meta: dict[str, Any] = {}
+    if prepared.upload_ids:
+        meta["upload_ids"] = list(prepared.upload_ids)
+    if prepared.reply_to_message_id is not None:
+        meta["reply_to_message_id"] = prepared.reply_to_message_id
+    if prepared.quoted_text is not None:
+        meta["quoted_text"] = prepared.quoted_text
     async with SessionLocal() as db:
         msg = await message_service.append(
             db,
             session.db_chat_id,
             MessageRole.USER,
             prepared.text,
-            meta=meta,
+            meta=meta or None,
         )
         await event_service.emit(
             db,
