@@ -12,31 +12,17 @@ from fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from app.db.base import SessionLocal
+from app.mcp.authz import require_claims
 from app.mcp.core import mcp
 from app.mcp.schemas.notes import NoteHit, NoteRef
-from app.services.mcp_authz import McpAuthzClaims, McpAuthzError, verify_authz
 from app.services.notes.default import note_service
 
-_AUTHZ_DESCRIPTION = (
-    "JWT з prompt-header `MCPAuthz: <token>` — обов'язково форвардити "
-    "точне значення з останнього header line. Без нього виклик відхиляється."
-)
 _CODEX_TAG = "codex:auto"
-
-
-def _require_authz(authz: str | None) -> McpAuthzClaims:
-    if not authz:
-        raise ToolError("authz required: forward `MCPAuthz: <jwt>` header from prompt")
-    try:
-        return verify_authz(authz)
-    except McpAuthzError as exc:
-        raise ToolError(str(exc)) from exc
 
 
 @mcp.tool(name="note_save")
 async def note_save(
     *,
-    authz: Annotated[str | None, Field(description=_AUTHZ_DESCRIPTION)] = None,
     title: Annotated[
         str,
         Field(
@@ -64,7 +50,7 @@ async def note_save(
     preference worth persisting. Before updating an existing fact —
     `note_search` to get its id, then pass via `note_id`.
     """
-    claims = _require_authz(authz)
+    claims = require_claims()
     final_tags: list[str] = sorted({*(tags or []), _CODEX_TAG})
     async with SessionLocal() as db:
         try:
@@ -91,7 +77,6 @@ async def note_save(
 @mcp.tool(name="note_search")
 async def note_search(
     *,
-    authz: Annotated[str | None, Field(description=_AUTHZ_DESCRIPTION)] = None,
     query: Annotated[
         str,
         Field(min_length=1, description="Free-text query (Postgres `websearch_to_tsquery`)."),
@@ -108,7 +93,7 @@ async def note_search(
     preference you might have saved earlier. Results include `id` — pass it
     into `note_save(note_id=...)` to update.
     """
-    claims = _require_authz(authz)
+    claims = require_claims()
     async with SessionLocal() as db:
         results = await note_service.search(
             db,
@@ -133,7 +118,6 @@ async def note_search(
 @mcp.tool(name="note_list")
 async def note_list(
     *,
-    authz: Annotated[str | None, Field(description=_AUTHZ_DESCRIPTION)] = None,
     tags: Annotated[
         list[str] | None,
         Field(description="Filter — повертати тільки notes що містять ВСІ ці tags."),
@@ -145,7 +129,7 @@ async def note_list(
     Use without query when you want a snapshot of preferences
     (`tags=["codex:auto"]`) or full user-notes dump.
     """
-    claims = _require_authz(authz)
+    claims = require_claims()
     async with SessionLocal() as db:
         notes = await note_service.list(
             db,

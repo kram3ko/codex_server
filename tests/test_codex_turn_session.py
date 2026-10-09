@@ -79,3 +79,32 @@ async def test_list_models_follows_cursor() -> None:
     transport = _ScriptedTransport(lambda _m, p: pages[p.get("cursor")])
     session = _session(transport)
     assert [m["id"] for m in await session.list_models()] == ["a", "b"]
+
+
+def _thread_session(transport: _ScriptedTransport, **kwargs: Any) -> CodexThreadSession:
+    return CodexThreadSession(
+        transport=transport,
+        cwd="/tmp",
+        approval_policy="never",
+        sandbox="danger-full-access",
+        on_thread_change=None,
+        **kwargs,
+    )
+
+
+async def test_thread_start_and_resume_carry_thread_config() -> None:
+    config = {"mcp_servers.codex_app": {"http_headers": {"X-Codex-Authz": "tok"}}}
+    transport = _ScriptedTransport(lambda _m, _p: {"thread": {"id": "t-new"}})
+
+    await _thread_session(transport, initial_thread_id=None, thread_config=config).ensure_thread()
+    await _thread_session(transport, initial_thread_id="t1", thread_config=config).ensure_thread()
+
+    methods = [m for m, _ in transport.calls]
+    assert methods == [Method.THREAD_START, Method.THREAD_RESUME]
+    assert all(p["config"] == config for _, p in transport.calls)
+
+
+async def test_thread_params_omit_config_when_unset() -> None:
+    transport = _ScriptedTransport(lambda _m, _p: {"thread": {"id": "t-new"}})
+    await _thread_session(transport, initial_thread_id=None).ensure_thread()
+    assert "config" not in transport.calls[0][1]

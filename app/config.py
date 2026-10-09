@@ -111,10 +111,9 @@ class Settings(BaseSettings):
 
     # --- MCP (Codex CLI ↔ FastAPI bridge) ---
     MCP_CALLBACK_TOKEN: str = ""
-    # HS256 secret для per-turn JWT що ін'єктимо у промпт-header.
-    # Модель форвардить як `authz` arg → MCP tool верифікує signature stateless.
+    # HS256 secret per-thread identity JWT, який Codex шле заголовком
+    # `X-Codex-Authz` у наш MCP (див. app/services/mcp_authz).
     MCP_AUTHZ_SECRET: str = ""
-    MCP_AUTHZ_TTL_S: int = 1800
 
     # --- Health probe ---
     HEALTH_PROBE_TIMEOUT_SECONDS: float = 3.0

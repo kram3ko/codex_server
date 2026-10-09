@@ -18,11 +18,13 @@ class CodexThreadSession:
         sandbox: str,
         initial_thread_id: str | None,
         on_thread_change: ThreadChangeCallback | None,
+        thread_config: dict[str, Any] | None = None,
     ) -> None:
         self._transport = transport
         self._cwd = cwd
         self._approval_policy = approval_policy
         self._sandbox = sandbox
+        self._thread_config = thread_config
         self._thread_id = initial_thread_id
         self._thread_resumed_or_started = False
         self._on_thread_change = on_thread_change
@@ -87,7 +89,9 @@ class CodexThreadSession:
 
     async def _try_resume(self, thread_id: str) -> bool:
         try:
-            await self._transport.request(Method.THREAD_RESUME, {"threadId": thread_id})
+            await self._transport.request(
+                Method.THREAD_RESUME, self._with_config({"threadId": thread_id})
+            )
         except AppServerError as exc:
             if is_thread_not_found(exc) or exc.code == -32601:
                 return False
@@ -98,11 +102,13 @@ class CodexThreadSession:
     async def _open_new_thread(self) -> str:
         result = await self._transport.request(
             Method.THREAD_START,
-            {
-                "cwd": self._cwd,
-                "approvalPolicy": self._approval_policy,
-                "sandbox": self._sandbox,
-            },
+            self._with_config(
+                {
+                    "cwd": self._cwd,
+                    "approvalPolicy": self._approval_policy,
+                    "sandbox": self._sandbox,
+                }
+            ),
         )
         thread_id: str = result["thread"]["id"]
         self._thread_id = thread_id
@@ -110,6 +116,11 @@ class CodexThreadSession:
         log.info("codex_thread_opened", thread_id=thread_id)
         await self._emit_thread_change(thread_id)
         return thread_id
+
+    def _with_config(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self._thread_config:
+            params["config"] = self._thread_config
+        return params
 
     async def _emit_thread_change(self, new_thread_id: str | None) -> None:
         if self._on_thread_change is None:
