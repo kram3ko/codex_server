@@ -42,6 +42,51 @@ jobs:
       - name: pyright
         run: uv run pyright app/
 
+  python-test:
+    name: Python tests (pytest + Postgres + Redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: codex
+          POSTGRES_PASSWORD: codex
+          POSTGRES_DB: codex_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U codex -d codex_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://codex:codex@localhost:5432/codex_test
+      TEST_REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.14"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install Python 3.14t (free-threaded)
+        run: uv python install 3.14t
+
+      - name: Sync test deps
+        env:
+          UV_PYTHON: 3.14t
+          ORJSON_BUILD_FREETHREADED: "1"
+        run: uv sync --frozen --group test
+
+      - name: pytest
+        run: uv run pytest -q
+
   web-lint:
     name: Web lint (svelte-check + tsc)
     runs-on: ubuntu-latest

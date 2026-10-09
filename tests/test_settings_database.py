@@ -1,21 +1,24 @@
+"""integrations — sealed secrets round-trip and unique name on a real Postgres."""
+
 from uuid import uuid4
 
 import pytest
 from cryptography.fernet import Fernet
 from pydantic import SecretStr
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.db.base import engine
 from app.models import Integration, TelegramChat
 from app.services.integrations.crypto import SecretCipher
 from app.services.integrations.schemas import IntegrationInput, IntegrationKind
 from app.services.integrations.service import IntegrationService
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
-async def database():
-    async with engine.connect() as connection:
+async def database(database_engine: AsyncEngine):
+    async with database_engine.connect() as connection:
         transaction = await connection.begin()
         try:
             schema = "settings_test_" + uuid4().hex

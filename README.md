@@ -324,7 +324,13 @@ Google озвучує без зірочок/backtick'ів.
   `ChatEvent.error{code='rate_limited'}` для web, текстова відповідь для TG.
 - **Self-restart:** `/restart` у боті → `DockerControlService.restart_container`
   через `/var/run/docker.sock` (без `docker` CLI в образі). Admin-only.
-- **Тести:** `uv run --group test pytest -q` (152 у 19 файлах).
+- **Тести:** `uv run --group test pytest -q` (165 у 22 файлах). Integration-тести
+  (маркер `integration`: rate-limit Lua на Redis, integrations на Postgres)
+  запускаються лише коли задані `TEST_REDIS_URL` і `TEST_DATABASE_URL`, інакше
+  skip; у CI їх дають service-контейнери. Локально:
+  `docker run -d --rm --name codex-test-redis -p 6399:6379 redis:8-alpine`,
+  `TEST_REDIS_URL=redis://localhost:6399/0 TEST_DATABASE_URL=postgresql+asyncpg://codex:<pw>@localhost:5432/codex_test uv run --group test pytest -q`
+  (база `codex_test` створюється один раз). Лише unit: `pytest -m "not integration"`.
 
 ### Turn-as-a-Job lifecycle
 
@@ -392,7 +398,7 @@ snapshot (multi-tab consistency через pub/sub side effect).
   на ingest. Не виставляти прямо на public-net без nginx + rate-limiting;
   tailnet/VPN OK для соло.
 - **Lint/types:** `uv run --group lint ruff check app/ tests/` + `pyright app/`.
-- **Pre-commit hooks:** `uv sync --group lint && uv run pre-commit install` (одноразово). Далі кожен `git commit` ганяє `ruff check --fix`, `ruff format`, `pyright app/`, `pytest -q`. Bypass — `git commit --no-verify` (тільки exceptional).
+- **Pre-commit hooks:** `uv sync --group lint && uv run pre-commit install` (одноразово). Далі кожен `git commit` ганяє `ruff check --fix`, `ruff format`, `pyright app/`, `pytest -q` (integration-тести skip без TEST_* env). Bypass — `git commit --no-verify` (тільки exceptional).
 - **Гарячий редеплой коду:** edit → save → `docker exec codex-server gunicornc -c reload`
   (workspace mount = source of truth, alembic зробить pending міграції).
 
@@ -563,7 +569,7 @@ codex_server/
 ├── migrations/versions/        alembic chain:
 │                                 d229700c948e → b7d1e5f2a9c3 →
 │                                 a1f3c9d2b7e4 (head)
-├── tests/                      pytest (152 у 19 файлах):
+├── tests/                      pytest (165 у 22 файлах; conftest.py — integration fixtures):
 │                               admin_rpc, auth_rpc/service, chat_rpc,
 │                               codex_collector/prefs/runner/streaming/
 │                               translate/turn_session, integrations,
