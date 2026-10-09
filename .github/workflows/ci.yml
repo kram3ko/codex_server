@@ -70,6 +70,7 @@ jobs:
       CODEX_WS_SECRET_ADMIN: ci-only-ws-admin-0123456789abcdef
       CODEX_WS_SECRET_GUEST: ci-only-ws-guest-0123456789abcdef
       MCP_AUTHZ_SECRET: ci-only-mcp-authz-0123456789abcdef
+      MCP_CALLBACK_TOKEN: ci-only-mcp-callback-token-0123456789
     steps:
       - uses: actions/checkout@v4
 
