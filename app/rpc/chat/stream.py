@@ -38,7 +38,6 @@ from app.services.codex.runner import quarantine_thread
 from app.services.codex.sidecar import SidecarName
 from app.services.codex_usage import poller as usage_poller
 from app.services.events.default import event_service
-from app.services.mcp_authz import inject_authz
 from app.services.messages.default import message_service
 from app.services.turns.default import turn_service
 from app.services.turns.probe import (
@@ -116,14 +115,8 @@ async def stream_turn(
         if sidecar is not None:
             await usage_poller.publish_rate_limits(sidecar, snapshot)
 
-    authz_text = inject_authz(
-        text,
-        user_id=user_pk,
-        chat_id=persisted_chat_id,
-        sidecar=sidecar or SidecarName.ADMIN,
-    )
     stream = client.run_turn(
-        authz_text,
+        text,
         attachments=image_urls,
         on_started=_on_started,
         idle_s=settings.WEB_TURN_TIMEOUT_SECONDS,

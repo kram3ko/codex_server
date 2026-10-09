@@ -29,6 +29,7 @@ from app.services.codex.jwt import make_ws_token
 from app.services.codex.sidecar import SidecarName
 from app.services.codex_prefs.default import codex_prefs_service
 from app.services.codex_prefs.schemas import TurnOptions
+from app.services.mcp_authz.default import mcp_authz_service
 from app.services.messages.default import message_service
 
 log = structlog.get_logger(__name__)
@@ -83,6 +84,9 @@ async def open_codex_turn(
             else settings.CODEX_NOTIFICATION_QUEUE_MAX_GUEST
         ),
         auth_token=make_ws_token(sidecar),
+        thread_config=mcp_authz_service.thread_config(
+            mcp_authz_service.issue(user_id=user_id, chat_id=db_chat_id, sidecar=sidecar)
+        ),
     )
     await client.connect()
     try:

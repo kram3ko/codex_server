@@ -44,6 +44,7 @@ class CodexClient:
         notification_queue_max: int | None = None,
         auth_token: str | None = None,
         transport: AppServerClient | None = None,
+        thread_config: dict[str, Any] | None = None,
     ) -> None:
         self._url = url
         if transport is None:
@@ -66,6 +67,7 @@ class CodexClient:
             sandbox=sandbox,
             initial_thread_id=initial_thread_id,
             on_thread_change=on_thread_change,
+            thread_config=thread_config,
         )
         self._turns = CodexTurnSession(
             transport=self._transport,

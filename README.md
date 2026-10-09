@@ -286,6 +286,19 @@ Google озвучує без зірочок/backtick'ів.
 - **Міграції:** `alembic upgrade head` (auto'ом на entrypoint'і, з
   `timeout 30` щоб asyncpg-teardown не вішав boot). Head: `a1f3c9d2b7e4`
   (`runtime_settings`). Committed-міграції не редагуємо — нова ревізія.
+- **MCP identity (per-thread):** sidecar ходить у наш MCP із connection-level
+  bearer (`MCP_CALLBACK_TOKEN`), а особа юзера їде заголовком `X-Codex-Authz`:
+  при `thread/start`/`thread/resume` сервер кладе у `config`
+  `mcp_servers.codex_app.http_headers` підписаний JWT (user_id, chat_id,
+  sidecar; без exp — заголовок фіксується на весь час життя завантаженого
+  thread). Токен лише ідентифікує thread: роль резолвиться з БД на кожен
+  виклик (`require_identity()`), тож зняття прав/видалення юзера діє одразу;
+  admin = роль ADMIN у БД **і** admin-sidecar. Модель токена не бачить, у
+  промпті нічого немає. Bugsink-тули — admin-only. Після деплою сервера
+  перезапускаємо і sidecar'и (`codex-cli`, `codex-cli-guest`): thread'и,
+  завантажені до того, заголовка не мають. Поведінка
+  `config` у thread/start недокументована OpenAI, але є у схемі протоколу
+  (`app/services/mcp_authz/`).
 - **Integrations (Settings):** GitHub / GitLab / SSH / Telegram креденшали у
   таблиці `integrations` (Fernet-sealed; master key — volume
   `codex_integration_key`, без нього записи нечитабельні — бекапити). Runtime
@@ -311,7 +324,7 @@ Google озвучує без зірочок/backtick'ів.
   `ChatEvent.error{code='rate_limited'}` для web, текстова відповідь для TG.
 - **Self-restart:** `/restart` у боті → `DockerControlService.restart_container`
   через `/var/run/docker.sock` (без `docker` CLI в образі). Admin-only.
-- **Тести:** `uv run --group test pytest -q` (147 у 19 файлах).
+- **Тести:** `uv run --group test pytest -q` (152 у 19 файлах).
 
 ### Turn-as-a-Job lifecycle
 
@@ -402,6 +415,7 @@ codex_server/
 │   │   │                       (tg_username + last activity), limits GET/PUT
 │   │   └── docs/               OpenAPI helper docs
 │   ├── mcp/                    MCP sub-app (/mcp/streamable, bearer auth)
+│   │   ├── authz.py            require_identity(): identity з `X-Codex-Authz` + роль з БД
 │   │   ├── core.py             FastAPI sub-app + auth middleware
 │   │   ├── errors.py
 │   │   └── tools/              show_image (re-deliver image without regen)
@@ -549,7 +563,7 @@ codex_server/
 ├── migrations/versions/        alembic chain:
 │                                 d229700c948e → b7d1e5f2a9c3 →
 │                                 a1f3c9d2b7e4 (head)
-├── tests/                      pytest (147 у 19 файлах):
+├── tests/                      pytest (152 у 19 файлах):
 │                               admin_rpc, auth_rpc/service, chat_rpc,
 │                               codex_collector/prefs/runner/streaming/
 │                               translate/turn_session, integrations,
