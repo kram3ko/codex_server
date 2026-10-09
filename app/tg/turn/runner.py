@@ -302,7 +302,7 @@ async def _handle_active_tg_turn(
         await message.answer(tg_markdown.escape("⏳ Turn ще запускається — спробуй за мить."))
         return True
 
-    if prepared.attachments:
+    if prepared.attachments or prepared.upload_ids or prepared.reply_to_message_id is not None:
         log.warning("tg_active_with_uploads", chat_id=session.db_chat_id)
         await message.answer(
             tg_markdown.escape("⏳ Попередній turn ще завершується — спробуй за мить.")
@@ -318,7 +318,7 @@ async def _handle_active_tg_turn(
                 is_admin=is_admin_sidecar,
                 thread_id=active.codex_thread_id,
                 codex_turn_id=active.codex_turn_id,
-                text=prepared.text,
+                text=prepared.prompt,
             )
         except _STEER_RPC_ERRORS as exc:
             log.warning("tg_inline_steer_rpc_failed", error=str(exc))

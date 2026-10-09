@@ -34,6 +34,9 @@
   const isSteered = $derived(metaJson?.steered === true);
   const isPartial = $derived(metaJson?.partial === true);
   const isInterruptedEmpty = $derived(isPartial && !message.text);
+  const quotedText = $derived(
+    typeof metaJson?.quoted_text === "string" ? metaJson.quoted_text : null
+  );
   const uploadIds = $derived.by((): number[] => idsFromMeta(metaJson?.upload_ids));
   const audioUploadIds = $derived.by((): number[] =>
     idsFromMeta(metaJson?.audio_upload_ids)
@@ -161,6 +164,12 @@
         Codex was thinking — turn interrupted before any output.
       </div>
     {:else}
+      {#if quotedText}
+        <blockquote
+          class="mb-2 border-l-2 border-[oklch(70%_0.16_230/0.6)] pl-3 text-[13px] leading-snug text-[var(--color-text-muted)] whitespace-pre-wrap"
+          title="Replied-to Telegram message"
+        >{quotedText}</blockquote>
+      {/if}
       <div class="markdown text-[1rem] leading-[1.7]">
         {@html renderMarkdown(message.text || "")}{#if streaming}<span
             class="ml-[2px] inline-block h-[1em] w-[7px] -translate-y-px rounded-sm bg-[var(--color-accent)] align-middle animate-blink"
