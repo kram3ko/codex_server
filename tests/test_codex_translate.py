@@ -1,7 +1,37 @@
-from app.services.codex.events import CodexItem, CodexNotif, TokenEvent, translate_notification
+from app.services.codex.error_codes import CodexErrorCode
+from app.services.codex.events import (
+    CodexItem,
+    CodexNotif,
+    DoneEvent,
+    ErrorEvent,
+    TokenEvent,
+    translate_notification,
+)
 from app.services.codex.transport import Notification
 
 _translate = translate_notification
+
+
+def test_failed_turn_preserves_error() -> None:
+    detail = "The model is not supported when using Codex with a ChatGPT account."
+    note = Notification(
+        method=CodexNotif.TURN_COMPLETED,
+        params={"turn": {"status": "failed", "error": {"message": detail}}},
+    )
+    assert _translate(note, "") == ErrorEvent(code=CodexErrorCode.CODEX_ERROR, detail=detail)
+
+
+def test_failed_turn_without_details_is_not_success() -> None:
+    note = Notification(method=CodexNotif.TURN_COMPLETED, params={"turn": {"status": "failed"}})
+    assert isinstance(_translate(note, "partial"), ErrorEvent)
+
+
+def test_completed_turn_keeps_accumulated_text() -> None:
+    note = Notification(
+        method=CodexNotif.TURN_COMPLETED,
+        params={"turn": {"status": "completed", "error": None}},
+    )
+    assert _translate(note, "answer") == DoneEvent(final_text="answer")
 
 
 def _agent_msg_completed(text: str) -> Notification:

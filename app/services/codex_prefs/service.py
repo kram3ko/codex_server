@@ -63,13 +63,15 @@ class CodexPrefsService:
         self, session: AsyncSession, user_id: int, sidecar: SidecarName
     ) -> TurnOptions:
         prefs = await self.get(session, user_id)
-        if prefs.reasoning_effort is not None:
-            return TurnOptions(model=prefs.model, reasoning_effort=prefs.reasoning_effort)
         model = await self._effective_model(sidecar, prefs.model)
+        if model is None:
+            raise UnknownModelError(prefs.model or "default")
+        if prefs.reasoning_effort is not None:
+            return TurnOptions(model=model.id, reasoning_effort=prefs.reasoning_effort)
         fallback = self.fallback_reasoning_effort()
-        if fallback is None or (model is not None and not _supports(model, fallback)):
-            return TurnOptions(model=prefs.model)
-        return TurnOptions(model=prefs.model, reasoning_effort=fallback)
+        if fallback is None or not _supports(model, fallback):
+            return TurnOptions(model=model.id)
+        return TurnOptions(model=model.id, reasoning_effort=fallback)
 
     async def _validate(self, sidecar: SidecarName, prefs: CodexPreferences) -> None:
         model = await self._effective_model(sidecar, prefs.model)
@@ -86,7 +88,7 @@ class CodexPrefsService:
         if model_id is not None:
             return await self._catalog.find(sidecar, model_id)
         models = await self._catalog.list(sidecar)
-        return next((m for m in models if m.is_default), models[0] if models else None)
+        return next((m for m in models if m.is_default), None)
 
     @staticmethod
     async def _row(session: AsyncSession, user_id: int) -> CodexPreference | None:
