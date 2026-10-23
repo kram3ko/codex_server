@@ -13,11 +13,13 @@ from typing import Any
 import orjson
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.services.codex.error_codes import CodexErrorCode
 from app.services.codex.events.types import (
     Attachment,
     AttachmentKind,
     ChatEvent,
     DoneEvent,
+    ErrorEvent,
     TokenEvent,
     ToolCallEvent,
     ToolResultEvent,
@@ -221,6 +223,12 @@ def translate_notification(note: Notification, accumulated: str) -> ChatEvent | 
         case CodexNotif.ITEM_COMPLETED:
             return _on_item_completed(note.params["item"], accumulated)
         case CodexNotif.TURN_COMPLETED:
+            turn = note.params.get("turn", {})
+            error = turn.get("error")
+            if error:
+                return ErrorEvent(code=CodexErrorCode.CODEX_ERROR, detail=error.get("message"))
+            if turn.get("status") == "failed":
+                return ErrorEvent(code=CodexErrorCode.CODEX_ERROR, detail="Codex turn failed")
             return DoneEvent(final_text=note.params.get("finalText", accumulated))
         case _:
             return None

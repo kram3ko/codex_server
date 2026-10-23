@@ -111,7 +111,7 @@ class CodexTurnSession:
                     if isinstance(event, TokenEvent):
                         accumulated += event.delta
                     yield event
-                if event is not None and isinstance(event, DoneEvent):
+                if isinstance(event, (DoneEvent, ErrorEvent)):
                     return
         finally:
             self._idle_s = None

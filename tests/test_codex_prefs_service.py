@@ -58,6 +58,7 @@ async def test_resolve_drops_fallback_unsupported_by_model(monkeypatch: pytest.M
 
     monkeypatch.setattr(svc, "get", _prefs)
     options = await svc.resolve_turn_options(None, 1, SidecarName.ADMIN)
+    assert options.model == _ASTRA.id
     assert options.reasoning_effort is None
 
 
@@ -70,7 +71,35 @@ async def test_resolve_keeps_supported_fallback(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(svc, "get", _prefs)
     options = await svc.resolve_turn_options(None, 1, SidecarName.ADMIN)
+    assert options.model == _ASTRA.id
     assert options.reasoning_effort == "high"
+
+
+async def test_resolve_default_with_explicit_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = _service()
+
+    async def _prefs(session: object, user_id: int) -> CodexPreferences:
+        return CodexPreferences(reasoning_effort="low")
+
+    monkeypatch.setattr(svc, "get", _prefs)
+    options = await svc.resolve_turn_options(None, 1, SidecarName.ADMIN)
+    assert options.model == _ASTRA.id
+    assert options.reasoning_effort == "low"
+
+
+async def test_resolve_missing_default_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = _service()
+
+    async def _models(sidecar: SidecarName) -> list[CodexModel]:
+        return [_ASTRA.model_copy(update={"is_default": False})]
+
+    async def _prefs(session: object, user_id: int) -> CodexPreferences:
+        return CodexPreferences()
+
+    monkeypatch.setattr(svc._catalog, "list", _models)
+    monkeypatch.setattr(svc, "get", _prefs)
+    with pytest.raises(UnknownModelError, match="default"):
+        await svc.resolve_turn_options(None, 1, SidecarName.ADMIN)
 
 
 async def test_validate_rejects_unknown_model() -> None:
